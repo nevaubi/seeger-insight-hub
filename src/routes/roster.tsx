@@ -139,7 +139,7 @@ function CaseRowEl({ c, pinned }: { c: CaseRow; pinned?: boolean }) {
   return (
     <tr className={cn(
       'border-t border-border align-top',
-      pinned && 'bg-[oklch(0.26_0.04_255_/_0.06)] border-l-2 border-l-primary',
+      pinned && 'bg-secondary border-l-2 border-l-primary',
     )}>
       <td className="px-4 py-3">
         <div className="flex items-start gap-2">
@@ -150,7 +150,7 @@ function CaseRowEl({ c, pinned }: { c: CaseRow; pinned?: boolean }) {
               <div className="text-[10px] uppercase tracking-wider text-primary font-semibold mt-0.5">MDL Master Case</div>
             )}
             {c.on_jpml_schedule_a && !pinned && (
-              <span className="inline-flex items-center gap-1 mt-1 text-[10px] uppercase tracking-wider bg-[oklch(0.4_0.06_140)] text-white px-1.5 py-0.5 rounded font-semibold">
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] uppercase tracking-wider bg-[hsl(150_30%_88%)] text-[hsl(150_50%_22%)] border border-[hsl(150_30%_75%)] px-1.5 py-0.5 rounded font-semibold">
                 <CheckCircle2 className="h-3 w-3" /> Certified transfer
               </span>
             )}
@@ -233,7 +233,7 @@ function CounselTab() {
               return (
                 <tr key={c.id} className={cn(
                   'border-t border-border align-top',
-                  isSeeger && 'bg-[oklch(0.42_0.14_25_/_0.05)] border-l-2 border-l-accent',
+                  isSeeger && 'bg-[hsl(38_42%_45%/0.08)] border-l-2 border-l-[hsl(38_42%_45%)]',
                 )}>
                   <td className="px-4 py-3"><SideBadge side={c.side} /></td>
                   <td className="px-4 py-3 font-medium text-foreground">{c.attorney_name ?? '—'}</td>

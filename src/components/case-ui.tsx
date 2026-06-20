@@ -3,10 +3,10 @@ import { cn } from '@/lib/utils';
 import { tagLabel } from '@/lib/supabase';
 
 const TYPE_STYLES: Record<string, string> = {
-  PTO: 'bg-[oklch(0.26_0.04_255)] text-white border-transparent',
-  CMO: 'bg-[oklch(0.42_0.14_25)] text-white border-transparent',
-  CBO: 'bg-[oklch(0.45_0.1_140)] text-white border-transparent',
-  JPML: 'bg-[oklch(0.4_0.06_80)] text-white border-transparent',
+  PTO: 'bg-secondary text-primary border border-border',
+  CMO: 'bg-primary text-primary-foreground border border-transparent',
+  CBO: 'bg-accent text-accent-foreground border border-transparent',
+  JPML: 'bg-secondary text-secondary-foreground border border-border',
 };
 
 export function OrderTypeBadge({
@@ -22,8 +22,8 @@ export function OrderTypeBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tracking-wider uppercase',
-        TYPE_STYLES[type] ?? 'bg-muted text-foreground',
+        'inline-flex items-center rounded-sm px-2 py-0.5 text-[10.5px] font-semibold tracking-[0.09em] uppercase tabular-nums',
+        TYPE_STYLES[type] ?? 'bg-secondary text-secondary-foreground border border-border',
         className,
       )}
     >
@@ -43,7 +43,7 @@ export function TagChips({ tags, max }: { tags: string[] | null; max?: number })
         <Badge
           key={t}
           variant="outline"
-          className="font-normal text-[10.5px] tracking-wide bg-secondary/60 border-border text-secondary-foreground/80 py-0 px-1.5"
+          className="font-medium text-[10px] tracking-[0.04em] bg-secondary border-border text-secondary-foreground py-0 px-1.5 rounded-sm"
         >
           {tagLabel(t)}
         </Badge>
@@ -57,16 +57,16 @@ export function TagChips({ tags, max }: { tags: string[] | null; max?: number })
 
 export function CategoryBadge({ category }: { category: string }) {
   const styles: Record<string, string> = {
-    hearing: 'bg-[oklch(0.42_0.14_25)] text-white',
-    cmc: 'bg-[oklch(0.26_0.04_255)] text-white',
-    deadline: 'bg-[oklch(0.55_0.12_60)] text-white',
-    milestone: 'bg-[oklch(0.4_0.06_140)] text-white',
+    hearing: 'bg-primary text-primary-foreground',
+    cmc: 'bg-accent text-accent-foreground',
+    deadline: 'bg-secondary text-secondary-foreground border border-border',
+    milestone: 'bg-secondary text-secondary-foreground border border-border',
   };
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
-        styles[category] ?? 'bg-muted',
+        'inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.09em]',
+        styles[category] ?? 'bg-muted text-muted-foreground',
       )}
     >
       {category}
@@ -78,10 +78,10 @@ export function SideBadge({ side }: { side: 'plaintiff' | 'defendant' }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+        'inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.09em]',
         side === 'plaintiff'
-          ? 'bg-[oklch(0.26_0.04_255)] text-white'
-          : 'bg-[oklch(0.42_0.14_25)] text-white',
+          ? 'bg-primary text-primary-foreground'
+          : 'bg-secondary text-secondary-foreground border border-border',
       )}
     >
       {side}

@@ -87,7 +87,7 @@ function Dashboard() {
                     <li
                       key={d.id}
                       className={`px-5 py-3.5 flex gap-4 items-start ${
-                        headline ? 'bg-[oklch(0.42_0.14_25_/_0.05)] border-l-2 border-l-accent' : ''
+                        headline ? 'bg-[hsl(38_42%_45%/0.08)] border-l-2 border-l-[hsl(38_42%_45%)]' : ''
                       }`}
                     >
                       <div className="w-28 shrink-0">
@@ -102,7 +102,7 @@ function Dashboard() {
                             {d.title}
                           </span>
                           {headline && (
-                            <span className="text-[10px] uppercase tracking-wider bg-accent text-accent-foreground px-1.5 py-0.5 rounded font-semibold">
+                            <span className="text-[10px] uppercase tracking-wider bg-[hsl(38_42%_45%)] text-white px-1.5 py-0.5 rounded-sm font-semibold">
                               Gating event
                             </span>
                           )}

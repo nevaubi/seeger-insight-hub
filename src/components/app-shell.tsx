@@ -17,22 +17,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex bg-background text-foreground">
       <aside className="w-64 shrink-0 bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border">
-        <div className="px-5 py-6 border-b border-sidebar-border">
-          <div className="flex items-center gap-2.5">
-            <Scale className="h-6 w-6 text-sidebar-primary" strokeWidth={1.5} />
+        <div className="px-6 py-7 border-b border-sidebar-border">
+          <div className="flex items-start gap-3">
+            <Scale className="h-7 w-7 text-sidebar-foreground mt-0.5" strokeWidth={1.25} />
             <div>
-              <div className="font-serif text-base font-semibold leading-tight">MDL 3140</div>
-              <div className="text-[11px] uppercase tracking-wider text-sidebar-foreground/60">
+              <div className="font-serif text-[26px] leading-none font-medium tracking-tight text-white">MDL 3140</div>
+              <div className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/70 font-sans font-medium">
                 Command Center
               </div>
             </div>
           </div>
-          <p className="mt-3 text-xs leading-relaxed text-sidebar-foreground/70 font-serif italic">
+          <p className="mt-4 text-[12px] leading-snug text-sidebar-foreground/70 font-serif italic">
             In re: Depo-Provera Products Liability Litigation
           </p>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-3 py-5 space-y-0.5">
           {NAV.map((item) => {
             const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
             const Icon = item.icon;
@@ -41,20 +41,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                  'group relative flex items-center gap-3 rounded-sm pl-4 pr-3 py-2.5 text-[11px] uppercase tracking-[0.09em] font-medium transition-colors',
                   active
-                    ? 'bg-sidebar-primary text-sidebar-primary-foreground font-medium'
-                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                    ? 'bg-sidebar-accent text-white before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[2px] before:bg-sidebar-primary before:rounded-r'
+                    : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-white',
                 )}
               >
-                <Icon className="h-4 w-4" strokeWidth={1.75} />
+                <Icon className="h-[15px] w-[15px]" strokeWidth={1.5} />
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
-        <div className="px-5 py-4 border-t border-sidebar-border text-[11px] text-sidebar-foreground/55 leading-relaxed">
+        <div className="px-6 py-5 border-t border-sidebar-border text-[10.5px] text-sidebar-foreground/60 leading-relaxed font-sans">
           <div>U.S. District Court</div>
           <div>N.D. Fla., Pensacola Division</div>
           <div className="mt-1">Judge M. Casey Rodgers</div>
@@ -77,12 +77,12 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <div className="border-b border-border bg-card/40 px-8 py-6">
+    <div className="border-b border-border bg-card px-8 py-8">
       <div className="flex items-start justify-between gap-6">
         <div>
-          <h1 className="font-serif text-3xl font-semibold text-foreground">{title}</h1>
+          <h1 className="font-serif text-[32px] leading-[1.15] font-medium tracking-[-0.01em] text-foreground">{title}</h1>
           {description && (
-            <p className="mt-1.5 text-sm text-muted-foreground max-w-2xl">{description}</p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground max-w-2xl">{description}</p>
           )}
         </div>
         {children}
