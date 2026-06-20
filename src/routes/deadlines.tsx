@@ -69,7 +69,7 @@ function DeadlinesPage() {
                   <tr
                     key={d.id}
                     className={`border-t border-border align-top ${
-                      headline ? 'bg-[oklch(0.42_0.14_25_/_0.05)]' : ''
+                      headline ? 'bg-[hsl(38_42%_45%/0.07)]' : ''
                     }`}
                   >
                     <td className="px-4 py-3 tabular-nums">
