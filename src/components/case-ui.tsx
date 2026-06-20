@@ -89,11 +89,13 @@ export function SideBadge({ side }: { side: 'plaintiff' | 'defendant' }) {
   );
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
-  const dt = new Date(d);
-  if (isNaN(dt.getTime())) return d;
-  return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  if (!m) return d;
+  return `${MONTHS[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
 }
 
 export function fmtDateRange(start: string | null, end: string | null): string {
