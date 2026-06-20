@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SearchRouteImport } from './routes/search'
+import { Route as RosterRouteImport } from './routes/roster'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as DeadlinesRouteImport } from './routes/deadlines'
 import { Route as IndexRouteImport } from './routes/index'
@@ -17,6 +18,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RosterRoute = RosterRouteImport.update({
+  id: '/roster',
+  path: '/roster',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrdersRoute = OrdersRouteImport.update({
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
   '/orders': typeof OrdersRoute
+  '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
   '/orders': typeof OrdersRoute
+  '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
   '/orders': typeof OrdersRoute
+  '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deadlines' | '/orders' | '/search'
+  fullPaths: '/' | '/deadlines' | '/orders' | '/roster' | '/search'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deadlines' | '/orders' | '/search'
-  id: '__root__' | '/' | '/deadlines' | '/orders' | '/search'
+  to: '/' | '/deadlines' | '/orders' | '/roster' | '/search'
+  id: '__root__' | '/' | '/deadlines' | '/orders' | '/roster' | '/search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DeadlinesRoute: typeof DeadlinesRoute
   OrdersRoute: typeof OrdersRoute
+  RosterRoute: typeof RosterRoute
   SearchRoute: typeof SearchRoute
 }
 
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/roster': {
+      id: '/roster'
+      path: '/roster'
+      fullPath: '/roster'
+      preLoaderRoute: typeof RosterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/orders': {
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DeadlinesRoute: DeadlinesRoute,
   OrdersRoute: OrdersRoute,
+  RosterRoute: RosterRoute,
   SearchRoute: SearchRoute,
 }
 export const routeTree = rootRouteImport
