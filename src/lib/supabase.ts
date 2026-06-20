@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const supabase = createClient(
-  'https://blhcucozljrojnvqosyi.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJsaGN1Y296bGpyb2pudnFvc3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MTcyMDYsImV4cCI6MjA5NzQ5MzIwNn0.uwwQT_gnFtcgKD73BdURuSyFVbqXkjBec23dPBUXNO0'
-);
+export const SUPABASE_URL = 'https://blhcucozljrojnvqosyi.supabase.co';
+export const SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJsaGN1Y296bGpyb2pudnFvc3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MTcyMDYsImV4cCI6MjA5NzQ5MzIwNn0.uwwQT_gnFtcgKD73BdURuSyFVbqXkjBec23dPBUXNO0';
+export const SYNTHESIS_ENDPOINT = `${SUPABASE_URL}/functions/v1/legal-synthesis`;
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export type OrderType = 'PTO' | 'CMO' | 'CBO' | 'JPML';
 
