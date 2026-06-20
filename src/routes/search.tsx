@@ -1,6 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useMutation } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import {
   ExternalLink,
   Search as SearchIcon,
@@ -11,7 +23,7 @@ import {
   BookOpen,
   Brain,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AppShell, PageHeader } from '@/components/app-shell';
 import { OrderTypeBadge, fmtDate } from '@/components/case-ui';
@@ -19,14 +31,19 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { supabase } from '@/lib/supabase';
+import {
+  supabase,
+  tagLabel,
+  SUPABASE_ANON_KEY,
+  SYNTHESIS_ENDPOINT,
+} from '@/lib/supabase';
 import { embedQuery, modelReady } from '@/lib/embed';
-import { tagLabel } from '@/lib/supabase';
-
-const SUPABASE_URL = 'https://blhcucozljrojnvqosyi.supabase.co';
-const SUPABASE_ANON =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJsaGN1Y296bGpyb2pudnFvc3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MTcyMDYsImV4cCI6MjA5NzQ5MzIwNn0.uwwQT_gnFtcgKD73BdURuSyFVbqXkjBec23dPBUXNO0';
-const SYNTH_ENDPOINT = `${SUPABASE_URL}/functions/v1/legal-synthesis`;
+import {
+  useSynthesisStream,
+  type Chunk,
+  type CitationEvt,
+  type RoundState,
+} from '@/lib/useSynthesisStream';
 
 const EXAMPLES_SYNTH = [
   'What must plaintiffs do to establish proof of Depo-Provera use, and by when?',
@@ -58,79 +75,7 @@ export const Route = createFileRoute('/search')({
   ),
 });
 
-// ----- types -----
-
-type Chunk = {
-  ref: string;
-  order_label?: string | null;
-  doc_label?: string | null;
-  order_type?: string | null;
-  order_number?: string | null;
-  order_date?: string | null;
-  page_start: number;
-  page_end: number;
-  section_label?: string | null;
-  affects?: string | null;
-  has_deadline?: boolean;
-  tags?: string[] | null;
-  pdf_url?: string | null;
-  score?: number;
-  vec_hit?: boolean;
-  lex_hit?: boolean;
-  sentences: string[];
-};
-
-type SearchEvt = {
-  round: number;
-  keywords: string | null;
-  filter: Record<string, unknown>;
-  k: number;
-  count?: number;
-};
-
-type RoundState = {
-  round: number;
-  textBlocks: { id: string; text: string }[];
-  textOrder: string[]; // block ids in order
-  stop_reason?: 'tool_use' | 'end_turn';
-};
-
-type CitationEvt = {
-  round: number;
-  block_id: string;
-  ref: string;
-  order_label?: string | null;
-  page: number;
-  sentence_start: number;
-  sentence_end: number;
-  cited_text?: string;
-  source?: string;
-  title?: string;
-  num: number; // assigned in order of arrival
-};
-
-type HybridHit = {
-  id: string;
-  document_id: string;
-  order_id: string | null;
-  content: string;
-  score: number;
-  vec_hit: boolean;
-  lex_hit: boolean;
-  doc_label: string | null;
-  order_type: string | null;
-  order_number: string | null;
-  order_date: string | null;
-  tags: string[] | null;
-  section_label: string | null;
-  affects: string | null;
-  has_deadline: boolean;
-  page_start: number;
-  page_end: number;
-  pdf_url: string | null;
-};
-
-// ----- filter bar -----
+// ----- filters -----
 
 type Filters = {
   orderType: string;
@@ -150,7 +95,7 @@ function buildFilter(f: Filters) {
   return out;
 }
 
-// ----- main component -----
+// ----- top-level page -----
 
 function AskTheRecord() {
   const [mode, setMode] = useState<'synth' | 'browse'>('synth');
@@ -170,46 +115,50 @@ function AskTheRecord() {
         description="Ask in plain English. The assistant searches every controlling order on the docket and answers with grounded, page-level citations."
       />
       <div className="px-8 py-6 space-y-5">
-        <Card className="p-5">
-          <div className="flex items-center gap-1 mb-4 text-xs">
-            <button
-              type="button"
-              onClick={() => setMode('synth')}
-              className={`px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-                mode === 'synth'
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'border-border bg-secondary/60 text-foreground/80 hover:border-accent/60'
-              }`}
-            >
-              <Brain className="h-3 w-3" /> Ask (synthesized answer)
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('browse')}
-              className={`px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-                mode === 'browse'
-                  ? 'bg-accent text-accent-foreground border-accent'
-                  : 'border-border bg-secondary/60 text-foreground/80 hover:border-accent/60'
-              }`}
-            >
-              <BookOpen className="h-3 w-3" /> Browse passages
-            </button>
-          </div>
-
-          <FilterBar value={filters} onChange={setFilters} q={q} setQ={setQ} mode={mode} />
-        </Card>
+        <div className="flex items-center gap-1 text-xs">
+          <ModeButton active={mode === 'synth'} onClick={() => setMode('synth')}>
+            <Brain className="h-3 w-3" /> Ask (synthesized answer)
+          </ModeButton>
+          <ModeButton active={mode === 'browse'} onClick={() => setMode('browse')}>
+            <BookOpen className="h-3 w-3" /> Browse passages
+          </ModeButton>
+        </div>
 
         {mode === 'synth' ? (
-          <SynthesisPanel q={q} setQ={setQ} filters={filters} />
+          <SynthesisPanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
         ) : (
-          <BrowsePanel q={q} setQ={setQ} filters={filters} />
+          <BrowsePanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
         )}
       </div>
     </AppShell>
   );
 }
 
-// ----- filter bar -----
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+        active
+          ? 'bg-accent text-accent-foreground border-accent'
+          : 'border-border bg-secondary/60 text-foreground/80 hover:border-accent/60'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ----- filter bar (input + filters) -----
 
 function FilterBar({
   value,
@@ -243,7 +192,9 @@ function FilterBar({
       </div>
       <div className="flex flex-wrap items-end gap-3 text-xs">
         <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">Order type</span>
+          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">
+            Order type
+          </span>
           <select
             value={value.orderType}
             onChange={(e) => set('orderType', e.target.value)}
@@ -302,257 +253,127 @@ function SynthesisPanel({
   q,
   setQ,
   filters,
+  setFilters,
 }: {
   q: string;
   setQ: (s: string) => void;
   filters: Filters;
+  setFilters: (f: Filters) => void;
 }) {
-  const [submitted, setSubmitted] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [embedding, setEmbedding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searches, setSearches] = useState<SearchEvt[]>([]);
-  const [thinking, setThinking] = useState<Record<number, string>>({});
-  const [rounds, setRounds] = useState<Record<number, RoundState>>({});
-  const [finalRound, setFinalRound] = useState<number | null>(null);
-  const [citations, setCitations] = useState<CitationEvt[]>([]);
-  const [chunks, setChunks] = useState<Record<string, Chunk>>({});
-  const [chunkOrder, setChunkOrder] = useState<string[]>([]);
+  const { state, ask, stop } = useSynthesisStream(SYNTHESIS_ENDPOINT, SUPABASE_ANON_KEY);
+  const {
+    running,
+    embedding,
+    error,
+    submitted,
+    searches,
+    notes,
+    thinking,
+    rounds,
+    currentRound,
+    finalRound,
+    citations,
+    chunks,
+    chunkOrder,
+  } = state;
+
   const [reasoningOpen, setReasoningOpen] = useState(true);
   const [flashRef, setFlashRef] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const citationCounter = useRef(0);
+  const reasoningScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const reset = () => {
-    setSearches([]);
-    setThinking({});
-    setRounds({});
-    setFinalRound(null);
-    setCitations([]);
-    setChunks({});
-    setChunkOrder([]);
-    setError(null);
-    citationCounter.current = 0;
-  };
-
-  const run = useCallback(
-    async (query: string) => {
-      const v = query.trim();
-      if (!v) return;
-      abortRef.current?.abort();
-      reset();
-      setSubmitted(v);
-      setRunning(true);
-      setReasoningOpen(true);
-
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      try {
-        setEmbedding(!modelReady());
-        const emb = await embedQuery(v);
-        setEmbedding(false);
-
-        const res = await fetch(SYNTH_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: SUPABASE_ANON,
-            Authorization: `Bearer ${SUPABASE_ANON}`,
-          },
-          body: JSON.stringify({
-            question: v,
-            embedding: emb,
-            initial_filter: buildFilter(filters),
-          }),
-          signal: ctrl.signal,
-        });
-
-        if (!res.ok || !res.body) {
-          throw new Error(`Synthesis failed (${res.status})`);
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let idx;
-          while ((idx = buf.indexOf('\n\n')) !== -1) {
-            const frame = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            // pull a data: line
-            const dataLine = frame
-              .split('\n')
-              .find((l) => l.startsWith('data:'));
-            if (!dataLine) continue;
-            const payload = dataLine.slice(5).trim();
-            if (!payload) continue;
-            let evt: any;
-            try {
-              evt = JSON.parse(payload);
-            } catch {
-              continue;
-            }
-            handleEvent(evt);
-          }
-        }
-      } catch (e: any) {
-        if (e?.name !== 'AbortError') setError(e?.message ?? String(e));
-      } finally {
-        setEmbedding(false);
-        setRunning(false);
-      }
-    },
-    [filters],
-  );
-
-  const handleEvent = (evt: any) => {
-    switch (evt.type) {
-      case 'round':
-        setRounds((r) => ({
-          ...r,
-          [evt.round]: r[evt.round] ?? { round: evt.round, textBlocks: [], textOrder: [] },
-        }));
-        break;
-      case 'thinking':
-        setThinking((t) => ({ ...t, [evt.round]: (t[evt.round] ?? '') + (evt.text ?? '') }));
-        break;
-      case 'search':
-        setSearches((s) => [
-          ...s,
-          { round: evt.round, keywords: evt.keywords, filter: evt.filter ?? {}, k: evt.k },
-        ]);
-        break;
-      case 'chunks': {
-        const list = (evt.chunks ?? []) as Chunk[];
-        setChunks((c) => {
-          const next = { ...c };
-          for (const ch of list) if (!next[ch.ref]) next[ch.ref] = ch;
-          return next;
-        });
-        setChunkOrder((o) => {
-          const seen = new Set(o);
-          const add = list.map((c) => c.ref).filter((r) => !seen.has(r));
-          return [...o, ...add];
-        });
-        setSearches((s) => {
-          // append count to the most recent search of this round
-          const copy = [...s];
-          for (let i = copy.length - 1; i >= 0; i--) {
-            if (copy[i].round === evt.round && copy[i].count === undefined) {
-              copy[i] = { ...copy[i], count: list.length };
-              break;
-            }
-          }
-          return copy;
-        });
-        break;
-      }
-      case 'text':
-        setRounds((r) => {
-          const cur = r[evt.round] ?? { round: evt.round, textBlocks: [], textOrder: [] };
-          const existing = cur.textBlocks.find((b) => b.id === evt.block_id);
-          let blocks = cur.textBlocks;
-          let order = cur.textOrder;
-          if (existing) {
-            blocks = blocks.map((b) =>
-              b.id === evt.block_id ? { ...b, text: b.text + (evt.text ?? '') } : b,
-            );
-          } else {
-            blocks = [...blocks, { id: evt.block_id, text: evt.text ?? '' }];
-            order = [...order, evt.block_id];
-          }
-          return { ...r, [evt.round]: { ...cur, textBlocks: blocks, textOrder: order } };
-        });
-        break;
-      case 'citation': {
-        citationCounter.current += 1;
-        const num = citationCounter.current;
-        setCitations((c) => [...c, { ...evt, num }]);
-        break;
-      }
-      case 'round_end':
-        setRounds((r) => {
-          const cur = r[evt.round] ?? { round: evt.round, textBlocks: [], textOrder: [] };
-          return { ...r, [evt.round]: { ...cur, stop_reason: evt.stop_reason } };
-        });
-        if (evt.stop_reason === 'end_turn') setFinalRound(evt.round);
-        break;
-      case 'search_error':
-        setError(`Search error (round ${evt.round}): ${evt.message}`);
-        break;
-      case 'error':
-        setError(evt.message ?? 'Unknown error');
-        break;
-      case 'done':
-        setRunning(false);
-        setReasoningOpen(false);
-        break;
-    }
-  };
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    run(q);
-  };
-
-  // collapse reasoning when stream completes
+  // collapse reasoning once we have a final answer & stream is done
   useEffect(() => {
     if (!running && finalRound != null) setReasoningOpen(false);
   }, [running, finalRound]);
 
-  const scrollToChunk = (ref: string) => {
-    const el = document.getElementById(`chunk-${ref}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setFlashRef(ref);
-      setTimeout(() => setFlashRef((cur) => (cur === ref ? null : cur)), 1600);
-    }
+  // open reasoning at start of a new query
+  useEffect(() => {
+    if (running) setReasoningOpen(true);
+  }, [submitted, running]);
+
+  // auto-scroll the reasoning panel as new thinking streams in
+  useEffect(() => {
+    const el = reasoningScrollRef.current;
+    if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
+  }, [thinking, reasoningOpen]);
+
+  const runQuery = useCallback(
+    (query: string) => {
+      ask(query, buildFilter(filters));
+    },
+    [ask, filters],
+  );
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    runQuery(q);
   };
 
-  // citations by block id (within final round) for inline chips
-  const citationsByBlock = useMemo(() => {
-    const m: Record<string, CitationEvt[]> = {};
-    for (const c of citations) {
-      if (finalRound != null && c.round !== finalRound) continue;
-      (m[c.block_id] ??= []).push(c);
-    }
-    return m;
-  }, [citations, finalRound]);
+  const scrollToChunk = useCallback((ref: string) => {
+    const el = document.getElementById(`chunk-${ref}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashRef(ref);
+    setTimeout(() => setFlashRef((cur) => (cur === ref ? null : cur)), 1600);
+  }, []);
 
-  // citations grouped by chunk ref (for highlighting sentences)
+  // citations grouped by chunk ref (for highlighting sentences in evidence)
   const citationsByRef = useMemo(() => {
     const m: Record<string, CitationEvt[]> = {};
     for (const c of citations) (m[c.ref] ??= []).push(c);
     return m;
   }, [citations]);
 
+  // citations grouped by block id (only those that belong to final round)
+  const citationsByBlock = useMemo(() => {
+    const m: Record<string, CitationEvt[]> = {};
+    if (finalRound == null) return m;
+    for (const c of citations) {
+      if (c.round !== finalRound) continue;
+      (m[c.block_id] ??= []).push(c);
+    }
+    return m;
+  }, [citations, finalRound]);
+
   const sortedChunkRefs = useMemo(() => {
-    // cited first (by first citation num), then the rest in arrival order
     const firstCiteNum: Record<string, number> = {};
     for (const c of citations) {
       if (!(c.ref in firstCiteNum)) firstCiteNum[c.ref] = c.num;
     }
-    const cited = chunkOrder.filter((r) => r in firstCiteNum).sort(
-      (a, b) => firstCiteNum[a] - firstCiteNum[b],
-    );
+    const cited = chunkOrder
+      .filter((r) => r in firstCiteNum)
+      .sort((a, b) => firstCiteNum[a] - firstCiteNum[b]);
     const uncited = chunkOrder.filter((r) => !(r in firstCiteNum));
     return [...cited, ...uncited];
   }, [chunkOrder, citations]);
 
-  const finalRoundState = finalRound != null ? rounds[finalRound] : undefined;
-  const concatenatedReasoning = useMemo(() => {
-    return Object.keys(thinking)
-      .map((k) => Number(k))
-      .sort((a, b) => a - b)
-      .map((r) => ({ round: r, text: thinking[r] }));
-  }, [thinking]);
+  const citationByNum = useMemo(() => {
+    const m = new Map<number, CitationEvt>();
+    for (const c of citations) m.set(c.num, c);
+    return m;
+  }, [citations]);
+
+  // active (currently rendering) round state
+  const activeRound: RoundState | undefined =
+    currentRound != null ? rounds[currentRound] : undefined;
+  const isFinalActive = currentRound != null && currentRound === finalRound;
+
+  const reasoningRounds = useMemo(
+    () =>
+      Object.keys(thinking)
+        .map((k) => Number(k))
+        .sort((a, b) => a - b)
+        .map((r) => ({ round: r, text: thinking[r] })),
+    [thinking],
+  );
 
   return (
-    <div className="space-y-4">
-      <form onSubmit={onSubmit} className="flex gap-2">
+    <form onSubmit={onSubmit} className="space-y-4">
+      <Card className="p-5">
+        <FilterBar value={filters} onChange={setFilters} q={q} setQ={setQ} mode="synth" />
+      </Card>
+
+      <div className="flex gap-2">
         <Button
           type="submit"
           disabled={running || !q.trim()}
@@ -568,16 +389,11 @@ function SynthesisPanel({
           )}
         </Button>
         {running && (
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10"
-            onClick={() => abortRef.current?.abort()}
-          >
+          <Button type="button" variant="outline" className="h-10" onClick={stop}>
             Stop
           </Button>
         )}
-      </form>
+      </div>
 
       {embedding && (
         <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
@@ -604,9 +420,9 @@ function SynthesisPanel({
                 type="button"
                 onClick={() => {
                   setQ(ex);
-                  run(ex);
+                  runQuery(ex);
                 }}
-                className="text-left text-sm font-serif px-3 py-2 rounded border border-border bg-secondary/40 hover:bg-accent hover:text-accent-foreground hover:border-accent transition-colors max-w-md"
+                className="text-left text-sm font-serif px-3 py-2 rounded border border-border bg-secondary/40 hover:bg-accent hover:text-accent-foreground hover:border-accent transition-colors max-w-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
                 {ex}
               </button>
@@ -616,34 +432,37 @@ function SynthesisPanel({
       )}
 
       {submitted && (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-          {/* LEFT: Answer + reasoning + trace */}
-          <div className="lg:col-span-3 space-y-4">
-            {/* Reasoning */}
-            {concatenatedReasoning.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-start">
+          {/* LEFT: Apparatus (small) + Answer (primary) */}
+          <div className="lg:col-span-3 space-y-4 min-w-0">
+            {/* Reasoning — capped, scroll-locked, secondary */}
+            {reasoningRounds.length > 0 && (
               <Card className="p-0 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setReasoningOpen((x) => !x)}
-                  className="w-full px-4 py-2.5 flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground hover:bg-secondary/50"
+                  className="w-full px-4 py-2 flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   {reasoningOpen ? (
                     <ChevronDown className="h-3.5 w-3.5" />
                   ) : (
                     <ChevronRight className="h-3.5 w-3.5" />
                   )}
-                  <Brain className="h-3.5 w-3.5" /> Reasoning
+                  <Brain className="h-3.5 w-3.5" /> How the assistant searched
                 </button>
                 {reasoningOpen && (
-                  <div className="px-4 pb-4 space-y-3 border-t border-border">
-                    {concatenatedReasoning.map(({ round, text }) => (
-                      <div key={round}>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground mt-2">
+                  <div
+                    ref={reasoningScrollRef}
+                    className="px-4 pb-3 pt-1 border-t border-border max-h-[13rem] overflow-y-auto bg-secondary/20"
+                  >
+                    {reasoningRounds.map(({ round, text }) => (
+                      <div key={round} className="pt-2">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
                           Round {round}
                         </div>
-                        <pre className="whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-foreground/70">
+                        <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/70">
                           {text}
-                        </pre>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -651,18 +470,22 @@ function SynthesisPanel({
               </Card>
             )}
 
-            {/* Research trace */}
-            {searches.length > 0 && (
+            {/* Research trace — compact, one line per search */}
+            {(searches.length > 0 || notes.length > 0) && (
               <Card className="p-4">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
                   Research trace
                 </div>
-                <ol className="space-y-2">
+                <ol className="space-y-1.5">
                   {searches.map((s, i) => (
-                    <li key={i} className="text-xs flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-muted-foreground">Search {i + 1}</span>
+                    <li key={i} className="text-xs flex flex-wrap items-center gap-2 leading-snug">
+                      <span className="font-mono text-muted-foreground tabular-nums">
+                        {String(i + 1).padStart(2, '0')}
+                      </span>
                       {s.keywords && (
-                        <span className="font-serif italic text-foreground">"{s.keywords}"</span>
+                        <span className="font-serif italic text-foreground">
+                          “{s.keywords}”
+                        </span>
                       )}
                       {Object.entries(s.filter ?? {}).map(([k, v]) => (
                         <span
@@ -672,57 +495,68 @@ function SynthesisPanel({
                           {k}: {String(v)}
                         </span>
                       ))}
-                      <span className="text-muted-foreground">
-                        · k={s.k}
-                        {s.count !== undefined && ` · ${s.count} passages`}
+                      <span className="text-muted-foreground ml-auto tabular-nums">
+                        {s.count !== undefined ? `${s.count} passages` : `k=${s.k}`}
                       </span>
+                    </li>
+                  ))}
+                  {notes.map((n) => (
+                    <li
+                      key={`note-${n.round}`}
+                      className="text-[11px] text-muted-foreground/80 italic border-l-2 border-border pl-2 mt-1"
+                    >
+                      Round {n.round} note: {truncate(n.text, 240)}
                     </li>
                   ))}
                 </ol>
               </Card>
             )}
 
-            {/* Answer */}
-            <Card className="p-6">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
-                Answer
-              </div>
-              {!finalRoundState && running && (
-                <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Researching the record…
+            {/* Answer — primary card */}
+            <Card className="p-7 shadow-sm border-accent/20">
+              <div className="flex items-baseline justify-between mb-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Answer
                 </div>
-              )}
-              {finalRoundState && (
-                <AnswerBlocks
-                  round={finalRoundState}
+                {running && (
+                  <div className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {currentRound != null && !isFinalActive
+                      ? 'Searching the record…'
+                      : 'Streaming…'}
+                  </div>
+                )}
+              </div>
+              <div className="max-w-[68ch]">
+                <AnswerStream
+                  activeRound={activeRound}
+                  isFinal={isFinalActive}
+                  running={running}
+                  submitted={!!submitted}
                   citationsByBlock={citationsByBlock}
+                  citationByNum={citationByNum}
                   onCitationClick={scrollToChunk}
                 />
-              )}
-              {!finalRoundState && !running && submitted && (
-                <div className="text-sm text-muted-foreground">No answer produced.</div>
-              )}
+              </div>
             </Card>
           </div>
 
-          {/* RIGHT: Evidence */}
-          <div className="lg:col-span-2 space-y-3">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1">
+          {/* RIGHT: Evidence column — sticky, self-scrolling on lg */}
+          <div className="lg:col-span-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto pr-1 space-y-3">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
               Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
             </div>
             {sortedChunkRefs.map((ref) => {
               const ch = chunks[ref];
               if (!ch) return null;
               const cites = citationsByRef[ref] ?? [];
-              const isCited = cites.length > 0;
               return (
                 <EvidenceCard
                   key={ref}
                   chunk={ch}
                   citations={cites}
                   flash={flashRef === ref}
-                  cited={isCited}
+                  cited={cites.length > 0}
                 />
               );
             })}
@@ -732,55 +566,245 @@ function SynthesisPanel({
           </div>
         </div>
       )}
-    </div>
+    </form>
   );
 }
 
-// ----- answer blocks with inline citation chips -----
+function truncate(s: string, n: number) {
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+}
 
-function AnswerBlocks({
-  round,
+// ----- Answer rendering: concatenate blocks + inline citation chips -----
+
+const CITE_SENTINEL_RE = /⟦cite:([\d,]+)⟧/g;
+
+function AnswerStream({
+  activeRound,
+  isFinal,
+  running,
+  submitted,
   citationsByBlock,
+  citationByNum,
   onCitationClick,
 }: {
-  round: RoundState;
+  activeRound: RoundState | undefined;
+  isFinal: boolean;
+  running: boolean;
+  submitted: boolean;
   citationsByBlock: Record<string, CitationEvt[]>;
+  citationByNum: Map<number, CitationEvt>;
   onCitationClick: (ref: string) => void;
 }) {
+  // Build markdown string. Append sentinels only when round is final.
+  const markdown = useMemo(() => {
+    if (!activeRound) return '';
+    const parts: string[] = [];
+    for (const id of activeRound.textOrder) {
+      const idx = activeRound.blockIndex[id];
+      const blk = activeRound.textBlocks[idx];
+      if (!blk) continue;
+      parts.push(blk.text);
+      if (isFinal) {
+        const cites = citationsByBlock[id];
+        if (cites && cites.length) {
+          const nums = cites.map((c) => c.num).join(',');
+          // Insert a sentinel attached to the trailing word of this block
+          // (no leading newline so it stays inline).
+          parts.push(`\u00A0⟦cite:${nums}⟧`);
+        }
+      }
+    }
+    return parts.join('');
+  }, [activeRound, isFinal, citationsByBlock]);
+
+  const components: Components = useMemo(() => {
+    const transform = (children: ReactNode): ReactNode =>
+      transformWithCitations(children, citationByNum, onCitationClick);
+    return {
+      h1: ({ children }) => (
+        <h2 className="font-serif text-xl mt-5 mb-2 font-semibold text-foreground">
+          {transform(children)}
+        </h2>
+      ),
+      h2: ({ children }) => (
+        <h2 className="font-serif text-lg mt-5 mb-2 font-semibold text-foreground">
+          {transform(children)}
+        </h2>
+      ),
+      h3: ({ children }) => (
+        <h3 className="font-serif text-[15px] mt-4 mb-1.5 font-semibold uppercase tracking-wide text-foreground/90">
+          {transform(children)}
+        </h3>
+      ),
+      h4: ({ children }) => (
+        <h4 className="font-serif text-sm mt-3 mb-1 font-semibold text-foreground/90">
+          {transform(children)}
+        </h4>
+      ),
+      p: ({ children }) => (
+        <p className="font-serif text-[15px] leading-[1.7] my-3 text-foreground">
+          {transform(children)}
+        </p>
+      ),
+      ul: ({ children }) => (
+        <ul className="my-3 ml-5 list-disc space-y-1.5 font-serif text-[15px] leading-[1.65] text-foreground marker:text-muted-foreground">
+          {children}
+        </ul>
+      ),
+      ol: ({ children }) => (
+        <ol className="my-3 ml-5 list-decimal space-y-1.5 font-serif text-[15px] leading-[1.65] text-foreground marker:text-muted-foreground">
+          {children}
+        </ol>
+      ),
+      li: ({ children }) => <li className="pl-1">{transform(children)}</li>,
+      strong: ({ children }) => (
+        <strong className="font-semibold text-foreground">{transform(children)}</strong>
+      ),
+      em: ({ children }) => <em className="italic">{transform(children)}</em>,
+      blockquote: ({ children }) => (
+        <blockquote className="border-l-2 border-accent/50 pl-3 my-3 italic text-foreground/85">
+          {children}
+        </blockquote>
+      ),
+      a: ({ children, href }) => (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-accent underline decoration-accent/40 hover:decoration-accent"
+        >
+          {transform(children)}
+        </a>
+      ),
+      code: ({ children }) => (
+        <code className="font-mono text-[13px] px-1 py-0.5 rounded bg-secondary/70">
+          {children}
+        </code>
+      ),
+      hr: () => <hr className="my-4 border-border" />,
+    };
+  }, [citationByNum, onCitationClick]);
+
+  if (!activeRound && running) {
+    return (
+      <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Researching the record…
+      </div>
+    );
+  }
+  if (!activeRound && !running && submitted) {
+    return <div className="text-sm text-muted-foreground">No answer produced.</div>;
+  }
+  if (!markdown) return null;
+
   return (
-    <div className="space-y-3">
-      {round.textOrder.map((bid) => {
-        const block = round.textBlocks.find((b) => b.id === bid);
-        if (!block) return null;
-        const cites = citationsByBlock[bid] ?? [];
-        return (
-          <div key={bid} className="font-serif text-[15px] leading-relaxed text-foreground prose-legal">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.text}</ReactMarkdown>
-            {cites.length > 0 && (
-              <span className="inline-flex flex-wrap items-center gap-1 ml-1 align-baseline">
-                {cites.map((c) => (
-                  <button
-                    key={c.num}
-                    type="button"
-                    onClick={() => onCitationClick(c.ref)}
-                    title={`${c.order_label ?? ''} p.${c.page}`}
-                    className="inline-flex items-center justify-center min-w-[1.4rem] h-[1.4rem] px-1 rounded-full text-[10.5px] font-sans font-medium bg-accent text-accent-foreground hover:brightness-110 transition cursor-pointer tabular-nums"
-                  >
-                    {c.num}
-                  </button>
-                ))}
-              </span>
-            )}
-          </div>
-        );
-      })}
+    <div className="answer-prose">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {markdown}
+      </ReactMarkdown>
     </div>
   );
 }
 
-// ----- evidence card -----
+function CitationChip({
+  num,
+  cite,
+  onClick,
+}: {
+  num: number;
+  cite: CitationEvt | undefined;
+  onClick: (ref: string) => void;
+}) {
+  if (!cite) return null;
+  const label = `Citation ${num}: ${cite.order_label ?? cite.title ?? 'source'} page ${cite.page}`;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(cite.ref)}
+      title={`${cite.order_label ?? ''} p.${cite.page}`}
+      aria-label={label}
+      className="inline-flex items-center justify-center min-w-[1.4rem] h-[1.4rem] px-1 mx-0.5 rounded-full text-[10.5px] font-sans font-medium bg-accent text-accent-foreground hover:brightness-110 transition cursor-pointer tabular-nums align-baseline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
+    >
+      {num}
+    </button>
+  );
+}
 
-function EvidenceCard({
+// Walk react-markdown's children, splitting any text node on the cite sentinel
+// and replacing matches with inline citation chips. Recurses into elements so
+// citations embedded inside <strong>, <em>, <a>, etc. still render correctly.
+function transformWithCitations(
+  children: ReactNode,
+  citationByNum: Map<number, CitationEvt>,
+  onClick: (ref: string) => void,
+): ReactNode {
+  const out: ReactNode[] = [];
+  let keyCounter = 0;
+  Children.forEach(children, (child) => {
+    if (typeof child === 'string') {
+      const parts = splitOnSentinel(child);
+      for (const p of parts) {
+        if (p.kind === 'text') {
+          if (p.value) out.push(p.value);
+        } else {
+          // chip group
+          const group: ReactNode[] = [];
+          for (const n of p.nums) {
+            group.push(
+              <CitationChip
+                key={`c-${keyCounter++}`}
+                num={n}
+                cite={citationByNum.get(n)}
+                onClick={onClick}
+              />,
+            );
+          }
+          out.push(
+            <span key={`g-${keyCounter++}`} className="inline-flex items-center align-baseline">
+              {group}
+            </span>,
+          );
+        }
+      }
+    } else if (isValidElement(child)) {
+      const props = child.props as { children?: ReactNode };
+      out.push(
+        cloneElement(
+          child,
+          { key: `e-${keyCounter++}` },
+          transformWithCitations(props.children, citationByNum, onClick),
+        ),
+      );
+    } else {
+      out.push(child);
+    }
+  });
+  return out;
+}
+
+function splitOnSentinel(
+  s: string,
+): Array<{ kind: 'text'; value: string } | { kind: 'cites'; nums: number[] }> {
+  const result: Array<{ kind: 'text'; value: string } | { kind: 'cites'; nums: number[] }> = [];
+  let last = 0;
+  for (const m of s.matchAll(CITE_SENTINEL_RE)) {
+    const start = m.index ?? 0;
+    if (start > last) result.push({ kind: 'text', value: s.slice(last, start) });
+    const nums = m[1]
+      .split(',')
+      .map((n) => Number(n.trim()))
+      .filter((n) => Number.isFinite(n));
+    result.push({ kind: 'cites', nums });
+    last = start + m[0].length;
+  }
+  if (last < s.length) result.push({ kind: 'text', value: s.slice(last) });
+  return result;
+}
+
+// ----- evidence card (synthesis mode) -----
+
+const EvidenceCard = memo(function EvidenceCard({
   chunk,
   citations,
   flash,
@@ -796,7 +820,6 @@ function EvidenceCard({
       ? `p.${chunk.page_start}`
       : `p.${chunk.page_start}–${chunk.page_end}`;
 
-  // map sentence index -> citation numbers attached to it
   const sentCites = useMemo(() => {
     const m: Record<number, number[]> = {};
     for (const c of citations) {
@@ -810,9 +833,9 @@ function EvidenceCard({
   return (
     <Card
       id={`chunk-${chunk.ref}`}
-      className={`p-4 transition-all ${
-        cited ? 'border-l-[3px] border-l-accent' : ''
-      } ${flash ? 'ring-2 ring-accent shadow-md' : ''}`}
+      className={`p-4 transition-all ${cited ? 'border-l-[3px] border-l-accent' : ''} ${
+        flash ? 'ring-2 ring-accent shadow-md' : ''
+      }`}
     >
       <div className="flex items-center gap-2 flex-wrap">
         {chunk.order_type ? (
@@ -886,8 +909,8 @@ function EvidenceCard({
           return <span key={i}>{s} </span>;
         })}
       </div>
-      <div className="mt-3 flex items-center gap-3 text-[11px]">
-        {chunk.pdf_url && (
+      {chunk.pdf_url && (
+        <div className="mt-3 text-[11px]">
           <a
             href={chunk.pdf_url}
             target="_blank"
@@ -896,27 +919,45 @@ function EvidenceCard({
           >
             <ExternalLink className="h-3 w-3" /> View source PDF
           </a>
-        )}
-        {typeof chunk.score === 'number' && (
-          <span className="text-muted-foreground tabular-nums ml-auto">
-            score {chunk.score.toFixed(3)}
-          </span>
-        )}
-      </div>
+        </div>
+      )}
     </Card>
   );
-}
+});
 
 // ----- browse passages (legacy hybrid) -----
+
+type HybridHit = {
+  id: string;
+  document_id: string;
+  order_id: string | null;
+  content: string;
+  score: number;
+  vec_hit: boolean;
+  lex_hit: boolean;
+  doc_label: string | null;
+  order_type: string | null;
+  order_number: string | null;
+  order_date: string | null;
+  tags: string[] | null;
+  section_label: string | null;
+  affects: string | null;
+  has_deadline: boolean;
+  page_start: number;
+  page_end: number;
+  pdf_url: string | null;
+};
 
 function BrowsePanel({
   q,
   setQ,
   filters,
+  setFilters,
 }: {
   q: string;
   setQ: (s: string) => void;
   filters: Filters;
+  setFilters: (f: Filters) => void;
 }) {
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [embedding, setEmbedding] = useState(false);
@@ -941,26 +982,25 @@ function BrowsePanel({
         setEmbedding(false);
         const { data, error } = await supabase.rpc('search_pages', { q: query, lim: 30 });
         if (error) throw error;
-        // shape lexical into HybridHit-ish for rendering
-        const rows: HybridHit[] = ((data ?? []) as any[]).map((r) => ({
+        const rows: HybridHit[] = ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
           id: `${r.document_id}-${r.page_number}`,
-          document_id: r.document_id,
-          order_id: r.order_id,
+          document_id: String(r.document_id),
+          order_id: (r.order_id as string | null) ?? null,
           content: String(r.snippet ?? '').replace(/<<|>>/g, ''),
-          score: r.rank ?? 0,
+          score: (r.rank as number) ?? 0,
           vec_hit: false,
           lex_hit: true,
-          doc_label: r.doc_label,
-          order_type: r.order_type,
+          doc_label: (r.doc_label as string | null) ?? null,
+          order_type: (r.order_type as string | null) ?? null,
           order_number: null,
-          order_date: r.order_date,
+          order_date: (r.order_date as string | null) ?? null,
           tags: null,
           section_label: null,
           affects: null,
           has_deadline: false,
-          page_start: r.page_number,
-          page_end: r.page_number,
-          pdf_url: r.pdf_url,
+          page_start: r.page_number as number,
+          page_end: r.page_number as number,
+          pdf_url: (r.pdf_url as string | null) ?? null,
         }));
         return { rows, notice: 'Semantic model unavailable — showing keyword results.' };
       }
@@ -981,16 +1021,20 @@ function BrowsePanel({
   };
 
   return (
-    <div className="space-y-4">
-      <form onSubmit={onSubmit} className="flex gap-2">
+    <form onSubmit={onSubmit} className="space-y-4">
+      <Card className="p-5">
+        <FilterBar value={filters} onChange={setFilters} q={q} setQ={setQ} mode="browse" />
+      </Card>
+
+      <div className="flex gap-2">
         <Button
           type="submit"
-          disabled={search.isPending}
+          disabled={search.isPending || !q.trim()}
           className="h-10 px-5 bg-accent text-accent-foreground hover:bg-accent/90"
         >
           {search.isPending ? 'Searching…' : 'Browse passages'}
         </Button>
-      </form>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
@@ -1122,6 +1166,6 @@ function BrowsePanel({
           </Card>
         )}
       </div>
-    </div>
+    </form>
   );
 }

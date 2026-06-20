@@ -1,0 +1,373 @@
+import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { embedQuery, modelReady } from '@/lib/embed';
+
+// ---- Public types ---------------------------------------------------------
+
+export type Chunk = {
+  ref: string;
+  order_label?: string | null;
+  doc_label?: string | null;
+  order_type?: string | null;
+  order_number?: string | null;
+  order_date?: string | null;
+  page_start: number;
+  page_end: number;
+  section_label?: string | null;
+  affects?: string | null;
+  has_deadline?: boolean;
+  tags?: string[] | null;
+  pdf_url?: string | null;
+  score?: number;
+  vec_hit?: boolean;
+  lex_hit?: boolean;
+  sentences: string[];
+};
+
+export type SearchEvt = {
+  round: number;
+  keywords: string | null;
+  filter: Record<string, unknown>;
+  k: number;
+  count?: number;
+};
+
+export type RoundState = {
+  round: number;
+  textBlocks: { id: string; text: string }[];
+  textOrder: string[];
+  blockIndex: Record<string, number>;
+  stop_reason?: 'tool_use' | 'end_turn';
+};
+
+export type CitationEvt = {
+  round: number;
+  block_id: string;
+  ref: string;
+  order_label?: string | null;
+  page: number;
+  sentence_start: number;
+  sentence_end: number;
+  cited_text?: string;
+  source?: string;
+  title?: string;
+  num: number;
+};
+
+export type RoundNote = { round: number; text: string };
+
+// ---- Discriminated SSE event union ---------------------------------------
+
+type SseRound = { type: 'round'; round: number };
+type SseThinking = { type: 'thinking'; round: number; text: string };
+type SseSearch = {
+  type: 'search';
+  round: number;
+  keywords: string | null;
+  filter?: Record<string, unknown>;
+  k: number;
+};
+type SseChunks = { type: 'chunks'; round: number; chunks: Chunk[] };
+type SseText = { type: 'text'; round: number; block_id: string; text: string };
+type SseCitation = {
+  type: 'citation';
+  round: number;
+  block_id: string;
+  ref: string;
+  order_label?: string | null;
+  page: number;
+  sentence_start: number;
+  sentence_end: number;
+  cited_text?: string;
+  source?: string;
+  title?: string;
+};
+type SseRoundEnd = {
+  type: 'round_end';
+  round: number;
+  stop_reason: 'tool_use' | 'end_turn';
+};
+type SseSearchError = { type: 'search_error'; round: number; message: string };
+type SseError = { type: 'error'; message: string };
+type SseDone = { type: 'done' };
+
+export type SynthEvent =
+  | SseRound
+  | SseThinking
+  | SseSearch
+  | SseChunks
+  | SseText
+  | SseCitation
+  | SseRoundEnd
+  | SseSearchError
+  | SseError
+  | SseDone;
+
+// ---- Reducer state --------------------------------------------------------
+
+export type SynthState = {
+  running: boolean;
+  embedding: boolean;
+  error: string | null;
+  submitted: string | null;
+  searches: SearchEvt[];
+  notes: RoundNote[]; // interim narration from tool_use rounds
+  thinking: Record<number, string>;
+  rounds: Record<number, RoundState>;
+  currentRound: number | null;
+  finalRound: number | null;
+  citations: CitationEvt[];
+  chunks: Record<string, Chunk>;
+  chunkOrder: string[];
+};
+
+const INITIAL: SynthState = {
+  running: false,
+  embedding: false,
+  error: null,
+  submitted: null,
+  searches: [],
+  notes: [],
+  thinking: {},
+  rounds: {},
+  currentRound: null,
+  finalRound: null,
+  citations: [],
+  chunks: {},
+  chunkOrder: [],
+};
+
+type Action =
+  | { kind: 'reset'; q: string }
+  | { kind: 'embedding'; on: boolean }
+  | { kind: 'error'; msg: string }
+  | { kind: 'running'; on: boolean }
+  | { kind: 'sse'; evt: SynthEvent; nextCitationNum: () => number };
+
+function ensureRound(rounds: Record<number, RoundState>, round: number): RoundState {
+  return (
+    rounds[round] ?? {
+      round,
+      textBlocks: [],
+      textOrder: [],
+      blockIndex: {},
+    }
+  );
+}
+
+function reducer(state: SynthState, action: Action): SynthState {
+  switch (action.kind) {
+    case 'reset':
+      return { ...INITIAL, submitted: action.q, running: true };
+    case 'embedding':
+      return { ...state, embedding: action.on };
+    case 'error':
+      return { ...state, error: action.msg, running: false, embedding: false };
+    case 'running':
+      return { ...state, running: action.on, embedding: action.on ? state.embedding : false };
+    case 'sse': {
+      const evt = action.evt;
+      switch (evt.type) {
+        case 'round': {
+          const cur = ensureRound(state.rounds, evt.round);
+          return {
+            ...state,
+            rounds: { ...state.rounds, [evt.round]: cur },
+            currentRound: Math.max(state.currentRound ?? -1, evt.round),
+          };
+        }
+        case 'thinking':
+          return {
+            ...state,
+            thinking: {
+              ...state.thinking,
+              [evt.round]: (state.thinking[evt.round] ?? '') + (evt.text ?? ''),
+            },
+          };
+        case 'search':
+          return {
+            ...state,
+            searches: [
+              ...state.searches,
+              {
+                round: evt.round,
+                keywords: evt.keywords,
+                filter: evt.filter ?? {},
+                k: evt.k,
+              },
+            ],
+          };
+        case 'chunks': {
+          const list = evt.chunks ?? [];
+          const nextChunks = { ...state.chunks };
+          const additions: string[] = [];
+          for (const ch of list) {
+            if (!nextChunks[ch.ref]) {
+              nextChunks[ch.ref] = ch;
+              additions.push(ch.ref);
+            }
+          }
+          // attach count to most recent search of this round
+          const nextSearches = [...state.searches];
+          for (let i = nextSearches.length - 1; i >= 0; i--) {
+            if (nextSearches[i].round === evt.round && nextSearches[i].count === undefined) {
+              nextSearches[i] = { ...nextSearches[i], count: list.length };
+              break;
+            }
+          }
+          return {
+            ...state,
+            chunks: nextChunks,
+            chunkOrder: [...state.chunkOrder, ...additions],
+            searches: nextSearches,
+          };
+        }
+        case 'text': {
+          const cur = ensureRound(state.rounds, evt.round);
+          const idx = cur.blockIndex[evt.block_id];
+          let textBlocks = cur.textBlocks;
+          let textOrder = cur.textOrder;
+          let blockIndex = cur.blockIndex;
+          if (idx === undefined) {
+            const newIdx = textBlocks.length;
+            textBlocks = [...textBlocks, { id: evt.block_id, text: evt.text ?? '' }];
+            textOrder = [...textOrder, evt.block_id];
+            blockIndex = { ...blockIndex, [evt.block_id]: newIdx };
+          } else {
+            textBlocks = textBlocks.slice();
+            textBlocks[idx] = {
+              ...textBlocks[idx],
+              text: textBlocks[idx].text + (evt.text ?? ''),
+            };
+          }
+          return {
+            ...state,
+            currentRound: Math.max(state.currentRound ?? -1, evt.round),
+            rounds: {
+              ...state.rounds,
+              [evt.round]: { ...cur, textBlocks, textOrder, blockIndex },
+            },
+          };
+        }
+        case 'citation': {
+          const num = action.nextCitationNum();
+          return {
+            ...state,
+            citations: [...state.citations, { ...evt, num }],
+          };
+        }
+        case 'round_end': {
+          const cur = ensureRound(state.rounds, evt.round);
+          const updated: RoundState = { ...cur, stop_reason: evt.stop_reason };
+          if (evt.stop_reason === 'end_turn') {
+            return {
+              ...state,
+              rounds: { ...state.rounds, [evt.round]: updated },
+              finalRound: evt.round,
+              currentRound: evt.round,
+            };
+          }
+          // tool_use: move text → notes, drop from rounds, clear currentRound
+          const interim = cur.textOrder
+            .map((id) => cur.textBlocks[cur.blockIndex[id]]?.text ?? '')
+            .join('')
+            .trim();
+          const nextRounds = { ...state.rounds };
+          delete nextRounds[evt.round];
+          return {
+            ...state,
+            rounds: nextRounds,
+            currentRound: null,
+            notes: interim
+              ? [...state.notes, { round: evt.round, text: interim }]
+              : state.notes,
+          };
+        }
+        case 'search_error':
+          return { ...state, error: `Search error (round ${evt.round}): ${evt.message}` };
+        case 'error':
+          return { ...state, error: evt.message ?? 'Unknown error' };
+        case 'done':
+          return { ...state, running: false, embedding: false };
+      }
+    }
+  }
+}
+
+// ---- Hook ----------------------------------------------------------------
+
+export function useSynthesisStream(endpoint: string, anonKey: string) {
+  const [state, dispatch] = useReducer(reducer, INITIAL);
+  const abortRef = useRef<AbortController | null>(null);
+  const citationCounter = useRef(0);
+
+  const ask = useCallback(
+    async (question: string, initialFilter: Record<string, unknown>) => {
+      const v = question.trim();
+      if (!v) return;
+      abortRef.current?.abort();
+      citationCounter.current = 0;
+      dispatch({ kind: 'reset', q: v });
+
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+      try {
+        dispatch({ kind: 'embedding', on: !modelReady() });
+        const emb = await embedQuery(v);
+        dispatch({ kind: 'embedding', on: false });
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: anonKey,
+            Authorization: `Bearer ${anonKey}`,
+          },
+          body: JSON.stringify({ question: v, embedding: emb, initial_filter: initialFilter }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok || !res.body) throw new Error(`Synthesis failed (${res.status})`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const dataLine = frame.split('\n').find((l) => l.startsWith('data:'));
+            if (!dataLine) continue;
+            const payload = dataLine.slice(5).trim();
+            if (!payload) continue;
+            let evt: SynthEvent;
+            try {
+              evt = JSON.parse(payload) as SynthEvent;
+            } catch {
+              continue;
+            }
+            dispatch({
+              kind: 'sse',
+              evt,
+              nextCitationNum: () => ++citationCounter.current,
+            });
+          }
+        }
+      } catch (e: unknown) {
+        const err = e as { name?: string; message?: string };
+        if (err?.name !== 'AbortError') dispatch({ kind: 'error', msg: err?.message ?? String(e) });
+      } finally {
+        dispatch({ kind: 'running', on: false });
+      }
+    },
+    [endpoint, anonKey],
+  );
+
+  const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  return { state, ask, stop };
+}
