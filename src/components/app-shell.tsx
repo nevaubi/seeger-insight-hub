@@ -3,13 +3,13 @@ import { LayoutDashboard, FileText, Search, CalendarDays, Users, Scale } from 'l
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
-const NAV = [
+const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/orders', label: 'Orders Intelligence', icon: FileText },
   { to: '/search', label: 'Ask the Record', icon: Search },
   { to: '/deadlines', label: 'Deadlines & Calendar', icon: CalendarDays },
   { to: '/roster', label: 'Roster & Key Players', icon: Users },
-] as const;
+];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
