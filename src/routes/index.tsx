@@ -102,7 +102,7 @@ function Dashboard() {
                             {d.title}
                           </span>
                           {headline && (
-                            <span className="text-[10px] uppercase tracking-wider bg-accent text-accent-foreground px-1.5 py-0.5 rounded font-semibold">
+                            <span className="text-[10px] uppercase tracking-wider bg-[hsl(38_42%_45%)] text-white px-1.5 py-0.5 rounded-sm font-semibold">
                               Gating event
                             </span>
                           )}

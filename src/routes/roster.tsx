@@ -150,7 +150,7 @@ function CaseRowEl({ c, pinned }: { c: CaseRow; pinned?: boolean }) {
               <div className="text-[10px] uppercase tracking-wider text-primary font-semibold mt-0.5">MDL Master Case</div>
             )}
             {c.on_jpml_schedule_a && !pinned && (
-              <span className="inline-flex items-center gap-1 mt-1 text-[10px] uppercase tracking-wider bg-secondary text-secondary-foreground border border-border text-white px-1.5 py-0.5 rounded font-semibold">
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] uppercase tracking-wider bg-[hsl(150_30%_88%)] text-[hsl(150_50%_22%)] border border-[hsl(150_30%_75%)] px-1.5 py-0.5 rounded font-semibold">
                 <CheckCircle2 className="h-3 w-3" /> Certified transfer
               </span>
             )}
