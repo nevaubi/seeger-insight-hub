@@ -205,7 +205,7 @@ function Composer({
   }, [variant]);
 
   return (
-    <div className={variant === 'hero' ? 'w-full max-w-2xl mx-auto' : 'w-full max-w-3xl mx-auto'}>
+    <div className={variant === 'hero' ? 'w-full max-w-2xl mx-auto' : 'w-full max-w-4xl mx-auto'}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -214,7 +214,7 @@ function Composer({
         className="relative"
       >
         <div
-          className="relative flex items-center bg-card rounded-2xl border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
+          className="relative flex items-center bg-card rounded-lg border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
           style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
         >
           <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -223,7 +223,7 @@ function Composer({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-2xl"
+            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-lg"
           />
           <div className="absolute right-2 flex items-center gap-1">
             {running && onStop && (
@@ -638,39 +638,43 @@ function SynthesisPanel({
       </div>
 
       {/* RIGHT: persistent evidence column */}
-      <div className="lg:flex-[2] lg:h-full lg:overflow-y-auto pr-1 space-y-3 pt-4 pb-6">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
-          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
-        </div>
-        {sortedChunkRefs.map((ref) => {
-          const ch = chunks[ref];
-          if (!ch) return null;
-          const cites = citationsByRef[ref] ?? [];
-          return (
-            <EvidenceCard
-              key={ref}
-              chunk={ch}
-              citations={cites}
-              flash={flashRef === ref}
-              cited={cites.length > 0}
-            />
-          );
-        })}
-        {chunkOrder.length === 0 && running && (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <Card key={i} className="p-4">
-                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                <div className="motion-shimmer h-2 w-4/5 rounded" />
-              </Card>
-            ))}
+      <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0">
+        <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
           </div>
-        )}
-        {chunkOrder.length === 0 && !running && (
-          <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-        )}
+        </div>
+        <div className="flex-1 overflow-y-auto pr-1 space-y-3 pb-6">
+          {sortedChunkRefs.map((ref) => {
+            const ch = chunks[ref];
+            if (!ch) return null;
+            const cites = citationsByRef[ref] ?? [];
+            return (
+              <EvidenceCard
+                key={ref}
+                chunk={ch}
+                citations={cites}
+                flash={flashRef === ref}
+                cited={cites.length > 0}
+              />
+            );
+          })}
+          {chunkOrder.length === 0 && running && (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Card key={i} className="p-4">
+                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-4/5 rounded" />
+                </Card>
+              ))}
+            </div>
+          )}
+          {chunkOrder.length === 0 && !running && (
+            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+          )}
+        </div>
       </div>
     </div>
   );
