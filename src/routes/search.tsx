@@ -638,39 +638,43 @@ function SynthesisPanel({
       </div>
 
       {/* RIGHT: persistent evidence column */}
-      <div className="lg:flex-[2] lg:h-full lg:overflow-y-auto pr-1 space-y-3 pt-4 pb-6">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
-          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
-        </div>
-        {sortedChunkRefs.map((ref) => {
-          const ch = chunks[ref];
-          if (!ch) return null;
-          const cites = citationsByRef[ref] ?? [];
-          return (
-            <EvidenceCard
-              key={ref}
-              chunk={ch}
-              citations={cites}
-              flash={flashRef === ref}
-              cited={cites.length > 0}
-            />
-          );
-        })}
-        {chunkOrder.length === 0 && running && (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <Card key={i} className="p-4">
-                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                <div className="motion-shimmer h-2 w-4/5 rounded" />
-              </Card>
-            ))}
+      <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0">
+        <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
           </div>
-        )}
-        {chunkOrder.length === 0 && !running && (
-          <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-        )}
+        </div>
+        <div className="flex-1 overflow-y-auto pr-1 space-y-3 pb-6">
+          {sortedChunkRefs.map((ref) => {
+            const ch = chunks[ref];
+            if (!ch) return null;
+            const cites = citationsByRef[ref] ?? [];
+            return (
+              <EvidenceCard
+                key={ref}
+                chunk={ch}
+                citations={cites}
+                flash={flashRef === ref}
+                cited={cites.length > 0}
+              />
+            );
+          })}
+          {chunkOrder.length === 0 && running && (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Card key={i} className="p-4">
+                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-4/5 rounded" />
+                </Card>
+              ))}
+            </div>
+          )}
+          {chunkOrder.length === 0 && !running && (
+            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+          )}
+        </div>
       </div>
     </div>
   );
