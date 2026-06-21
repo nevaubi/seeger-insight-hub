@@ -368,6 +368,8 @@ function SynthesisPanel({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [flashRef, setFlashRef] = useState<string | null>(null);
   const reasoningScrollRef = useRef<HTMLDivElement | null>(null);
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
 
   // collapse reasoning + timeline once final answer is done
   useEffect(() => {
@@ -391,12 +393,36 @@ function SynthesisPanel({
     if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
   }, [thinking, reasoningOpen]);
 
+  // Track whether conversation is scrolled near the bottom
+  const handleConversationScroll = useCallback(() => {
+    const el = conversationScrollRef.current;
+    if (!el) return;
+    nearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  // On new query: jump to top, re-enable auto-scroll
+  useEffect(() => {
+    const el = conversationScrollRef.current;
+    if (!el || !submitted) return;
+    el.scrollTop = 0;
+    nearBottomRef.current = true;
+  }, [submitted]);
+
+  // Auto-scroll to bottom as content streams (only if user is near bottom)
+  useEffect(() => {
+    const el = conversationScrollRef.current;
+    if (!el || !nearBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [rounds, citations, searches, chunkOrder, thinking, running]);
+
   const runQuery = useCallback(
     (query: string) => {
       ask(query, buildFilter(filters));
     },
     [ask, filters],
   );
+
 
   const scrollToChunk = useCallback((ref: string) => {
     const el = document.getElementById(`chunk-${ref}`);
