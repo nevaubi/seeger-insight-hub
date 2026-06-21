@@ -205,7 +205,7 @@ function Composer({
   }, [variant]);
 
   return (
-    <div className={variant === 'hero' ? 'w-full max-w-2xl mx-auto' : 'w-full max-w-3xl mx-auto'}>
+    <div className={variant === 'hero' ? 'w-full max-w-2xl mx-auto' : 'w-full max-w-4xl mx-auto'}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -214,7 +214,7 @@ function Composer({
         className="relative"
       >
         <div
-          className="relative flex items-center bg-card rounded-2xl border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
+          className="relative flex items-center bg-card rounded-lg border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
           style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
         >
           <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -223,7 +223,7 @@ function Composer({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-2xl"
+            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-lg"
           />
           <div className="absolute right-2 flex items-center gap-1">
             {running && onStop && (
