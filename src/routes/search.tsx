@@ -638,7 +638,7 @@ function SynthesisPanel({
       </div>
 
       {/* RIGHT: persistent evidence column */}
-      <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0">
+      <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0 overflow-hidden">
         <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
             Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
