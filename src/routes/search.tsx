@@ -368,6 +368,8 @@ function SynthesisPanel({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [flashRef, setFlashRef] = useState<string | null>(null);
   const reasoningScrollRef = useRef<HTMLDivElement | null>(null);
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
 
   // collapse reasoning + timeline once final answer is done
   useEffect(() => {
@@ -391,12 +393,36 @@ function SynthesisPanel({
     if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
   }, [thinking, reasoningOpen]);
 
+  // Track whether conversation is scrolled near the bottom
+  const handleConversationScroll = useCallback(() => {
+    const el = conversationScrollRef.current;
+    if (!el) return;
+    nearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  // On new query: jump to top, re-enable auto-scroll
+  useEffect(() => {
+    const el = conversationScrollRef.current;
+    if (!el || !submitted) return;
+    el.scrollTop = 0;
+    nearBottomRef.current = true;
+  }, [submitted]);
+
+  // Auto-scroll to bottom as content streams (only if user is near bottom)
+  useEffect(() => {
+    const el = conversationScrollRef.current;
+    if (!el || !nearBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [rounds, citations, searches, chunkOrder, thinking, running]);
+
   const runQuery = useCallback(
     (query: string) => {
       ask(query, buildFilter(filters));
     },
     [ask, filters],
   );
+
 
   const scrollToChunk = useCallback((ref: string) => {
     const el = document.getElementById(`chunk-${ref}`);
@@ -521,130 +547,135 @@ function SynthesisPanel({
 
   // ----- ACTIVE / RESTING STATE -----
   return (
-    <div className="px-6 lg:px-10 pb-10">
-      {/* Docked composer */}
-      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 py-4 bg-background/85 backdrop-blur border-b border-border/60 motion-fade-rise">
-        <Composer
-          q={q}
-          setQ={setQ}
-          onSubmit={() => runQuery(q)}
-          running={running}
-          onStop={stop}
-          variant="docked"
-          placeholder="Ask another question…"
-          filters={filters}
-          setFilters={setFilters}
-          filtersOpen={filtersOpen}
-          setFiltersOpen={setFiltersOpen}
-        />
+    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:flex lg:gap-6 lg:overflow-hidden">
+      {/* LEFT: chat pane (conversation scrolls, composer pinned at bottom) */}
+      <div className="lg:flex-[3] min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0">
+        <div
+          ref={conversationScrollRef}
+          onScroll={handleConversationScroll}
+          className="flex-1 overflow-y-auto pr-1 pt-4 pb-6"
+        >
+          <div className="max-w-3xl mx-auto space-y-4">
+            {/* User turn */}
+            {submitted && (
+              <div className="motion-fade-rise">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
+                    You
+                  </div>
+                  <div className="font-serif text-[18px] leading-snug text-foreground">
+                    {submitted}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {embedding && (
+              <div className="text-xs text-muted-foreground inline-flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Preparing semantic model…
+              </div>
+            )}
+            {error && (
+              <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
+                {error}
+              </Card>
+            )}
+
+            <RunCard
+              running={running}
+              searches={searches}
+              notes={notes}
+              currentRound={currentRound}
+              finalRound={finalRound}
+              chunkOrder={chunkOrder}
+              citations={citations}
+              timelineOpen={timelineOpen}
+              setTimelineOpen={setTimelineOpen}
+              reasoningOpen={reasoningOpen}
+              setReasoningOpen={setReasoningOpen}
+              reasoningRounds={reasoningRounds}
+              reasoningScrollRef={reasoningScrollRef}
+            />
+
+            <Card className="p-7 border-border shadow-none motion-fade-rise">
+              <div className="flex items-baseline justify-between mb-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Answer
+                </div>
+              </div>
+              <div className="max-w-[68ch]">
+                <AnswerStream
+                  activeRound={activeRound}
+                  isFinal={isFinalActive}
+                  running={running}
+                  submitted={!!submitted}
+                  citationsByBlock={citationsByBlock}
+                  citationByNum={citationByNum}
+                  onCitationClick={scrollToChunk}
+                />
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        {/* Bottom-pinned composer */}
+        <div className="sticky bottom-0 lg:static border-t border-border/60 bg-background/90 backdrop-blur pt-3 pb-3 z-20">
+          <Composer
+            q={q}
+            setQ={setQ}
+            onSubmit={() => runQuery(q)}
+            running={running}
+            onStop={stop}
+            variant="docked"
+            placeholder="Ask another question…"
+            filters={filters}
+            setFilters={setFilters}
+            filtersOpen={filtersOpen}
+            setFiltersOpen={setFiltersOpen}
+          />
+        </div>
       </div>
 
-      {/* User turn pinned at top */}
-      {submitted && (
-        <div className="max-w-3xl mx-auto pt-6 pb-2 motion-fade-rise">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
-              You
-            </div>
-            <div className="font-serif text-[18px] leading-snug text-foreground">
-              {submitted}
-            </div>
+      {/* RIGHT: persistent evidence column */}
+      <div className="lg:flex-[2] lg:h-full lg:overflow-y-auto pr-1 space-y-3 pt-4 pb-6">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
+          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
+        </div>
+        {sortedChunkRefs.map((ref) => {
+          const ch = chunks[ref];
+          if (!ch) return null;
+          const cites = citationsByRef[ref] ?? [];
+          return (
+            <EvidenceCard
+              key={ref}
+              chunk={ch}
+              citations={cites}
+              flash={flashRef === ref}
+              cited={cites.length > 0}
+            />
+          );
+        })}
+        {chunkOrder.length === 0 && running && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className="p-4">
+                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                <div className="motion-shimmer h-2 w-4/5 rounded" />
+              </Card>
+            ))}
           </div>
-        </div>
-      )}
-
-      {embedding && (
-        <div className="max-w-3xl mx-auto mt-3 text-xs text-muted-foreground inline-flex items-center gap-2">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Preparing semantic model…
-        </div>
-      )}
-      {error && (
-        <div className="max-w-3xl mx-auto mt-3">
-          <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
-            {error}
-          </Card>
-        </div>
-      )}
-
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* LEFT: timeline + answer */}
-        <div className="lg:col-span-3 space-y-4 min-w-0">
-          <RunCard
-            running={running}
-            searches={searches}
-            notes={notes}
-            currentRound={currentRound}
-            finalRound={finalRound}
-            chunkOrder={chunkOrder}
-            citations={citations}
-            timelineOpen={timelineOpen}
-            setTimelineOpen={setTimelineOpen}
-            reasoningOpen={reasoningOpen}
-            setReasoningOpen={setReasoningOpen}
-            reasoningRounds={reasoningRounds}
-            reasoningScrollRef={reasoningScrollRef}
-          />
-
-          <Card className="p-7 border-border shadow-none motion-fade-rise">
-            <div className="flex items-baseline justify-between mb-3">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Answer
-              </div>
-            </div>
-            <div className="max-w-[68ch]">
-              <AnswerStream
-                activeRound={activeRound}
-                isFinal={isFinalActive}
-                running={running}
-                submitted={!!submitted}
-                citationsByBlock={citationsByBlock}
-                citationByNum={citationByNum}
-                onCitationClick={scrollToChunk}
-              />
-            </div>
-          </Card>
-        </div>
-
-        {/* RIGHT: persistent evidence column */}
-        <div className="lg:col-span-2 lg:sticky lg:top-[8.5rem] lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto pr-1 space-y-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
-            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
-          </div>
-          {sortedChunkRefs.map((ref) => {
-            const ch = chunks[ref];
-            if (!ch) return null;
-            const cites = citationsByRef[ref] ?? [];
-            return (
-              <EvidenceCard
-                key={ref}
-                chunk={ch}
-                citations={cites}
-                flash={flashRef === ref}
-                cited={cites.length > 0}
-              />
-            );
-          })}
-          {chunkOrder.length === 0 && running && (
-            <div className="space-y-3">
-              {[0, 1, 2].map((i) => (
-                <Card key={i} className="p-4">
-                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-4/5 rounded" />
-                </Card>
-              ))}
-            </div>
-          )}
-          {chunkOrder.length === 0 && !running && (
-            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-          )}
-        </div>
+        )}
+        {chunkOrder.length === 0 && !running && (
+          <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+        )}
       </div>
     </div>
   );
 }
+
 
 // ----- run card with step timeline -----
 
@@ -1405,8 +1436,141 @@ function BrowsePanel({
   }
 
   return (
-    <div className="px-6 lg:px-10 pb-10">
-      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 py-4 bg-background/85 backdrop-blur border-b border-border/60 motion-fade-rise">
+    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] flex flex-col min-h-[calc(100vh-3.5rem)]">
+      <div className="flex-1 overflow-y-auto pr-1 pt-6 pb-6">
+        <div className="max-w-3xl mx-auto">
+          {search.isPending && embedding && (
+            <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground mb-3">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Preparing semantic model (one-time, ~30MB)…
+            </Card>
+          )}
+
+          {search.isError && (
+            <Card className="p-4 text-sm text-destructive mb-3">
+              Search failed: {(search.error as Error).message}
+            </Card>
+          )}
+
+          {search.data?.notice && (
+            <div className="text-xs text-muted-foreground italic mb-2">{search.data.notice}</div>
+          )}
+
+          {submitted && !search.isPending && search.data && (
+            <div className="text-xs text-muted-foreground mb-3">
+              {search.data.rows.length} passage{search.data.rows.length === 1 ? '' : 's'} for{' '}
+              <span className="font-serif italic text-foreground">"{submitted}"</span>
+            </div>
+          )}
+
+          {search.isPending && (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Card key={i} className="p-4">
+                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-9/12 rounded" />
+                </Card>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {search.data?.rows.map((h) => {
+              const isExpanded = expanded[h.id];
+              const pageCite =
+                h.page_start === h.page_end ? `p.${h.page_start}` : `p.${h.page_start}–${h.page_end}`;
+              return (
+                <Card key={h.id} className="p-4 motion-fade-rise">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {h.order_type ? (
+                      <OrderTypeBadge type={h.order_type} number={h.order_number} />
+                    ) : (
+                      <span className="text-sm font-medium text-foreground">
+                        {h.doc_label ?? 'Document'}
+                      </span>
+                    )}
+                    {h.order_type && h.doc_label && (
+                      <span className="text-sm text-foreground/80">{h.doc_label}</span>
+                    )}
+                    <span className="text-xs text-muted-foreground">· {pageCite}</span>
+                    {h.order_date && (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        · {fmtDate(h.order_date)}
+                      </span>
+                    )}
+                  </div>
+                  {h.section_label && (
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
+                      {h.section_label}
+                    </div>
+                  )}
+                  <p
+                    className={`mt-2 text-[14px] leading-relaxed font-serif text-foreground/90 whitespace-pre-wrap ${
+                      isExpanded ? '' : 'line-clamp-6'
+                    }`}
+                  >
+                    {h.content}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((s) => ({ ...s, [h.id]: !s[h.id] }))}
+                    className="mt-1 text-xs text-accent hover:underline"
+                  >
+                    {isExpanded ? 'Show less' : 'Show more'}
+                  </button>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-foreground">
+                    <span className="tabular-nums">score {h.score.toFixed(3)}</span>
+                    {h.vec_hit && (
+                      <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                        semantic
+                      </span>
+                    )}
+                    {h.lex_hit && (
+                      <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                        keyword
+                      </span>
+                    )}
+                    {h.affects && (
+                      <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                        affects: {h.affects}
+                      </span>
+                    )}
+                    {h.has_deadline && (
+                      <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                        deadline
+                      </span>
+                    )}
+                    {h.pdf_url && (
+                      <a
+                        href={h.pdf_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3" /> View source PDF ↗
+                      </a>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+
+            {submitted && !search.isPending && search.data && search.data.rows.length === 0 && (
+              <Card className="p-8 text-center">
+                <div className="text-sm text-muted-foreground">No passages matched "{submitted}".</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Try broader phrasing or remove filters.
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom-pinned composer */}
+      <div className="sticky bottom-0 lg:static border-t border-border/60 bg-background/90 backdrop-blur pt-3 pb-3 z-20">
         <Composer
           q={q}
           setQ={setQ}
@@ -1420,136 +1584,7 @@ function BrowsePanel({
           setFiltersOpen={setFiltersOpen}
         />
       </div>
-
-      <div className="max-w-3xl mx-auto pt-6">
-        {search.isPending && embedding && (
-          <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground mb-3">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Preparing semantic model (one-time, ~30MB)…
-          </Card>
-        )}
-
-        {search.isError && (
-          <Card className="p-4 text-sm text-destructive mb-3">
-            Search failed: {(search.error as Error).message}
-          </Card>
-        )}
-
-        {search.data?.notice && (
-          <div className="text-xs text-muted-foreground italic mb-2">{search.data.notice}</div>
-        )}
-
-        {submitted && !search.isPending && search.data && (
-          <div className="text-xs text-muted-foreground mb-3">
-            {search.data.rows.length} passage{search.data.rows.length === 1 ? '' : 's'} for{' '}
-            <span className="font-serif italic text-foreground">"{submitted}"</span>
-          </div>
-        )}
-
-        {search.isPending && (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
-              <Card key={i} className="p-4">
-                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                <div className="motion-shimmer h-2 w-9/12 rounded" />
-              </Card>
-            ))}
-          </div>
-        )}
-
-        <div className="space-y-3">
-          {search.data?.rows.map((h) => {
-            const isExpanded = expanded[h.id];
-            const pageCite =
-              h.page_start === h.page_end ? `p.${h.page_start}` : `p.${h.page_start}–${h.page_end}`;
-            return (
-              <Card key={h.id} className="p-4 motion-fade-rise">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {h.order_type ? (
-                    <OrderTypeBadge type={h.order_type} number={h.order_number} />
-                  ) : (
-                    <span className="text-sm font-medium text-foreground">
-                      {h.doc_label ?? 'Document'}
-                    </span>
-                  )}
-                  {h.order_type && h.doc_label && (
-                    <span className="text-sm text-foreground/80">{h.doc_label}</span>
-                  )}
-                  <span className="text-xs text-muted-foreground">· {pageCite}</span>
-                  {h.order_date && (
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      · {fmtDate(h.order_date)}
-                    </span>
-                  )}
-                </div>
-                {h.section_label && (
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
-                    {h.section_label}
-                  </div>
-                )}
-                <p
-                  className={`mt-2 text-[14px] leading-relaxed font-serif text-foreground/90 whitespace-pre-wrap ${
-                    isExpanded ? '' : 'line-clamp-6'
-                  }`}
-                >
-                  {h.content}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setExpanded((s) => ({ ...s, [h.id]: !s[h.id] }))}
-                  className="mt-1 text-xs text-accent hover:underline"
-                >
-                  {isExpanded ? 'Show less' : 'Show more'}
-                </button>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-foreground">
-                  <span className="tabular-nums">score {h.score.toFixed(3)}</span>
-                  {h.vec_hit && (
-                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                      semantic
-                    </span>
-                  )}
-                  {h.lex_hit && (
-                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                      keyword
-                    </span>
-                  )}
-                  {h.affects && (
-                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                      affects: {h.affects}
-                    </span>
-                  )}
-                  {h.has_deadline && (
-                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                      deadline
-                    </span>
-                  )}
-                  {h.pdf_url && (
-                    <a
-                      href={h.pdf_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" /> View source PDF ↗
-                    </a>
-                  )}
-                </div>
-              </Card>
-            );
-          })}
-
-          {submitted && !search.isPending && search.data && search.data.rows.length === 0 && (
-            <Card className="p-8 text-center">
-              <div className="text-sm text-muted-foreground">No passages matched "{submitted}".</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Try broader phrasing or remove filters.
-              </div>
-            </Card>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
+
