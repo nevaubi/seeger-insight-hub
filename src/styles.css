@@ -128,3 +128,74 @@
     border-radius: 2px;
   }
 }
+
+/* Motion foundation — shared keyframes & utilities. */
+:root {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 200ms;
+  --dur-base: 300ms;
+  --dur-slow: 500ms;
+}
+
+@keyframes fade-rise {
+  0%   { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer-sweep {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.92); }
+}
+@keyframes flash-ring {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 70%, transparent); }
+  60%  { box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent) 25%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+}
+@keyframes caret-blink {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0.15; }
+}
+
+@utility motion-fade-rise {
+  animation: fade-rise var(--dur-base) var(--ease-out-soft) both;
+}
+@utility motion-pulse-soft {
+  animation: pulse-soft 1.6s var(--ease-out-soft) infinite;
+}
+@utility motion-flash-ring {
+  animation: flash-ring 1.6s var(--ease-out-soft) 1;
+}
+@utility motion-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--muted) 60%, transparent) 0%,
+    color-mix(in oklab, var(--muted) 30%, transparent) 50%,
+    color-mix(in oklab, var(--muted) 60%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.6s linear infinite;
+}
+@utility motion-stream-caret {
+  display: inline-block;
+  width: 0.45ch;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.12em;
+  background: color-mix(in oklab, var(--accent) 75%, transparent);
+  border-radius: 1px;
+  animation: caret-blink 1.05s steps(2, end) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-fade-rise,
+  .motion-pulse-soft,
+  .motion-flash-ring,
+  .motion-shimmer,
+  .motion-stream-caret {
+    animation: none !important;
+  }
+  .motion-fade-rise { opacity: 1; transform: none; }
+}

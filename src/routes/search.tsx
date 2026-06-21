@@ -22,14 +22,17 @@ import {
   ChevronRight,
   BookOpen,
   Brain,
+  ArrowUp,
+  Check,
+  PenLine,
+  SlidersHorizontal,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AppShell, PageHeader } from '@/components/app-shell';
+import { AppShell } from '@/components/app-shell';
 import { OrderTypeBadge, fmtDate } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   supabase,
@@ -43,7 +46,9 @@ import {
   type Chunk,
   type CitationEvt,
   type RoundState,
+  type SearchEvt,
 } from '@/lib/useSynthesisStream';
+import { useSmoothText } from '@/lib/useSmoothText';
 
 const EXAMPLES_SYNTH = [
   'What must plaintiffs do to establish proof of Depo-Provera use, and by when?',
@@ -95,41 +100,47 @@ function buildFilter(f: Filters) {
   return out;
 }
 
+const DEFAULT_FILTERS: Filters = {
+  orderType: 'Any',
+  affects: 'Any',
+  hasDeadline: false,
+  dateFrom: '',
+  dateTo: '',
+};
+
+function filtersActive(f: Filters): number {
+  let n = 0;
+  if (f.orderType !== 'Any') n++;
+  if (f.affects !== 'Any') n++;
+  if (f.hasDeadline) n++;
+  if (f.dateFrom) n++;
+  if (f.dateTo) n++;
+  return n;
+}
+
 // ----- top-level page -----
 
 function AskTheRecord() {
   const [mode, setMode] = useState<'synth' | 'browse'>('synth');
   const [q, setQ] = useState('');
-  const [filters, setFilters] = useState<Filters>({
-    orderType: 'Any',
-    affects: 'Any',
-    hasDeadline: false,
-    dateFrom: '',
-    dateTo: '',
-  });
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
   return (
     <AppShell>
-      <PageHeader
-        title="Ask the Record"
-        description="Ask in plain English. The assistant searches every controlling order on the docket and answers with grounded, page-level citations."
-      />
-      <div className="px-8 py-6 space-y-5">
-        <div className="flex items-center gap-1 text-xs">
-          <ModeButton active={mode === 'synth'} onClick={() => setMode('synth')}>
-            <Brain className="h-3 w-3" /> Ask (synthesized answer)
-          </ModeButton>
-          <ModeButton active={mode === 'browse'} onClick={() => setMode('browse')}>
-            <BookOpen className="h-3 w-3" /> Browse passages
-          </ModeButton>
-        </div>
-
-        {mode === 'synth' ? (
-          <SynthesisPanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
-        ) : (
-          <BrowsePanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
-        )}
+      <div className="px-6 lg:px-10 pt-6 pb-2 flex items-center gap-1 text-xs">
+        <ModeButton active={mode === 'synth'} onClick={() => setMode('synth')}>
+          <Brain className="h-3 w-3" /> Ask the record
+        </ModeButton>
+        <ModeButton active={mode === 'browse'} onClick={() => setMode('browse')}>
+          <BookOpen className="h-3 w-3" /> Browse passages
+        </ModeButton>
       </div>
+
+      {mode === 'synth' ? (
+        <SynthesisPanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
+      ) : (
+        <BrowsePanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
+      )}
     </AppShell>
   );
 }
@@ -147,102 +158,177 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`px-3 py-1.5 rounded-full border inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-[background-color,border-color,color] duration-200 ${
         active
           ? 'bg-accent text-accent-foreground border-accent'
           : 'border-border bg-secondary/60 text-foreground/80 hover:border-accent/60'
       }`}
+      style={{ transitionTimingFunction: 'var(--ease-out-soft)' }}
     >
       {children}
     </button>
   );
 }
 
-// ----- filter bar (input + filters) -----
+// ----- shared composer (hero or docked) -----
 
-function FilterBar({
-  value,
-  onChange,
+function Composer({
   q,
   setQ,
-  mode,
+  onSubmit,
+  running,
+  onStop,
+  variant,
+  placeholder,
+  filters,
+  setFilters,
+  filtersOpen,
+  setFiltersOpen,
 }: {
-  value: Filters;
-  onChange: (f: Filters) => void;
   q: string;
   setQ: (s: string) => void;
-  mode: 'synth' | 'browse';
+  onSubmit: () => void;
+  running?: boolean;
+  onStop?: () => void;
+  variant: 'hero' | 'docked';
+  placeholder: string;
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  filtersOpen: boolean;
+  setFiltersOpen: (v: boolean) => void;
 }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const activeFilterCount = filtersActive(filters);
+
+  useEffect(() => {
+    if (variant === 'hero') inputRef.current?.focus();
+  }, [variant]);
+
+  return (
+    <div className={variant === 'hero' ? 'w-full max-w-2xl mx-auto' : 'w-full max-w-3xl mx-auto'}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+        className="relative"
+      >
+        <div
+          className="relative flex items-center bg-card rounded-2xl border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
+          style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
+        >
+          <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={placeholder}
+            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-2xl"
+          />
+          <div className="absolute right-2 flex items-center gap-1">
+            {running && onStop && (
+              <button
+                type="button"
+                onClick={onStop}
+                className="h-9 px-3 text-xs rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              >
+                Stop
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={!q.trim() || running}
+              aria-label="Ask the record"
+              className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-accent text-accent-foreground hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition"
+            >
+              {running ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex items-center justify-between px-1">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(!filtersOpen)}
+            className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {filtersOpen ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            <SlidersHorizontal className="h-3 w-3" /> Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-accent/15 text-accent text-[10px] tabular-nums">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {filtersOpen && (
+          <div className="mt-2 motion-fade-rise">
+            <FilterControls value={filters} onChange={setFilters} />
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
+function FilterControls({ value, onChange }: { value: Filters; onChange: (f: Filters) => void }) {
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => onChange({ ...value, [k]: v });
   return (
-    <div className="space-y-4">
-      <div className="relative">
-        <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={
-            mode === 'synth'
-              ? 'Ask the record in plain English…'
-              : 'Search the record (keywords or natural language)…'
-          }
-          className="pl-9 h-11 text-base bg-background"
-          autoFocus
+    <div className="flex flex-wrap items-end gap-3 text-xs p-3 rounded-lg border border-border bg-secondary/30">
+      <label className="flex flex-col gap-1">
+        <span className="uppercase tracking-wider text-muted-foreground text-[10px]">Order type</span>
+        <select
+          value={value.orderType}
+          onChange={(e) => set('orderType', e.target.value)}
+          className="h-8 rounded border border-border bg-background px-2 text-foreground"
+        >
+          {ORDER_TYPES.map((o) => <option key={o}>{o}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="uppercase tracking-wider text-muted-foreground text-[10px]">Affects</span>
+        <select
+          value={value.affects}
+          onChange={(e) => set('affects', e.target.value)}
+          className="h-8 rounded border border-border bg-background px-2 text-foreground"
+        >
+          {AFFECTS.map((o) => <option key={o}>{o}</option>)}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="uppercase tracking-wider text-muted-foreground text-[10px]">From</span>
+        <input
+          type="date"
+          value={value.dateFrom}
+          onChange={(e) => set('dateFrom', e.target.value)}
+          className="h-8 rounded border border-border bg-background px-2 text-foreground"
         />
-      </div>
-      <div className="flex flex-wrap items-end gap-3 text-xs">
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">
-            Order type
-          </span>
-          <select
-            value={value.orderType}
-            onChange={(e) => set('orderType', e.target.value)}
-            className="h-8 rounded border border-border bg-background px-2 text-foreground"
-          >
-            {ORDER_TYPES.map((o) => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">Affects</span>
-          <select
-            value={value.affects}
-            onChange={(e) => set('affects', e.target.value)}
-            className="h-8 rounded border border-border bg-background px-2 text-foreground"
-          >
-            {AFFECTS.map((o) => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">From</span>
-          <input
-            type="date"
-            value={value.dateFrom}
-            onChange={(e) => set('dateFrom', e.target.value)}
-            className="h-8 rounded border border-border bg-background px-2 text-foreground"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wider text-muted-foreground text-[10px]">To</span>
-          <input
-            type="date"
-            value={value.dateTo}
-            onChange={(e) => set('dateTo', e.target.value)}
-            className="h-8 rounded border border-border bg-background px-2 text-foreground"
-          />
-        </label>
-        <label className="flex items-center gap-2 h-8">
-          <Checkbox
-            checked={value.hasDeadline}
-            onCheckedChange={(v) => set('hasDeadline', v === true)}
-          />
-          <span className="text-foreground/80">Has a deadline</span>
-        </label>
-      </div>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="uppercase tracking-wider text-muted-foreground text-[10px]">To</span>
+        <input
+          type="date"
+          value={value.dateTo}
+          onChange={(e) => set('dateTo', e.target.value)}
+          className="h-8 rounded border border-border bg-background px-2 text-foreground"
+        />
+      </label>
+      <label className="flex items-center gap-2 h-8">
+        <Checkbox
+          checked={value.hasDeadline}
+          onCheckedChange={(v) => set('hasDeadline', v === true)}
+        />
+        <span className="text-foreground/80">Has a deadline</span>
+      </label>
     </div>
   );
 }
@@ -278,20 +364,28 @@ function SynthesisPanel({
   } = state;
 
   const [reasoningOpen, setReasoningOpen] = useState(true);
+  const [timelineOpen, setTimelineOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [flashRef, setFlashRef] = useState<string | null>(null);
   const reasoningScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // collapse reasoning once we have a final answer & stream is done
+  // collapse reasoning + timeline once final answer is done
   useEffect(() => {
-    if (!running && finalRound != null) setReasoningOpen(false);
+    if (!running && finalRound != null) {
+      setReasoningOpen(false);
+      setTimelineOpen(false);
+    }
   }, [running, finalRound]);
 
   // open reasoning at start of a new query
   useEffect(() => {
-    if (running) setReasoningOpen(true);
+    if (running) {
+      setReasoningOpen(true);
+      setTimelineOpen(true);
+    }
   }, [submitted, running]);
 
-  // auto-scroll the reasoning panel as new thinking streams in
+  // auto-scroll reasoning panel as new thinking streams
   useEffect(() => {
     const el = reasoningScrollRef.current;
     if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
@@ -304,11 +398,6 @@ function SynthesisPanel({
     [ask, filters],
   );
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    runQuery(q);
-  };
-
   const scrollToChunk = useCallback((ref: string) => {
     const el = document.getElementById(`chunk-${ref}`);
     if (!el) return;
@@ -317,14 +406,12 @@ function SynthesisPanel({
     setTimeout(() => setFlashRef((cur) => (cur === ref ? null : cur)), 1600);
   }, []);
 
-  // citations grouped by chunk ref (for highlighting sentences in evidence)
   const citationsByRef = useMemo(() => {
     const m: Record<string, CitationEvt[]> = {};
     for (const c of citations) (m[c.ref] ??= []).push(c);
     return m;
   }, [citations]);
 
-  // citations grouped by block id (only those that belong to final round)
   const citationsByBlock = useMemo(() => {
     const m: Record<string, CitationEvt[]> = {};
     if (finalRound == null) return m;
@@ -353,7 +440,6 @@ function SynthesisPanel({
     return m;
   }, [citations]);
 
-  // active (currently rendering) round state
   const activeRound: RoundState | undefined =
     currentRound != null ? rounds[currentRound] : undefined;
   const isFinalActive = currentRound != null && currentRound === finalRound;
@@ -367,206 +453,462 @@ function SynthesisPanel({
     [thinking],
   );
 
-  return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <Card className="p-5">
-        <FilterBar value={filters} onChange={setFilters} q={q} setQ={setQ} mode="synth" />
-      </Card>
+  // ----- LAUNCHER STATE -----
+  if (!submitted && !running) {
+    return (
+      <div className="px-6 lg:px-10 pb-10">
+        <div className="min-h-[calc(100vh-12rem)] flex flex-col items-center justify-center">
+          <div className="w-full max-w-2xl text-center mb-8">
+            <h1 className="font-serif text-[40px] leading-[1.1] tracking-[-0.02em] text-foreground">
+              Ask the record
+            </h1>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Plain-English questions, grounded in every controlling order on the docket — answered with page-level citations.
+            </p>
+          </div>
 
-      <div className="flex gap-2">
-        <Button
-          type="submit"
-          disabled={running || !q.trim()}
-          className="h-10 px-5 bg-accent text-accent-foreground hover:bg-accent/90"
-        >
-          {running ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Researching…
-            </>
-          ) : (
-            'Ask the record'
+          <Composer
+            q={q}
+            setQ={setQ}
+            onSubmit={() => runQuery(q)}
+            variant="hero"
+            placeholder="Ask the record in plain English…"
+            filters={filters}
+            setFilters={setFilters}
+            filtersOpen={filtersOpen}
+            setFiltersOpen={setFiltersOpen}
+          />
+
+          <div className="mt-8 w-full max-w-2xl">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
+              <Sparkles className="h-3 w-3" /> Try a question
+            </div>
+            <div className="flex flex-col gap-2">
+              {EXAMPLES_SYNTH.map((ex, i) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => {
+                    setQ(ex);
+                    runQuery(ex);
+                  }}
+                  className="motion-fade-rise text-left text-[14px] font-serif italic px-4 py-2.5 rounded-xl border border-border bg-card/60 text-foreground/85 hover:border-accent/60 hover:text-foreground hover:-translate-y-px transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  style={{
+                    animationDelay: `${i * 60}ms`,
+                    transitionDuration: 'var(--dur-fast)',
+                    transitionTimingFunction: 'var(--ease-out-soft)',
+                  }}
+                >
+                  “{ex}”
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {embedding && (
+            <div className="mt-6 text-xs text-muted-foreground inline-flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Preparing semantic model (one-time, ~30MB)…
+            </div>
           )}
-        </Button>
-        {running && (
-          <Button type="button" variant="outline" className="h-10" onClick={stop}>
-            Stop
-          </Button>
-        )}
+          {error && (
+            <div className="mt-6 text-sm text-destructive">{error}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ----- ACTIVE / RESTING STATE -----
+  return (
+    <div className="px-6 lg:px-10 pb-10">
+      {/* Docked composer */}
+      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 py-4 bg-background/85 backdrop-blur border-b border-border/60 motion-fade-rise">
+        <Composer
+          q={q}
+          setQ={setQ}
+          onSubmit={() => runQuery(q)}
+          running={running}
+          onStop={stop}
+          variant="docked"
+          placeholder="Ask another question…"
+          filters={filters}
+          setFilters={setFilters}
+          filtersOpen={filtersOpen}
+          setFiltersOpen={setFiltersOpen}
+        />
       </div>
 
-      {embedding && (
-        <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Preparing semantic model (one-time, ~30MB)…
-        </Card>
-      )}
-
-      {error && (
-        <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
-          {error}
-        </Card>
-      )}
-
-      {!submitted && !running && (
-        <Card className="p-6">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3" /> Try a question
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {EXAMPLES_SYNTH.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                onClick={() => {
-                  setQ(ex);
-                  runQuery(ex);
-                }}
-                className="text-left text-sm font-serif px-3 py-2 rounded border border-border bg-secondary/40 hover:bg-accent hover:text-accent-foreground hover:border-accent transition-colors max-w-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                {ex}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
-
+      {/* User turn pinned at top */}
       {submitted && (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-start">
-          {/* LEFT: Apparatus (small) + Answer (primary) */}
-          <div className="lg:col-span-3 space-y-4 min-w-0">
-            {/* Reasoning — capped, scroll-locked, secondary */}
-            {reasoningRounds.length > 0 && (
-              <Card className="p-0 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setReasoningOpen((x) => !x)}
-                  className="w-full px-4 py-2 flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  {reasoningOpen ? (
-                    <ChevronDown className="h-3.5 w-3.5" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  )}
-                  <Brain className="h-3.5 w-3.5" /> How the assistant searched
-                </button>
-                {reasoningOpen && (
-                  <div
-                    ref={reasoningScrollRef}
-                    className="px-4 pb-3 pt-1 border-t border-border max-h-[13rem] overflow-y-auto bg-secondary/20"
-                  >
-                    {reasoningRounds.map(({ round, text }) => (
-                      <div key={round} className="pt-2">
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                          Round {round}
-                        </div>
-                        <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/70">
-                          {text}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {/* Research trace — compact, one line per search */}
-            {(searches.length > 0 || notes.length > 0) && (
-              <Card className="p-4">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-                  Research trace
-                </div>
-                <ol className="space-y-1.5">
-                  {searches.map((s, i) => (
-                    <li key={i} className="text-xs flex flex-wrap items-center gap-2 leading-snug">
-                      <span className="font-mono text-muted-foreground tabular-nums">
-                        {String(i + 1).padStart(2, '0')}
-                      </span>
-                      {s.keywords && (
-                        <span className="font-serif italic text-foreground">
-                          “{s.keywords}”
-                        </span>
-                      )}
-                      {Object.entries(s.filter ?? {}).map(([k, v]) => (
-                        <span
-                          key={k}
-                          className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-[10px]"
-                        >
-                          {k}: {String(v)}
-                        </span>
-                      ))}
-                      <span className="text-muted-foreground ml-auto tabular-nums">
-                        {s.count !== undefined ? `${s.count} passages` : `k=${s.k}`}
-                      </span>
-                    </li>
-                  ))}
-                  {notes.map((n) => (
-                    <li
-                      key={`note-${n.round}`}
-                      className="text-[11px] text-muted-foreground/80 italic border-l-2 border-border pl-2 mt-1"
-                    >
-                      Round {n.round} note: {truncate(n.text, 240)}
-                    </li>
-                  ))}
-                </ol>
-              </Card>
-            )}
-
-            {/* Answer — primary card */}
-            <Card className="p-7 shadow-sm border-accent/20">
-              <div className="flex items-baseline justify-between mb-3">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Answer
-                </div>
-                {running && (
-                  <div className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    {currentRound != null && !isFinalActive
-                      ? 'Searching the record…'
-                      : 'Streaming…'}
-                  </div>
-                )}
-              </div>
-              <div className="max-w-[68ch]">
-                <AnswerStream
-                  activeRound={activeRound}
-                  isFinal={isFinalActive}
-                  running={running}
-                  submitted={!!submitted}
-                  citationsByBlock={citationsByBlock}
-                  citationByNum={citationByNum}
-                  onCitationClick={scrollToChunk}
-                />
-              </div>
-            </Card>
-          </div>
-
-          {/* RIGHT: Evidence column — sticky, self-scrolling on lg */}
-          <div className="lg:col-span-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto pr-1 space-y-3">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
-              Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
+        <div className="max-w-3xl mx-auto pt-6 pb-2 motion-fade-rise">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
+              You
             </div>
-            {sortedChunkRefs.map((ref) => {
-              const ch = chunks[ref];
-              if (!ch) return null;
-              const cites = citationsByRef[ref] ?? [];
-              return (
-                <EvidenceCard
-                  key={ref}
-                  chunk={ch}
-                  citations={cites}
-                  flash={flashRef === ref}
-                  cited={cites.length > 0}
-                />
-              );
-            })}
-            {chunkOrder.length === 0 && !running && (
-              <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-            )}
+            <div className="font-serif text-[18px] leading-snug text-foreground">
+              {submitted}
+            </div>
           </div>
         </div>
       )}
-    </form>
+
+      {embedding && (
+        <div className="max-w-3xl mx-auto mt-3 text-xs text-muted-foreground inline-flex items-center gap-2">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Preparing semantic model…
+        </div>
+      )}
+      {error && (
+        <div className="max-w-3xl mx-auto mt-3">
+          <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
+            {error}
+          </Card>
+        </div>
+      )}
+
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+        {/* LEFT: timeline + answer */}
+        <div className="lg:col-span-3 space-y-4 min-w-0">
+          <RunCard
+            running={running}
+            searches={searches}
+            notes={notes}
+            currentRound={currentRound}
+            finalRound={finalRound}
+            chunkOrder={chunkOrder}
+            citations={citations}
+            timelineOpen={timelineOpen}
+            setTimelineOpen={setTimelineOpen}
+            reasoningOpen={reasoningOpen}
+            setReasoningOpen={setReasoningOpen}
+            reasoningRounds={reasoningRounds}
+            reasoningScrollRef={reasoningScrollRef}
+          />
+
+          <Card className="p-7 border-border shadow-none motion-fade-rise">
+            <div className="flex items-baseline justify-between mb-3">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                Answer
+              </div>
+            </div>
+            <div className="max-w-[68ch]">
+              <AnswerStream
+                activeRound={activeRound}
+                isFinal={isFinalActive}
+                running={running}
+                submitted={!!submitted}
+                citationsByBlock={citationsByBlock}
+                citationByNum={citationByNum}
+                onCitationClick={scrollToChunk}
+              />
+            </div>
+          </Card>
+        </div>
+
+        {/* RIGHT: persistent evidence column */}
+        <div className="lg:col-span-2 lg:sticky lg:top-[8.5rem] lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto pr-1 space-y-3">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
+            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
+          </div>
+          {sortedChunkRefs.map((ref) => {
+            const ch = chunks[ref];
+            if (!ch) return null;
+            const cites = citationsByRef[ref] ?? [];
+            return (
+              <EvidenceCard
+                key={ref}
+                chunk={ch}
+                citations={cites}
+                flash={flashRef === ref}
+                cited={cites.length > 0}
+              />
+            );
+          })}
+          {chunkOrder.length === 0 && running && (
+            <div className="space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Card key={i} className="p-4">
+                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                  <div className="motion-shimmer h-2 w-4/5 rounded" />
+                </Card>
+              ))}
+            </div>
+          )}
+          {chunkOrder.length === 0 && !running && (
+            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----- run card with step timeline -----
+
+function RunCard({
+  running,
+  searches,
+  notes,
+  currentRound,
+  finalRound,
+  chunkOrder,
+  citations,
+  timelineOpen,
+  setTimelineOpen,
+  reasoningOpen,
+  setReasoningOpen,
+  reasoningRounds,
+  reasoningScrollRef,
+}: {
+  running: boolean;
+  searches: SearchEvt[];
+  notes: { round: number; text: string }[];
+  currentRound: number | null;
+  finalRound: number | null;
+  chunkOrder: string[];
+  citations: CitationEvt[];
+  timelineOpen: boolean;
+  setTimelineOpen: (v: boolean) => void;
+  reasoningOpen: boolean;
+  setReasoningOpen: (v: boolean) => void;
+  reasoningRounds: { round: number; text: string }[];
+  reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
+}) {
+  const done = !running && finalRound != null;
+  const writerActive = currentRound != null && currentRound === finalRound && running;
+  const writerDone = finalRound != null && !running;
+
+  // Steps: one per search + a final "Writing the answer" step
+  const steps = useMemo(() => {
+    type Step =
+      | {
+          kind: 'search';
+          idx: number;
+          search: SearchEvt;
+          status: 'active' | 'done';
+        }
+      | { kind: 'writer'; status: 'pending' | 'active' | 'done' };
+
+    const out: Step[] = searches.map((s, i) => {
+      const isLast = i === searches.length - 1;
+      const stillSearching = running && !writerActive && isLast;
+      return {
+        kind: 'search',
+        idx: i,
+        search: s,
+        status: stillSearching ? 'active' : 'done',
+      };
+    });
+    out.push({
+      kind: 'writer',
+      status: writerDone ? 'done' : writerActive ? 'active' : 'pending',
+    });
+    return out;
+  }, [searches, running, writerActive, writerDone]);
+
+  // Collapsed summary line when done
+  if (done && !timelineOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setTimelineOpen(true)}
+        className="w-full text-left px-4 py-2.5 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors inline-flex items-center gap-2 text-xs text-muted-foreground motion-fade-rise"
+      >
+        <ChevronRight className="h-3.5 w-3.5" />
+        <Check className="h-3.5 w-3.5 text-accent" />
+        <span>
+          Searched {searches.length}× · {chunkOrder.length} passages · {citations.length} citations
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <Card className="p-0 overflow-hidden motion-fade-rise">
+      <button
+        type="button"
+        onClick={() => setTimelineOpen(!timelineOpen)}
+        className="w-full px-4 py-3 flex items-center gap-2 hover:bg-secondary/40 transition-colors"
+      >
+        {timelineOpen ? (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+        <Sparkles className={`h-3.5 w-3.5 ${running ? 'text-accent' : 'text-muted-foreground'}`} />
+        <span className="text-[12px] font-medium text-foreground">
+          {running ? 'Researching the record' : 'Research complete'}
+        </span>
+        {running && (
+          <span className="ml-2 text-[11px] text-muted-foreground tabular-nums">
+            {searches.length} search{searches.length === 1 ? '' : 'es'} · {chunkOrder.length} passages
+          </span>
+        )}
+      </button>
+
+      {timelineOpen && (
+        <div className="px-5 pb-4 pt-1 border-t border-border">
+          <ol className="relative pl-5">
+            {/* vertical rail */}
+            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
+            {steps.map((s, i) => (
+              <li
+                key={i}
+                className="relative py-2 motion-fade-rise"
+                style={{ animationDelay: `${i * 40}ms` }}
+              >
+                <span
+                  className={`absolute -left-[14px] top-[14px] h-2.5 w-2.5 rounded-full ring-2 ring-background ${
+                    s.status === 'active'
+                      ? 'bg-accent motion-pulse-soft'
+                      : s.status === 'done'
+                      ? 'bg-accent'
+                      : 'bg-muted-foreground/30'
+                  }`}
+                  aria-hidden
+                />
+                {s.kind === 'search' ? (
+                  <SearchStepRow search={s.search} index={s.idx} status={s.status} />
+                ) : (
+                  <WriterStepRow status={s.status} citations={citations.length} />
+                )}
+              </li>
+            ))}
+          </ol>
+
+          {notes.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-border/50">
+              {notes.map((n) => (
+                <div
+                  key={`note-${n.round}`}
+                  className="text-[11px] text-muted-foreground/80 italic pl-1 py-0.5"
+                >
+                  Round {n.round} note: {truncate(n.text, 240)}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {reasoningRounds.length > 0 && (
+            <div className="mt-3 rounded-md border border-border/70 bg-secondary/20">
+              <button
+                type="button"
+                onClick={() => setReasoningOpen(!reasoningOpen)}
+                className="w-full px-3 py-1.5 flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {reasoningOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <Brain className="h-3 w-3" /> Show reasoning
+              </button>
+              {reasoningOpen && (
+                <div
+                  ref={reasoningScrollRef}
+                  className="px-3 pb-2 pt-1 border-t border-border/60 max-h-[13rem] overflow-y-auto"
+                >
+                  {reasoningRounds.map(({ round, text }) => (
+                    <div key={round} className="pt-2">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
+                        Round {round}
+                      </div>
+                      <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/70">
+                        {text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SearchStepRow({
+  search,
+  index,
+  status,
+}: {
+  search: SearchEvt;
+  index: number;
+  status: 'active' | 'done';
+}) {
+  const label = search.keywords
+    ? `“${search.keywords}”`
+    : 'Searching the record';
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5">
+          Step {index + 1} · Search
+        </div>
+        <div className={`font-serif italic text-[14px] text-foreground/90 ${status === 'active' ? '' : ''}`}>
+          {label}
+        </div>
+        {Object.keys(search.filter ?? {}).length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {Object.entries(search.filter).map(([k, v]) => (
+              <span
+                key={k}
+                className="px-1.5 py-0.5 rounded border border-border bg-secondary/50 text-[10px] text-muted-foreground"
+              >
+                {k}: {String(v)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
+        {search.count !== undefined ? (
+          `${search.count} passage${search.count === 1 ? '' : 's'}`
+        ) : status === 'active' ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-1 w-12 rounded motion-shimmer" />
+          </span>
+        ) : (
+          `k=${search.k}`
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WriterStepRow({
+  status,
+  citations,
+}: {
+  status: 'pending' | 'active' | 'done';
+  citations: number;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5">
+          Final · Write
+        </div>
+        <div className="font-serif italic text-[14px] text-foreground/90 inline-flex items-center gap-1.5">
+          <PenLine className="h-3.5 w-3.5 text-muted-foreground" />
+          {status === 'done'
+            ? 'Answer complete'
+            : status === 'active'
+            ? 'Writing the answer'
+            : 'Writing the answer'}
+        </div>
+      </div>
+      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
+        {status === 'done' && `${citations} citation${citations === 1 ? '' : 's'}`}
+        {status === 'active' && (
+          <span className="inline-block h-1 w-12 rounded motion-shimmer" />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -574,7 +916,7 @@ function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
 }
 
-// ----- Answer rendering: concatenate blocks + inline citation chips -----
+// ----- Answer rendering -----
 
 const CITE_SENTINEL_RE = /⟦cite:([\d,]+)⟧/g;
 
@@ -595,8 +937,7 @@ function AnswerStream({
   citationByNum: Map<number, CitationEvt>;
   onCitationClick: (ref: string) => void;
 }) {
-  // Build markdown string. Append sentinels only when round is final.
-  const markdown = useMemo(() => {
+  const fullMarkdown = useMemo(() => {
     if (!activeRound) return '';
     const parts: string[] = [];
     for (const id of activeRound.textOrder) {
@@ -608,14 +949,16 @@ function AnswerStream({
         const cites = citationsByBlock[id];
         if (cites && cites.length) {
           const nums = cites.map((c) => c.num).join(',');
-          // Insert a sentinel attached to the trailing word of this block
-          // (no leading newline so it stays inline).
           parts.push(`\u00A0⟦cite:${nums}⟧`);
         }
       }
     }
     return parts.join('');
   }, [activeRound, isFinal, citationsByBlock]);
+
+  // Smooth-stream the raw markdown (sentinels pass through untouched).
+  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 550);
+  const markdown = running && isFinal ? smoothMarkdown : fullMarkdown;
 
   const components: Components = useMemo(() => {
     const transform = (children: ReactNode): ReactNode =>
@@ -687,9 +1030,10 @@ function AnswerStream({
 
   if (!activeRound && running) {
     return (
-      <div className="text-sm text-muted-foreground inline-flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Researching the record…
+      <div className="space-y-2">
+        <div className="motion-shimmer h-3 w-11/12 rounded" />
+        <div className="motion-shimmer h-3 w-10/12 rounded" />
+        <div className="motion-shimmer h-3 w-9/12 rounded" />
       </div>
     );
   }
@@ -703,6 +1047,7 @@ function AnswerStream({
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {markdown}
       </ReactMarkdown>
+      {running && isFinal && <span className="motion-stream-caret" aria-hidden />}
     </div>
   );
 }
@@ -731,9 +1076,6 @@ function CitationChip({
   );
 }
 
-// Walk react-markdown's children, splitting any text node on the cite sentinel
-// and replacing matches with inline citation chips. Recurses into elements so
-// citations embedded inside <strong>, <em>, <a>, etc. still render correctly.
 function transformWithCitations(
   children: ReactNode,
   citationByNum: Map<number, CitationEvt>,
@@ -748,7 +1090,6 @@ function transformWithCitations(
         if (p.kind === 'text') {
           if (p.value) out.push(p.value);
         } else {
-          // chip group
           const group: ReactNode[] = [];
           for (const n of p.nums) {
             group.push(
@@ -802,7 +1143,7 @@ function splitOnSentinel(
   return result;
 }
 
-// ----- evidence card (synthesis mode) -----
+// ----- evidence card -----
 
 const EvidenceCard = memo(function EvidenceCard({
   chunk,
@@ -833,9 +1174,10 @@ const EvidenceCard = memo(function EvidenceCard({
   return (
     <Card
       id={`chunk-${chunk.ref}`}
-      className={`p-4 transition-all ${cited ? 'border-l-[3px] border-l-accent' : ''} ${
-        flash ? 'ring-2 ring-accent shadow-md' : ''
-      }`}
+      className={`p-4 motion-fade-rise transition-shadow ${
+        cited ? 'border-l-[3px] border-l-accent' : ''
+      } ${flash ? 'motion-flash-ring' : ''}`}
+      style={{ transitionDuration: 'var(--dur-base)' }}
     >
       <div className="flex items-center gap-2 flex-wrap">
         {chunk.order_type ? (
@@ -962,6 +1304,7 @@ function BrowsePanel({
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [embedding, setEmbedding] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const search = useMutation<{ rows: HybridHit[]; notice?: string }, Error, string>({
     mutationFn: async (query) => {
@@ -1015,157 +1358,198 @@ function BrowsePanel({
     search.mutate(v);
   };
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    run(q);
-  };
+  // Launcher state for browse
+  if (!submitted) {
+    return (
+      <div className="px-6 lg:px-10 pb-10">
+        <div className="min-h-[calc(100vh-12rem)] flex flex-col items-center justify-center">
+          <div className="w-full max-w-2xl text-center mb-8">
+            <h1 className="font-serif text-[40px] leading-[1.1] tracking-[-0.02em] text-foreground">
+              Browse the record
+            </h1>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Keyword and semantic search across every page of every controlling order.
+            </p>
+          </div>
+          <Composer
+            q={q}
+            setQ={setQ}
+            onSubmit={() => run(q)}
+            variant="hero"
+            placeholder="Search the record (keywords or natural language)…"
+            filters={filters}
+            setFilters={setFilters}
+            filtersOpen={filtersOpen}
+            setFiltersOpen={setFiltersOpen}
+          />
+          <div className="mt-8 w-full max-w-2xl">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
+              <Sparkles className="h-3 w-3" /> Try
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {EXAMPLES_BROWSE.map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => run(ex)}
+                  className="motion-fade-rise text-xs px-3 py-1.5 rounded-full border border-border bg-card/60 text-foreground/80 hover:border-accent/60 hover:text-foreground transition-colors"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <Card className="p-5">
-        <FilterBar value={filters} onChange={setFilters} q={q} setQ={setQ} mode="browse" />
-      </Card>
-
-      <div className="flex gap-2">
-        <Button
-          type="submit"
-          disabled={search.isPending || !q.trim()}
-          className="h-10 px-5 bg-accent text-accent-foreground hover:bg-accent/90"
-        >
-          {search.isPending ? 'Searching…' : 'Browse passages'}
-        </Button>
+    <div className="px-6 lg:px-10 pb-10">
+      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 py-4 bg-background/85 backdrop-blur border-b border-border/60 motion-fade-rise">
+        <Composer
+          q={q}
+          setQ={setQ}
+          onSubmit={() => run(q)}
+          running={search.isPending}
+          variant="docked"
+          placeholder="Search the record…"
+          filters={filters}
+          setFilters={setFilters}
+          filtersOpen={filtersOpen}
+          setFiltersOpen={setFiltersOpen}
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3" /> Try
-        </span>
-        {EXAMPLES_BROWSE.map((ex) => (
-          <button
-            key={ex}
-            type="button"
-            onClick={() => run(ex)}
-            className="text-xs px-2.5 py-1 rounded-full border border-border bg-secondary/60 text-foreground/80 hover:bg-accent hover:text-accent-foreground hover:border-accent transition-colors"
-          >
-            {ex}
-          </button>
-        ))}
-      </div>
-
-      {search.isPending && embedding && (
-        <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Preparing semantic model (one-time, ~30MB)…
-        </Card>
-      )}
-
-      {search.isError && (
-        <Card className="p-4 text-sm text-destructive">
-          Search failed: {(search.error as Error).message}
-        </Card>
-      )}
-
-      {search.data?.notice && (
-        <div className="text-xs text-muted-foreground italic">{search.data.notice}</div>
-      )}
-
-      {submitted && !search.isPending && search.data && (
-        <div className="text-xs text-muted-foreground">
-          {search.data.rows.length} passage{search.data.rows.length === 1 ? '' : 's'} for{' '}
-          <span className="font-serif italic text-foreground">"{submitted}"</span>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {search.data?.rows.map((h) => {
-          const isExpanded = expanded[h.id];
-          const pageCite =
-            h.page_start === h.page_end ? `p.${h.page_start}` : `p.${h.page_start}–${h.page_end}`;
-          return (
-            <Card key={h.id} className="p-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                {h.order_type ? (
-                  <OrderTypeBadge type={h.order_type} number={h.order_number} />
-                ) : (
-                  <span className="text-sm font-medium text-foreground">
-                    {h.doc_label ?? 'Document'}
-                  </span>
-                )}
-                {h.order_type && h.doc_label && (
-                  <span className="text-sm text-foreground/80">{h.doc_label}</span>
-                )}
-                <span className="text-xs text-muted-foreground">· {pageCite}</span>
-                {h.order_date && (
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    · {fmtDate(h.order_date)}
-                  </span>
-                )}
-              </div>
-              {h.section_label && (
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
-                  {h.section_label}
-                </div>
-              )}
-              <p
-                className={`mt-2 text-[14px] leading-relaxed font-serif text-foreground/90 whitespace-pre-wrap ${
-                  isExpanded ? '' : 'line-clamp-6'
-                }`}
-              >
-                {h.content}
-              </p>
-              <button
-                type="button"
-                onClick={() => setExpanded((s) => ({ ...s, [h.id]: !s[h.id] }))}
-                className="mt-1 text-xs text-accent hover:underline"
-              >
-                {isExpanded ? 'Show less' : 'Show more'}
-              </button>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-foreground">
-                <span className="tabular-nums">score {h.score.toFixed(3)}</span>
-                {h.vec_hit && (
-                  <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                    semantic
-                  </span>
-                )}
-                {h.lex_hit && (
-                  <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                    keyword
-                  </span>
-                )}
-                {h.affects && (
-                  <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                    affects: {h.affects}
-                  </span>
-                )}
-                {h.has_deadline && (
-                  <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
-                    deadline
-                  </span>
-                )}
-                {h.pdf_url && (
-                  <a
-                    href={h.pdf_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
-                  >
-                    <ExternalLink className="h-3 w-3" /> View source PDF ↗
-                  </a>
-                )}
-              </div>
-            </Card>
-          );
-        })}
-
-        {submitted && !search.isPending && search.data && search.data.rows.length === 0 && (
-          <Card className="p-8 text-center">
-            <div className="text-sm text-muted-foreground">No passages matched "{submitted}".</div>
-            <div className="text-xs text-muted-foreground mt-1">
-              Try broader phrasing or remove filters.
-            </div>
+      <div className="max-w-3xl mx-auto pt-6">
+        {search.isPending && embedding && (
+          <Card className="p-4 flex items-center gap-2 text-sm text-muted-foreground mb-3">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Preparing semantic model (one-time, ~30MB)…
           </Card>
         )}
+
+        {search.isError && (
+          <Card className="p-4 text-sm text-destructive mb-3">
+            Search failed: {(search.error as Error).message}
+          </Card>
+        )}
+
+        {search.data?.notice && (
+          <div className="text-xs text-muted-foreground italic mb-2">{search.data.notice}</div>
+        )}
+
+        {submitted && !search.isPending && search.data && (
+          <div className="text-xs text-muted-foreground mb-3">
+            {search.data.rows.length} passage{search.data.rows.length === 1 ? '' : 's'} for{' '}
+            <span className="font-serif italic text-foreground">"{submitted}"</span>
+          </div>
+        )}
+
+        {search.isPending && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className="p-4">
+                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                <div className="motion-shimmer h-2 w-9/12 rounded" />
+              </Card>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {search.data?.rows.map((h) => {
+            const isExpanded = expanded[h.id];
+            const pageCite =
+              h.page_start === h.page_end ? `p.${h.page_start}` : `p.${h.page_start}–${h.page_end}`;
+            return (
+              <Card key={h.id} className="p-4 motion-fade-rise">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {h.order_type ? (
+                    <OrderTypeBadge type={h.order_type} number={h.order_number} />
+                  ) : (
+                    <span className="text-sm font-medium text-foreground">
+                      {h.doc_label ?? 'Document'}
+                    </span>
+                  )}
+                  {h.order_type && h.doc_label && (
+                    <span className="text-sm text-foreground/80">{h.doc_label}</span>
+                  )}
+                  <span className="text-xs text-muted-foreground">· {pageCite}</span>
+                  {h.order_date && (
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      · {fmtDate(h.order_date)}
+                    </span>
+                  )}
+                </div>
+                {h.section_label && (
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
+                    {h.section_label}
+                  </div>
+                )}
+                <p
+                  className={`mt-2 text-[14px] leading-relaxed font-serif text-foreground/90 whitespace-pre-wrap ${
+                    isExpanded ? '' : 'line-clamp-6'
+                  }`}
+                >
+                  {h.content}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((s) => ({ ...s, [h.id]: !s[h.id] }))}
+                  className="mt-1 text-xs text-accent hover:underline"
+                >
+                  {isExpanded ? 'Show less' : 'Show more'}
+                </button>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-foreground">
+                  <span className="tabular-nums">score {h.score.toFixed(3)}</span>
+                  {h.vec_hit && (
+                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                      semantic
+                    </span>
+                  )}
+                  {h.lex_hit && (
+                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                      keyword
+                    </span>
+                  )}
+                  {h.affects && (
+                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                      affects: {h.affects}
+                    </span>
+                  )}
+                  {h.has_deadline && (
+                    <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60">
+                      deadline
+                    </span>
+                  )}
+                  {h.pdf_url && (
+                    <a
+                      href={h.pdf_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" /> View source PDF ↗
+                    </a>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+
+          {submitted && !search.isPending && search.data && search.data.rows.length === 0 && (
+            <Card className="p-8 text-center">
+              <div className="text-sm text-muted-foreground">No passages matched "{submitted}".</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Try broader phrasing or remove filters.
+              </div>
+            </Card>
+          )}
+        </div>
       </div>
-    </form>
+    </div>
   );
 }
