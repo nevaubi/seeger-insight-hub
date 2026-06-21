@@ -32,7 +32,7 @@ import remarkGfm from 'remark-gfm';
 import { AppShell } from '@/components/app-shell';
 import { OrderTypeBadge, fmtDate } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   supabase,
