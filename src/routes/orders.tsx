@@ -87,90 +87,92 @@ function OrdersPage() {
         description="All controlling orders from the docket — PTOs, CMOs, CBOs, and JPML orders, with tags and full source text."
       />
 
-      <div className="px-8 py-6 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[260px] max-w-md">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Filter by title…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              className="pl-9 bg-card"
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setTypeFilter(null)}
-              className={cn(
-                'text-xs px-2.5 py-1 rounded border',
-                typeFilter === null ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-foreground/70 hover:bg-muted',
-              )}
-            >
-              All types
-            </button>
-            {ORDER_TYPES.map((t) => (
+      <div className="px-8 py-6 space-y-5">
+        <Card className="p-4 space-y-4 motion-safe:motion-fade-rise">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[260px] max-w-md">
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Filter by title…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                className="pl-9 bg-background"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
               <button
-                key={t}
-                onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+                onClick={() => setTypeFilter(null)}
                 className={cn(
-                  'text-xs px-2.5 py-1 rounded border font-semibold tracking-wider',
-                  typeFilter === t ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-foreground/70 hover:bg-muted',
+                  'text-xs px-2.5 py-1.5 rounded border transition-colors font-sans',
+                  typeFilter === null ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border text-foreground/70 hover:bg-muted',
                 )}
               >
-                {t}
+                All types
               </button>
-            ))}
-          </div>
-          <div className="text-xs text-muted-foreground ml-auto">
-            {filtered.length} of {orders.length} orders
-          </div>
-        </div>
-
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Tags</div>
-          <div className="flex flex-wrap gap-1.5">
-            {allTags.map((t) => {
-              const active = tagFilters.has(t);
-              return (
+              {ORDER_TYPES.map((t) => (
                 <button
                   key={t}
-                  onClick={() => {
-                    const next = new Set(tagFilters);
-                    if (active) next.delete(t);
-                    else next.add(t);
-                    setTagFilters(next);
-                  }}
+                  onClick={() => setTypeFilter(typeFilter === t ? null : t)}
                   className={cn(
-                    'text-[11px] px-2 py-0.5 rounded border transition-colors',
-                    active
-                      ? 'bg-accent text-accent-foreground border-accent'
-                      : 'bg-card border-border text-foreground/70 hover:bg-muted',
+                    'text-xs px-2.5 py-1.5 rounded border font-semibold tracking-[0.08em] transition-colors',
+                    typeFilter === t ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-border text-foreground/70 hover:bg-muted',
                   )}
                 >
-                  {TAG_LABELS[t] ?? tagLabel(t)}
+                  {t}
                 </button>
-              );
-            })}
-            {tagFilters.size > 0 && (
-              <button
-                onClick={() => setTagFilters(new Set())}
-                className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted inline-flex items-center gap-1"
-              >
-                <X className="h-3 w-3" /> Clear
-              </button>
-            )}
+              ))}
+            </div>
+            <div className="text-[11px] text-muted-foreground ml-auto font-sans tabular-nums">
+              {filtered.length} of {orders.length} orders
+            </div>
           </div>
-        </div>
 
-        <Card className="p-0 overflow-hidden">
+          <div className="pt-3 border-t border-border">
+            <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground mb-2 font-sans">Filter by tag</div>
+            <div className="flex flex-wrap gap-1.5">
+              {allTags.map((t) => {
+                const active = tagFilters.has(t);
+                return (
+                  <button
+                    key={t}
+                    onClick={() => {
+                      const next = new Set(tagFilters);
+                      if (active) next.delete(t);
+                      else next.add(t);
+                      setTagFilters(next);
+                    }}
+                    className={cn(
+                      'text-[11px] px-2 py-0.5 rounded border transition-colors',
+                      active
+                        ? 'bg-accent text-accent-foreground border-accent'
+                        : 'bg-background border-border text-foreground/70 hover:bg-muted',
+                    )}
+                  >
+                    {TAG_LABELS[t] ?? tagLabel(t)}
+                  </button>
+                );
+              })}
+              {tagFilters.size > 0 && (
+                <button
+                  onClick={() => setTagFilters(new Set())}
+                  className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted inline-flex items-center gap-1"
+                >
+                  <X className="h-3 w-3" /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-0 overflow-hidden motion-safe:motion-fade-rise">
           <table className="w-full text-sm">
-            <thead className="bg-secondary/60 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-secondary/60 text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
               <tr>
-                <th className="text-left px-4 py-2.5 font-medium w-28">Order</th>
-                <th className="text-left px-4 py-2.5 font-medium">Title</th>
-                <th className="text-left px-4 py-2.5 font-medium w-[26%]">Tags</th>
-                <th className="text-right px-4 py-2.5 font-medium w-24">Date</th>
-                <th className="text-right px-4 py-2.5 font-medium w-16">Pages</th>
+                <th className="text-left px-4 py-3 font-semibold w-28">Order</th>
+                <th className="text-left px-4 py-3 font-semibold">Title</th>
+                <th className="text-left px-4 py-3 font-semibold w-[26%]">Tags</th>
+                <th className="text-right px-4 py-3 font-semibold w-24">Date</th>
+                <th className="text-right px-4 py-3 font-semibold w-16">Pages</th>
               </tr>
             </thead>
             <tbody>
@@ -178,22 +180,22 @@ function OrdersPage() {
                 <tr
                   key={o.id}
                   onClick={() => navigate({ to: '/orders', search: { id: o.id } })}
-                  className="border-t border-border hover:bg-muted/40 cursor-pointer"
+                  className="border-t border-border hover:bg-muted/50 cursor-pointer transition-colors"
                 >
-                  <td className="px-4 py-3 align-top">
+                  <td className="px-4 py-4 align-top">
                     <OrderTypeBadge type={o.order_type} number={o.order_number} />
                   </td>
-                  <td className="px-4 py-3 align-top">
-                    <div className="font-medium text-foreground">{o.canonical_title}</div>
+                  <td className="px-4 py-4 align-top">
+                    <div className="font-medium text-foreground leading-snug">{o.canonical_title}</div>
                     {o.summary && (
-                      <div className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{o.summary}</div>
+                      <div className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">{o.summary}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3 align-top"><TagChips tags={o.tags} max={4} /></td>
-                  <td className="px-4 py-3 align-top text-right text-muted-foreground tabular-nums">
+                  <td className="px-4 py-4 align-top"><TagChips tags={o.tags} max={4} /></td>
+                  <td className="px-4 py-4 align-top text-right text-muted-foreground tabular-nums font-sans text-xs">
                     {fmtDate(o.order_date)}
                   </td>
-                  <td className="px-4 py-3 align-top text-right text-muted-foreground tabular-nums">
+                  <td className="px-4 py-4 align-top text-right text-muted-foreground tabular-nums font-sans text-xs">
                     {o.page_count ?? '—'}
                   </td>
                 </tr>
