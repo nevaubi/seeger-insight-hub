@@ -547,130 +547,135 @@ function SynthesisPanel({
 
   // ----- ACTIVE / RESTING STATE -----
   return (
-    <div className="px-6 lg:px-10 pb-10">
-      {/* Docked composer */}
-      <div className="sticky top-0 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 py-4 bg-background/85 backdrop-blur border-b border-border/60 motion-fade-rise">
-        <Composer
-          q={q}
-          setQ={setQ}
-          onSubmit={() => runQuery(q)}
-          running={running}
-          onStop={stop}
-          variant="docked"
-          placeholder="Ask another question…"
-          filters={filters}
-          setFilters={setFilters}
-          filtersOpen={filtersOpen}
-          setFiltersOpen={setFiltersOpen}
-        />
+    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:flex lg:gap-6 lg:overflow-hidden">
+      {/* LEFT: chat pane (conversation scrolls, composer pinned at bottom) */}
+      <div className="lg:flex-[3] min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0">
+        <div
+          ref={conversationScrollRef}
+          onScroll={handleConversationScroll}
+          className="flex-1 overflow-y-auto pr-1 pt-4 pb-6"
+        >
+          <div className="max-w-3xl mx-auto space-y-4">
+            {/* User turn */}
+            {submitted && (
+              <div className="motion-fade-rise">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
+                    You
+                  </div>
+                  <div className="font-serif text-[18px] leading-snug text-foreground">
+                    {submitted}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {embedding && (
+              <div className="text-xs text-muted-foreground inline-flex items-center gap-2">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Preparing semantic model…
+              </div>
+            )}
+            {error && (
+              <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
+                {error}
+              </Card>
+            )}
+
+            <RunCard
+              running={running}
+              searches={searches}
+              notes={notes}
+              currentRound={currentRound}
+              finalRound={finalRound}
+              chunkOrder={chunkOrder}
+              citations={citations}
+              timelineOpen={timelineOpen}
+              setTimelineOpen={setTimelineOpen}
+              reasoningOpen={reasoningOpen}
+              setReasoningOpen={setReasoningOpen}
+              reasoningRounds={reasoningRounds}
+              reasoningScrollRef={reasoningScrollRef}
+            />
+
+            <Card className="p-7 border-border shadow-none motion-fade-rise">
+              <div className="flex items-baseline justify-between mb-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Answer
+                </div>
+              </div>
+              <div className="max-w-[68ch]">
+                <AnswerStream
+                  activeRound={activeRound}
+                  isFinal={isFinalActive}
+                  running={running}
+                  submitted={!!submitted}
+                  citationsByBlock={citationsByBlock}
+                  citationByNum={citationByNum}
+                  onCitationClick={scrollToChunk}
+                />
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        {/* Bottom-pinned composer */}
+        <div className="sticky bottom-0 lg:static border-t border-border/60 bg-background/90 backdrop-blur pt-3 pb-3 z-20">
+          <Composer
+            q={q}
+            setQ={setQ}
+            onSubmit={() => runQuery(q)}
+            running={running}
+            onStop={stop}
+            variant="docked"
+            placeholder="Ask another question…"
+            filters={filters}
+            setFilters={setFilters}
+            filtersOpen={filtersOpen}
+            setFiltersOpen={setFiltersOpen}
+          />
+        </div>
       </div>
 
-      {/* User turn pinned at top */}
-      {submitted && (
-        <div className="max-w-3xl mx-auto pt-6 pb-2 motion-fade-rise">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
-              You
-            </div>
-            <div className="font-serif text-[18px] leading-snug text-foreground">
-              {submitted}
-            </div>
+      {/* RIGHT: persistent evidence column */}
+      <div className="lg:flex-[2] lg:h-full lg:overflow-y-auto pr-1 space-y-3 pt-4 pb-6">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
+          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
+        </div>
+        {sortedChunkRefs.map((ref) => {
+          const ch = chunks[ref];
+          if (!ch) return null;
+          const cites = citationsByRef[ref] ?? [];
+          return (
+            <EvidenceCard
+              key={ref}
+              chunk={ch}
+              citations={cites}
+              flash={flashRef === ref}
+              cited={cites.length > 0}
+            />
+          );
+        })}
+        {chunkOrder.length === 0 && running && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className="p-4">
+                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                <div className="motion-shimmer h-2 w-4/5 rounded" />
+              </Card>
+            ))}
           </div>
-        </div>
-      )}
-
-      {embedding && (
-        <div className="max-w-3xl mx-auto mt-3 text-xs text-muted-foreground inline-flex items-center gap-2">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Preparing semantic model…
-        </div>
-      )}
-      {error && (
-        <div className="max-w-3xl mx-auto mt-3">
-          <Card className="p-4 text-sm border-destructive/40 bg-destructive/5 text-destructive">
-            {error}
-          </Card>
-        </div>
-      )}
-
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* LEFT: timeline + answer */}
-        <div className="lg:col-span-3 space-y-4 min-w-0">
-          <RunCard
-            running={running}
-            searches={searches}
-            notes={notes}
-            currentRound={currentRound}
-            finalRound={finalRound}
-            chunkOrder={chunkOrder}
-            citations={citations}
-            timelineOpen={timelineOpen}
-            setTimelineOpen={setTimelineOpen}
-            reasoningOpen={reasoningOpen}
-            setReasoningOpen={setReasoningOpen}
-            reasoningRounds={reasoningRounds}
-            reasoningScrollRef={reasoningScrollRef}
-          />
-
-          <Card className="p-7 border-border shadow-none motion-fade-rise">
-            <div className="flex items-baseline justify-between mb-3">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                Answer
-              </div>
-            </div>
-            <div className="max-w-[68ch]">
-              <AnswerStream
-                activeRound={activeRound}
-                isFinal={isFinalActive}
-                running={running}
-                submitted={!!submitted}
-                citationsByBlock={citationsByBlock}
-                citationByNum={citationByNum}
-                onCitationClick={scrollToChunk}
-              />
-            </div>
-          </Card>
-        </div>
-
-        {/* RIGHT: persistent evidence column */}
-        <div className="lg:col-span-2 lg:sticky lg:top-[8.5rem] lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto pr-1 space-y-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-1 sticky top-0 bg-background/95 backdrop-blur py-1 z-10">
-            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
-          </div>
-          {sortedChunkRefs.map((ref) => {
-            const ch = chunks[ref];
-            if (!ch) return null;
-            const cites = citationsByRef[ref] ?? [];
-            return (
-              <EvidenceCard
-                key={ref}
-                chunk={ch}
-                citations={cites}
-                flash={flashRef === ref}
-                cited={cites.length > 0}
-              />
-            );
-          })}
-          {chunkOrder.length === 0 && running && (
-            <div className="space-y-3">
-              {[0, 1, 2].map((i) => (
-                <Card key={i} className="p-4">
-                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-4/5 rounded" />
-                </Card>
-              ))}
-            </div>
-          )}
-          {chunkOrder.length === 0 && !running && (
-            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-          )}
-        </div>
+        )}
+        {chunkOrder.length === 0 && !running && (
+          <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+        )}
       </div>
     </div>
   );
 }
+
 
 // ----- run card with step timeline -----
 
