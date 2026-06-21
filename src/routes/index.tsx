@@ -60,22 +60,28 @@ function Dashboard() {
         description="MDL No. 3140 · U.S. District Court, Northern District of Florida, Pensacola Division · Hon. M. Casey Rodgers · Mag. Judge Hope T. Cannon"
       />
 
-      <div className="px-8 py-6 space-y-8">
+      <div className="px-8 py-6 space-y-10">
         {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <StatCard icon={Gavel} label="Controlling orders" value={data.counts.orders} />
-          <StatCard icon={FileText} label="Cases in roster" value={data.counts.cases} />
-          <StatCard icon={CheckCircle2} label="Certified JPML transfers" value={data.counts.jpml} />
-          <StatCard icon={Users} label="Counsel of record" value={data.counts.counsel} />
-          <StatCard icon={Building2} label="Distinct firms" value={data.counts.firms} />
-        </div>
+        <section className="motion-safe:motion-fade-rise">
+          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground mb-2.5 font-sans">At a glance</div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <StatCard icon={Gavel} label="Controlling orders" value={data.counts.orders} />
+            <StatCard icon={FileText} label="Cases in roster" value={data.counts.cases} />
+            <StatCard icon={CheckCircle2} label="Certified JPML transfers" value={data.counts.jpml} />
+            <StatCard icon={Users} label="Counsel of record" value={data.counts.counsel} />
+            <StatCard icon={Building2} label="Distinct firms" value={data.counts.firms} />
+          </div>
+        </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 motion-safe:motion-fade-rise">
           {/* Upcoming */}
           <Card className="lg:col-span-2 p-0 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between">
-              <h2 className="font-serif text-lg font-semibold">Next critical dates</h2>
-              <span className="text-xs text-muted-foreground">From the record</span>
+            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+              <div>
+                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Calendar</div>
+                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Next critical dates</h2>
+              </div>
+              <span className="text-[11px] text-muted-foreground font-sans">From the record</span>
             </div>
             {data.upcoming.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">No upcoming events on record.</div>
@@ -86,15 +92,15 @@ function Dashboard() {
                   return (
                     <li
                       key={d.id}
-                      className={`px-5 py-3.5 flex gap-4 items-start ${
+                      className={`px-5 py-4 flex gap-5 items-start ${
                         headline ? 'bg-[hsl(38_42%_45%/0.08)] border-l-2 border-l-[hsl(38_42%_45%)]' : ''
                       }`}
                     >
-                      <div className="w-28 shrink-0">
-                        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                      <div className="w-32 shrink-0">
+                        <div className="text-xs font-sans text-foreground/80 font-medium tabular-nums">
                           {fmtDateRange(d.event_date, d.end_date)}
                         </div>
-                        <div className="mt-1"><CategoryBadge category={d.category} /></div>
+                        <div className="mt-1.5"><CategoryBadge category={d.category} /></div>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -113,10 +119,10 @@ function Dashboard() {
                           )}
                         </div>
                         {d.affects && (
-                          <div className="text-xs text-muted-foreground mt-0.5">Affects: {d.affects}</div>
+                          <div className="text-xs text-muted-foreground mt-1">Affects: {d.affects}</div>
                         )}
                         {d.citation && (
-                          <div className="text-[11px] text-muted-foreground mt-1 italic font-serif">
+                          <div className="text-[11px] text-muted-foreground mt-1.5 italic font-serif">
                             {d.is_conflicted ? <span className="not-italic font-sans text-amber-800">Conflict cite: </span> : 'Source: '}
                             {d.citation}
                           </div>
@@ -130,9 +136,10 @@ function Dashboard() {
           </Card>
 
           {/* Strategic posture */}
-          <Card className="p-5">
-            <h2 className="font-serif text-lg font-semibold">Strategic posture</h2>
-            <div className="mt-3 text-sm leading-relaxed text-foreground/85 space-y-3 font-serif">
+          <Card className="p-5 bg-secondary/40">
+            <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Context</div>
+            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Strategic posture</h2>
+            <div className="mt-4 text-sm leading-relaxed text-foreground/85 space-y-3 font-serif">
               <p>
                 The MDL is in <strong>pretrial</strong>, with general-causation discovery
                 ongoing. Plaintiffs allege long-term use of Depo-Provera (depot
@@ -144,46 +151,51 @@ function Dashboard() {
                 the gating event — its outcome will materially determine the trajectory
                 of the entire MDL.
               </p>
-              <p className="text-xs text-muted-foreground font-sans not-italic">
+              <p className="text-xs text-muted-foreground font-sans not-italic pt-1 border-t border-border">
                 Defendants: Pfizer, Pharmacia &amp; Upjohn, Pharmacia LLC, Greenstone
                 LLC, Viatris Inc., Prasco LLC.
               </p>
             </div>
           </Card>
-        </div>
+        </section>
 
         {/* Recent orders */}
-        <Card className="p-0 overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between">
-            <h2 className="font-serif text-lg font-semibold">Recent orders</h2>
-            <button
-              onClick={() => navigate({ to: '/orders' })}
-              className="text-xs text-accent hover:underline inline-flex items-center gap-1"
-            >
-              All orders <ArrowRight className="h-3 w-3" />
-            </button>
-          </div>
-          <ul className="divide-y divide-border">
-            {data.recent.map((o) => (
-              <li
-                key={o.id}
-                onClick={() => navigate({ to: '/orders', search: { id: o.id } as any })}
-                className="px-5 py-3 flex items-start gap-4 hover:bg-muted/50 cursor-pointer transition-colors"
+        <section className="motion-safe:motion-fade-rise">
+          <Card className="p-0 overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+              <div>
+                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Docket activity</div>
+                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Recent orders</h2>
+              </div>
+              <button
+                onClick={() => navigate({ to: '/orders' })}
+                className="text-xs text-accent hover:underline inline-flex items-center gap-1 font-sans"
               >
-                <div className="shrink-0 pt-0.5">
-                  <OrderTypeBadge type={o.order_type} number={o.order_number} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-foreground truncate">{o.canonical_title}</div>
-                  <div className="mt-1"><TagChips tags={o.tags} max={5} /></div>
-                </div>
-                <div className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                  {fmtDate(o.order_date)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
+                All orders <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+            <ul className="divide-y divide-border">
+              {data.recent.map((o) => (
+                <li
+                  key={o.id}
+                  onClick={() => navigate({ to: '/orders', search: { id: o.id } as any })}
+                  className="px-5 py-3.5 flex items-start gap-4 hover:bg-muted/50 cursor-pointer transition-colors"
+                >
+                  <div className="shrink-0 pt-0.5 w-24">
+                    <OrderTypeBadge type={o.order_type} number={o.order_number} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-foreground truncate">{o.canonical_title}</div>
+                    <div className="mt-1.5"><TagChips tags={o.tags} max={5} /></div>
+                  </div>
+                  <div className="text-xs text-muted-foreground shrink-0 tabular-nums font-sans pt-0.5">
+                    {fmtDate(o.order_date)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
       </div>
     </AppShell>
   );
@@ -191,12 +203,12 @@ function Dashboard() {
 
 function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <Icon className="h-4 w-4 text-muted-foreground/60" strokeWidth={1.5} />
+    <Card className="p-4 hover:border-foreground/15 transition-colors">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans leading-snug">{label}</div>
+        <Icon className="h-4 w-4 text-muted-foreground/60 shrink-0" strokeWidth={1.5} />
       </div>
-      <div className="mt-2 font-serif text-3xl font-semibold tabular-nums">{value.toLocaleString()}</div>
+      <div className="mt-3 font-serif text-3xl font-semibold tabular-nums tracking-[-0.02em]">{value.toLocaleString()}</div>
     </Card>
   );
 }

@@ -59,8 +59,8 @@ function RosterPage() {
             <TabsTrigger value="cases">Cases</TabsTrigger>
             <TabsTrigger value="counsel">Counsel & Firms</TabsTrigger>
           </TabsList>
-          <TabsContent value="cases" className="mt-4"><CasesTab /></TabsContent>
-          <TabsContent value="counsel" className="mt-4"><CounselTab /></TabsContent>
+          <TabsContent value="cases" className="mt-5"><CasesTab /></TabsContent>
+          <TabsContent value="counsel" className="mt-5"><CounselTab /></TabsContent>
         </Tabs>
       </div>
     </AppShell>
@@ -88,80 +88,96 @@ function CasesTab() {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <label className="text-xs uppercase tracking-wider text-muted-foreground">Court</label>
-          <select
-            value={courtFilter}
-            onChange={(e) => setCourtFilter(e.target.value)}
-            className="h-9 rounded-md border border-border bg-card px-2 text-sm"
-          >
-            <option value="all">All courts</option>
-            {courts.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div className="flex items-center gap-2.5 text-sm">
-          <Switch checked={certifiedOnly} onCheckedChange={setCertifiedOnly} id="cert" />
-          <label htmlFor="cert" className="text-muted-foreground cursor-pointer">Certified JPML transfers only</label>
-        </div>
-        <div className="ml-auto text-xs text-muted-foreground">
-          {master.length + filteredRest.length} cases
-        </div>
-      </div>
+    <div className="space-y-8">
+      {master.length > 0 && (
+        <section className="motion-safe:motion-fade-rise">
+          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground mb-2.5 font-sans px-1">MDL master case</div>
+          <Card className="p-5 bg-secondary/50 border-l-2 border-l-primary">
+            {master.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+                <div className="flex items-center gap-2">
+                  <Star className="h-3.5 w-3.5 text-primary" fill="currentColor" />
+                  <div className="font-serif text-lg font-semibold tracking-[-0.01em]">{c.case_name}</div>
+                </div>
+                <div className="text-xs text-muted-foreground font-sans tabular-nums">{c.docket_number ?? '—'}</div>
+                <div className="text-xs text-foreground/75 font-sans">{c.court_name ?? '—'}</div>
+                <div className="text-xs text-foreground/75 font-sans">{c.assigned_judge ?? c.assigned_judge_str ?? '—'}</div>
+                <div className="text-xs text-muted-foreground font-sans tabular-nums">Filed {fmtDate(c.date_filed)}</div>
+                <div className="text-xs text-foreground/75 font-sans">{c.case_status ?? '—'}</div>
+              </div>
+            ))}
+          </Card>
+        </section>
+      )}
 
-      <Card className="p-0 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary/60 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-4 py-2.5 font-medium">Case name</th>
-              <th className="text-left px-4 py-2.5 font-medium w-36">Docket</th>
-              <th className="text-left px-4 py-2.5 font-medium">Court</th>
-              <th className="text-left px-4 py-2.5 font-medium w-44">Judge</th>
-              <th className="text-left px-4 py-2.5 font-medium w-28">Filed</th>
-              <th className="text-left px-4 py-2.5 font-medium w-32">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {master.map((c) => <CaseRowEl key={c.id} c={c} pinned />)}
-            {filteredRest.map((c) => <CaseRowEl key={c.id} c={c} />)}
-            {master.length + filteredRest.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No cases match.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <section className="space-y-4 motion-safe:motion-fade-rise">
+        <div className="flex items-baseline justify-between gap-4 px-1">
+          <div>
+            <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Member & related cases</div>
+            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Case roster</h2>
+          </div>
+          <div className="text-[11px] text-muted-foreground font-sans tabular-nums">{filteredRest.length} of {rest.length}</div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 px-1">
+          <div className="flex items-center gap-2">
+            <label className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">Court</label>
+            <select
+              value={courtFilter}
+              onChange={(e) => setCourtFilter(e.target.value)}
+              className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+            >
+              <option value="all">All courts</option>
+              {courts.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2.5 text-sm font-sans">
+            <Switch checked={certifiedOnly} onCheckedChange={setCertifiedOnly} id="cert" />
+            <label htmlFor="cert" className="text-muted-foreground cursor-pointer">Certified JPML transfers only</label>
+          </div>
+        </div>
+
+        <Card className="p-0 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/60 text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Case name</th>
+                <th className="text-left px-4 py-3 font-semibold w-36">Docket</th>
+                <th className="text-left px-4 py-3 font-semibold">Court</th>
+                <th className="text-left px-4 py-3 font-semibold w-44">Judge</th>
+                <th className="text-left px-4 py-3 font-semibold w-28">Filed</th>
+                <th className="text-left px-4 py-3 font-semibold w-32">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRest.map((c) => <CaseRowEl key={c.id} c={c} />)}
+              {filteredRest.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No cases match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </Card>
+      </section>
     </div>
   );
 }
 
-function CaseRowEl({ c, pinned }: { c: CaseRow; pinned?: boolean }) {
+function CaseRowEl({ c }: { c: CaseRow }) {
   return (
-    <tr className={cn(
-      'border-t border-border align-top',
-      pinned && 'bg-secondary border-l-2 border-l-primary',
-    )}>
-      <td className="px-4 py-3">
-        <div className="flex items-start gap-2">
-          {pinned && <Star className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" fill="currentColor" />}
-          <div>
-            <div className="font-medium text-foreground font-serif">{c.case_name}</div>
-            {pinned && (
-              <div className="text-[10px] uppercase tracking-wider text-primary font-semibold mt-0.5">MDL Master Case</div>
-            )}
-            {c.on_jpml_schedule_a && !pinned && (
-              <span className="inline-flex items-center gap-1 mt-1 text-[10px] uppercase tracking-wider bg-[hsl(150_30%_88%)] text-[hsl(150_50%_22%)] border border-[hsl(150_30%_75%)] px-1.5 py-0.5 rounded font-semibold">
-                <CheckCircle2 className="h-3 w-3" /> Certified transfer
-              </span>
-            )}
-          </div>
-        </div>
+    <tr className="border-t border-border align-top hover:bg-muted/40 transition-colors">
+      <td className="px-4 py-3.5">
+        <div className="font-medium text-foreground font-serif leading-snug">{c.case_name}</div>
+        {c.on_jpml_schedule_a && (
+          <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] uppercase tracking-[0.1em] bg-[hsl(150_30%_88%)] text-[hsl(150_50%_22%)] border border-[hsl(150_30%_75%)] px-1.5 py-0.5 rounded font-semibold">
+            <CheckCircle2 className="h-3 w-3" /> Certified transfer
+          </span>
+        )}
       </td>
-      <td className="px-4 py-3 text-muted-foreground tabular-nums text-xs">{c.docket_number ?? '—'}</td>
-      <td className="px-4 py-3 text-foreground/80 text-xs">{c.court_name ?? '—'}</td>
-      <td className="px-4 py-3 text-foreground/80 text-xs">{c.assigned_judge ?? c.assigned_judge_str ?? '—'}</td>
-      <td className="px-4 py-3 text-muted-foreground tabular-nums text-xs">{fmtDate(c.date_filed)}</td>
-      <td className="px-4 py-3 text-xs">
+      <td className="px-4 py-3.5 text-muted-foreground tabular-nums text-xs font-sans">{c.docket_number ?? '—'}</td>
+      <td className="px-4 py-3.5 text-foreground/80 text-xs font-sans">{c.court_name ?? '—'}</td>
+      <td className="px-4 py-3.5 text-foreground/80 text-xs font-sans">{c.assigned_judge ?? c.assigned_judge_str ?? '—'}</td>
+      <td className="px-4 py-3.5 text-muted-foreground tabular-nums text-xs font-sans">{fmtDate(c.date_filed)}</td>
+      <td className="px-4 py-3.5 text-xs font-sans">
         <span className="text-foreground/80">{c.case_status ?? '—'}</span>
       </td>
     </tr>
@@ -186,8 +202,18 @@ function CounselTab() {
   }, [counsel, sideFilter, q]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="space-y-5 motion-safe:motion-fade-rise">
+      <div className="flex flex-wrap items-end justify-between gap-4 px-1">
+        <div>
+          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Attorneys of record</div>
+          <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Counsel & firms</h2>
+        </div>
+        <div className="text-[11px] text-muted-foreground font-sans tabular-nums">
+          {filtered.length} of {counsel.length}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 px-1">
         <div className="relative flex-1 min-w-[240px] max-w-sm">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -203,7 +229,7 @@ function CounselTab() {
               key={s}
               onClick={() => setSideFilter(s)}
               className={cn(
-                'text-xs px-2.5 py-1 rounded border capitalize',
+                'text-xs px-2.5 py-1.5 rounded border capitalize font-sans transition-colors',
                 sideFilter === s ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-foreground/70 hover:bg-muted',
               )}
             >
@@ -211,20 +237,17 @@ function CounselTab() {
             </button>
           ))}
         </div>
-        <div className="ml-auto text-xs text-muted-foreground">
-          {filtered.length} of {counsel.length}
-        </div>
       </div>
 
       <Card className="p-0 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-secondary/60 text-[11px] uppercase tracking-wider text-muted-foreground">
+          <thead className="bg-secondary/60 text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
             <tr>
-              <th className="text-left px-4 py-2.5 font-medium w-20">Side</th>
-              <th className="text-left px-4 py-2.5 font-medium">Attorney</th>
-              <th className="text-left px-4 py-2.5 font-medium">Firm</th>
-              <th className="text-left px-4 py-2.5 font-medium">Represents</th>
-              <th className="text-left px-4 py-2.5 font-medium w-56">Contact</th>
+              <th className="text-left px-4 py-3 font-semibold w-20">Side</th>
+              <th className="text-left px-4 py-3 font-semibold">Attorney</th>
+              <th className="text-left px-4 py-3 font-semibold">Firm</th>
+              <th className="text-left px-4 py-3 font-semibold">Represents</th>
+              <th className="text-left px-4 py-3 font-semibold w-56">Contact</th>
             </tr>
           </thead>
           <tbody>
@@ -232,19 +255,19 @@ function CounselTab() {
               const isSeeger = (c.firm_name ?? '').toUpperCase().includes('SEEGER');
               return (
                 <tr key={c.id} className={cn(
-                  'border-t border-border align-top',
-                  isSeeger && 'bg-[hsl(38_42%_45%/0.08)] border-l-2 border-l-[hsl(38_42%_45%)]',
+                  'border-t border-border align-top transition-colors',
+                  isSeeger ? 'bg-[hsl(38_42%_45%/0.08)] border-l-2 border-l-[hsl(38_42%_45%)]' : 'hover:bg-muted/40',
                 )}>
-                  <td className="px-4 py-3"><SideBadge side={c.side} /></td>
-                  <td className="px-4 py-3 font-medium text-foreground">{c.attorney_name ?? '—'}</td>
-                  <td className="px-4 py-3 text-foreground/80 font-serif">
+                  <td className="px-4 py-3.5"><SideBadge side={c.side} /></td>
+                  <td className="px-4 py-3.5 font-medium text-foreground">{c.attorney_name ?? '—'}</td>
+                  <td className="px-4 py-3.5 text-foreground/85 font-serif">
                     {c.firm_name ?? '—'}
                     {isSeeger && (
-                      <span className="ml-2 text-[10px] uppercase tracking-wider text-accent font-semibold not-italic font-sans">Our firm</span>
+                      <span className="ml-2 text-[10px] uppercase tracking-[0.1em] text-accent font-semibold not-italic font-sans">Our firm</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-foreground/75">{c.represents ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs">
+                  <td className="px-4 py-3.5 text-xs text-foreground/75 font-sans">{c.represents ?? '—'}</td>
+                  <td className="px-4 py-3.5 text-xs font-sans">
                     {c.email && <div><a className="text-accent hover:underline" href={`mailto:${c.email}`}>{c.email}</a></div>}
                     {c.phone && <div className="text-muted-foreground tabular-nums">{c.phone}</div>}
                   </td>
