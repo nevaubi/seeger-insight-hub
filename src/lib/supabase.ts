@@ -4,6 +4,7 @@ export const SUPABASE_URL = 'https://blhcucozljrojnvqosyi.supabase.co';
 export const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJsaGN1Y296bGpyb2pudnFvc3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MTcyMDYsImV4cCI6MjA5NzQ5MzIwNn0.uwwQT_gnFtcgKD73BdURuSyFVbqXkjBec23dPBUXNO0';
 export const SYNTHESIS_ENDPOINT = `${SUPABASE_URL}/functions/v1/legal-synthesis`;
+export const AI_ASSIST_ENDPOINT = `${SUPABASE_URL}/functions/v1/ai-assist`;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -83,6 +84,15 @@ export interface SearchHit {
   order_type: string | null;
   order_date: string | null;
   pdf_url: string | null;
+}
+
+export interface WorkspaceDocument {
+  id: string;
+  case_id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export const TAG_LABELS: Record<string, string> = {

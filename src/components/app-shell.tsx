@@ -5,6 +5,7 @@ import {
   Search,
   CalendarDays,
   Users,
+  PenLine,
   Scale,
   PanelLeftClose,
   PanelLeftOpen,
@@ -29,6 +30,7 @@ const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: bo
   { to: '/search', label: 'Ask the Record', icon: Search },
   { to: '/deadlines', label: 'Deadlines & Calendar', icon: CalendarDays },
   { to: '/roster', label: 'Roster & Key Players', icon: Users },
+  { to: '/draft', label: 'Drafting Workspace', icon: PenLine },
 ];
 
 function MatterSwitcher({ collapsed }: { collapsed: boolean }) {

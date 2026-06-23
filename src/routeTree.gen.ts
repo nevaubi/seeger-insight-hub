@@ -12,12 +12,18 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as RosterRouteImport } from './routes/roster'
 import { Route as OrdersRouteImport } from './routes/orders'
+import { Route as DraftRouteImport } from './routes/draft'
 import { Route as DeadlinesRouteImport } from './routes/deadlines'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DraftRoute = DraftRouteImport.update({
+  id: '/draft',
+  path: '/draft',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RosterRoute = RosterRouteImport.update({
@@ -44,6 +50,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
@@ -59,21 +67,23 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deadlines' | '/orders' | '/roster' | '/search'
+  fullPaths: '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deadlines' | '/orders' | '/roster' | '/search'
-  id: '__root__' | '/' | '/deadlines' | '/orders' | '/roster' | '/search'
+  to: '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
+  id: '__root__' | '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DeadlinesRoute: typeof DeadlinesRoute
+  DraftRoute: typeof DraftRoute
   OrdersRoute: typeof OrdersRoute
   RosterRoute: typeof RosterRoute
   SearchRoute: typeof SearchRoute
@@ -102,6 +112,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrdersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/draft': {
+      id: '/draft'
+      path: '/draft'
+      fullPath: '/draft'
+      preLoaderRoute: typeof DraftRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/deadlines': {
       id: '/deadlines'
       path: '/deadlines'
@@ -122,6 +139,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DeadlinesRoute: DeadlinesRoute,
+  DraftRoute: DraftRoute,
   OrdersRoute: OrdersRoute,
   RosterRoute: RosterRoute,
   SearchRoute: SearchRoute,
