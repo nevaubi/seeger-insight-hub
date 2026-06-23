@@ -746,7 +746,7 @@ function SynthesisPanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
-            showFilters
+
           />
         </div>
       </div>
