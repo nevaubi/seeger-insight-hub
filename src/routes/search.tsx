@@ -743,44 +743,107 @@ function SynthesisPanel({
       </div>
 
       {/* RIGHT: persistent evidence column */}
-      <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0 overflow-hidden">
-        <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-            Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
-          </div>
+      <EvidenceColumn
+        chunks={chunks}
+        sortedChunkRefs={sortedChunkRefs}
+        citationsByRef={citationsByRef}
+        chunkOrder={chunkOrder}
+        running={running}
+        flashRef={flashRef}
+      />
+    </div>
+  );
+}
+
+function EvidenceColumn({
+  chunks,
+  sortedChunkRefs,
+  citationsByRef,
+  chunkOrder,
+  running,
+  flashRef,
+}: {
+  chunks: Record<string, Chunk>;
+  sortedChunkRefs: string[];
+  citationsByRef: Record<string, CitationEvt[]>;
+  chunkOrder: string[];
+  running: boolean;
+  flashRef: string | null;
+}) {
+  const [view, setView] = useState<'all' | 'cited' | 'uncited'>('all');
+  const citedCount = sortedChunkRefs.filter((r) => (citationsByRef[r]?.length ?? 0) > 0).length;
+  const visible = sortedChunkRefs.filter((r) => {
+    const isCited = (citationsByRef[r]?.length ?? 0) > 0;
+    if (view === 'cited') return isCited;
+    if (view === 'uncited') return !isCited;
+    return true;
+  });
+
+  return (
+    <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0 overflow-hidden">
+      <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1 flex items-center justify-between gap-2">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
         </div>
-        <div className="flex-1 overflow-y-auto pr-1 space-y-3 pb-6">
-          {sortedChunkRefs.map((ref) => {
-            const ch = chunks[ref];
-            if (!ch) return null;
-            const cites = citationsByRef[ref] ?? [];
-            return (
-              <EvidenceCard
-                key={ref}
-                chunk={ch}
-                citations={cites}
-                flash={flashRef === ref}
-                cited={cites.length > 0}
-              />
-            );
-          })}
-          {chunkOrder.length === 0 && running && (
-            <div className="space-y-3">
-              {[0, 1, 2].map((i) => (
-                <Card key={i} className="p-4">
-                  <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
-                  <div className="motion-shimmer h-2 w-full rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
-                  <div className="motion-shimmer h-2 w-4/5 rounded" />
-                </Card>
-              ))}
-            </div>
-          )}
-          {chunkOrder.length === 0 && !running && (
-            <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
-          )}
+        <div className="inline-flex items-center rounded-md border border-border bg-secondary/40 p-0.5 text-[10.5px]">
+          {(['all', 'cited', 'uncited'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`px-2 py-0.5 rounded transition-colors capitalize ${
+                view === v
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {v}
+              {v === 'cited' && citedCount > 0 && (
+                <span className="ml-1 tabular-nums opacity-70">{citedCount}</span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
+      <div className="flex-1 overflow-y-auto pr-1 space-y-3 pb-6">
+        {visible.map((ref) => {
+          const ch = chunks[ref];
+          if (!ch) return null;
+          const cites = citationsByRef[ref] ?? [];
+          return (
+            <EvidenceCard
+              key={ref}
+              chunk={ch}
+              citations={cites}
+              flash={flashRef === ref}
+              cited={cites.length > 0}
+            />
+          );
+        })}
+        {chunkOrder.length === 0 && running && (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <Card key={i} className="p-4">
+                <div className="motion-shimmer h-3 w-1/3 rounded mb-3" />
+                <div className="motion-shimmer h-2 w-full rounded mb-2" />
+                <div className="motion-shimmer h-2 w-11/12 rounded mb-2" />
+                <div className="motion-shimmer h-2 w-4/5 rounded" />
+              </Card>
+            ))}
+          </div>
+        )}
+        {chunkOrder.length === 0 && !running && (
+          <Card className="p-6 text-sm text-muted-foreground">No passages retrieved.</Card>
+        )}
+        {chunkOrder.length > 0 && visible.length === 0 && (
+          <Card className="p-4 text-xs text-muted-foreground">
+            No passages match this filter.
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
     </div>
   );
 }
