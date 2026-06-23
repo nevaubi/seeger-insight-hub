@@ -1,27 +1,29 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useSuspenseQuery, queryOptions } from '@tanstack/react-query';
+import { useQuery, queryOptions } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
 import { AppShell, PageHeader } from '@/components/app-shell';
 import { CategoryBadge, fmtDateRange, isRule702 } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { supabase, type KeyDate } from '@/lib/supabase';
+import { useMatter } from '@/lib/matter-context';
 
-const datesQuery = queryOptions({
-  queryKey: ['key-dates'],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('v_key_dates')
-      .select('*')
-      .order('event_date', { ascending: true });
-    if (error) throw error;
-    return (data ?? []) as KeyDate[];
-  },
-});
+const datesQuery = (caseId: string) =>
+  queryOptions({
+    queryKey: ['key-dates', caseId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('v_key_dates')
+        .select('*')
+        .eq('case_id', caseId)
+        .order('event_date', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as KeyDate[];
+    },
+  });
 
 export const Route = createFileRoute('/deadlines')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(datesQuery),
   component: DeadlinesPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
@@ -30,7 +32,8 @@ export const Route = createFileRoute('/deadlines')({
 });
 
 function DeadlinesPage() {
-  const { data: all } = useSuspenseQuery(datesQuery);
+  const { currentMatter } = useMatter();
+  const { data: all = [], isLoading } = useQuery(datesQuery(currentMatter.master_case_id));
   const [upcomingOnly, setUpcomingOnly] = useState(true);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -69,7 +72,12 @@ function DeadlinesPage() {
       </PageHeader>
 
       <div className="px-8 py-6 space-y-8">
-        {rows.length === 0 && (
+        {isLoading && (
+          <Card className="p-10 text-center text-sm text-muted-foreground inline-flex items-center justify-center gap-2 w-full">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </Card>
+        )}
+        {!isLoading && rows.length === 0 && (
           <Card className="p-10 text-center text-sm text-muted-foreground">No dates to show.</Card>
         )}
         {grouped.map(([monthKey, items]) => (

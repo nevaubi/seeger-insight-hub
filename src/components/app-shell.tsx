@@ -8,9 +8,20 @@ import {
   Scale,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronsUpDown,
+  Check,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { useMatter } from '@/lib/matter-context';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 
 const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -20,9 +31,58 @@ const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: bo
   { to: '/roster', label: 'Roster & Key Players', icon: Users },
 ];
 
+function MatterSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { matters, currentMatter, setMatter } = useMatter();
+
+  if (collapsed) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="mt-4 w-full inline-flex items-center justify-between gap-2 rounded-sm border border-sidebar-border/60 bg-sidebar-accent/30 hover:bg-sidebar-accent/60 px-2.5 py-1.5 text-left text-[11px] font-sans text-sidebar-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-primary/60 transition-colors"
+        aria-label="Switch matter"
+      >
+        <span className="truncate font-medium text-white">{currentMatter.short_name}</span>
+        <ChevronsUpDown className="h-3.5 w-3.5 text-sidebar-foreground/60 shrink-0" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          Matter
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {matters.map((m) => {
+          const active = m.slug === currentMatter.slug;
+          return (
+            <DropdownMenuItem
+              key={m.slug}
+              onSelect={() => setMatter(m.slug)}
+              className="flex items-start gap-2 py-2"
+            >
+              <Check
+                className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', active ? 'opacity-100' : 'opacity-0')}
+              />
+              <div className="min-w-0">
+                <div className="text-sm font-medium leading-tight">{m.short_name}</div>
+                <div className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+                  MDL {m.mdl_number} · {m.court}
+                </div>
+              </div>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [collapsed, setCollapsed] = useState(false);
+  const { currentMatter } = useMatter();
+  const cfg = currentMatter.config ?? {};
+  const brandTitle = cfg.command_center_title ?? `MDL ${currentMatter.mdl_number}`;
+  const subtitle = cfg.subtitle ?? currentMatter.name;
+  const courtLines = cfg.court_lines ?? [];
 
   return (
     <div className="min-h-screen flex bg-background text-foreground">
@@ -47,9 +107,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <>
               <div className="flex items-start gap-3">
                 <Scale className="h-7 w-7 text-sidebar-foreground mt-0.5" strokeWidth={1.25} />
-                <div>
-                  <div className="font-serif text-[26px] leading-none font-semibold tracking-tight text-white">
-                    MDL 3140
+                <div className="min-w-0">
+                  <div className="font-serif text-[26px] leading-none font-semibold tracking-tight text-white truncate">
+                    {brandTitle}
                   </div>
                   <div className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-sidebar-foreground/70 font-sans font-medium">
                     Command Center
@@ -57,8 +117,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </div>
               </div>
               <p className="mt-4 text-[12px] leading-snug text-sidebar-foreground/70 font-serif italic">
-                In re: Depo-Provera Products Liability Litigation
+                {subtitle}
               </p>
+              <MatterSwitcher collapsed={collapsed} />
             </>
           )}
         </div>
@@ -92,12 +153,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Footer: court info + toggle */}
         <div className="border-t border-sidebar-border">
-          {!collapsed && (
+          {!collapsed && courtLines.length > 0 && (
             <div className="px-6 pt-5 pb-3 text-[10.5px] text-sidebar-foreground/60 leading-relaxed font-sans">
-              <div>U.S. District Court</div>
-              <div>N.D. Fla., Pensacola Division</div>
-              <div className="mt-1">Judge M. Casey Rodgers</div>
-              <div>Mag. Judge Hope T. Cannon</div>
+              {courtLines.map((line, i) => (
+                <div key={i} className={i === 2 ? 'mt-1' : undefined}>
+                  {line}
+                </div>
+              ))}
             </div>
           )}
           <div className={cn('flex', collapsed ? 'justify-center py-3' : 'justify-end px-3 pb-3')}>

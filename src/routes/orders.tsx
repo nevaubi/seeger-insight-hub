@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useSuspenseQuery, queryOptions, useQuery } from '@tanstack/react-query';
+import { useQuery, queryOptions } from '@tanstack/react-query';
 import { useMemo, useState, useEffect } from 'react';
-import { ExternalLink, Search as SearchIcon, X } from 'lucide-react';
+import { ExternalLink, Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { z } from 'zod';
 import { AppShell, PageHeader } from '@/components/app-shell';
 import { OrderTypeBadge, TagChips, fmtDate } from '@/components/case-ui';
@@ -9,19 +9,23 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { supabase, tagLabel, TAG_LABELS, type Order } from '@/lib/supabase';
+import { useMatter } from '@/lib/matter-context';
 import { cn } from '@/lib/utils';
 
-const ordersQuery = queryOptions({
-  queryKey: ['orders-all'],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('v_orders')
-      .select('*')
-      .order('order_date', { ascending: false, nullsFirst: false });
-    if (error) throw error;
-    return (data ?? []) as Order[];
-  },
-});
+const ordersQuery = (caseId: string) =>
+  queryOptions({
+    queryKey: ['orders-all', caseId],
+    queryFn: async () => {
+      // NOTE: v_orders does not currently expose case_id. Once that column is
+      // added to the view, re-enable: .eq('case_id', caseId)
+      const { data, error } = await supabase
+        .from('v_orders')
+        .select('*')
+        .order('order_date', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as Order[];
+    },
+  });
 
 const orderPagesQuery = (documentId: string) =>
   queryOptions({
@@ -41,7 +45,6 @@ const ORDER_TYPES = ['PTO', 'CMO', 'CBO', 'JPML'] as const;
 
 export const Route = createFileRoute('/orders')({
   validateSearch: z.object({ id: z.string().optional() }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(ordersQuery),
   component: OrdersPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
@@ -50,7 +53,8 @@ export const Route = createFileRoute('/orders')({
 });
 
 function OrdersPage() {
-  const { data: orders } = useSuspenseQuery(ordersQuery);
+  const { currentMatter } = useMatter();
+  const { data: orders = [], isLoading } = useQuery(ordersQuery(currentMatter.master_case_id));
   const { id } = Route.useSearch();
   const navigate = useNavigate();
 
@@ -122,7 +126,8 @@ function OrdersPage() {
                 </button>
               ))}
             </div>
-            <div className="text-[11px] text-muted-foreground ml-auto font-sans tabular-nums">
+            <div className="text-[11px] text-muted-foreground ml-auto font-sans tabular-nums inline-flex items-center gap-2">
+              {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
               {filtered.length} of {orders.length} orders
             </div>
           </div>

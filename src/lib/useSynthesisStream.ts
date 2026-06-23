@@ -301,7 +301,20 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
   const citationCounter = useRef(0);
 
   const ask = useCallback(
-    async (question: string, initialFilter: Record<string, unknown>) => {
+    async (
+      question: string,
+      initialFilter: Record<string, unknown>,
+      scope?: {
+        case_id?: string;
+        matter?: {
+          name: string;
+          short_name: string;
+          mdl_number: string;
+          court: string;
+          judge: string;
+        };
+      },
+    ) => {
       const v = question.trim();
       if (!v) return;
       abortRef.current?.abort();
@@ -315,6 +328,14 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
         const emb = await embedQuery(v);
         dispatch({ kind: 'embedding', on: false });
 
+        const body: Record<string, unknown> = {
+          question: v,
+          embedding: emb,
+          initial_filter: initialFilter,
+        };
+        if (scope?.case_id) body.case_id = scope.case_id;
+        if (scope?.matter) body.matter = scope.matter;
+
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -322,7 +343,7 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
             apikey: anonKey,
             Authorization: `Bearer ${anonKey}`,
           },
-          body: JSON.stringify({ question: v, embedding: emb, initial_filter: initialFilter }),
+          body: JSON.stringify(body),
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) throw new Error(`Synthesis failed (${res.status})`);

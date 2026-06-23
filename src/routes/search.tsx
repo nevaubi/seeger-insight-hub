@@ -50,16 +50,16 @@ import {
 } from '@/lib/useSynthesisStream';
 import { useSmoothText } from '@/lib/useSmoothText';
 
-const EXAMPLES_SYNTH = [
-  'What must plaintiffs do to establish proof of Depo-Provera use, and by when?',
-  "What does PTO 22A's Deficiency Exception require?",
+import { useMatter, type Matter } from '@/lib/matter-context';
+
+const FALLBACK_EXAMPLES_SYNTH = [
+  'What must plaintiffs do to establish proof of use, and by when?',
   'What are the common-benefit assessment obligations?',
   'What is the Rule 702 / Daubert schedule?',
 ];
-const EXAMPLES_BROWSE = [
+const FALLBACK_EXAMPLES_BROWSE = [
   'threshold proof of use',
   'deposition protocol',
-  'money from outside investors paying for the lawsuit',
   'common benefit',
 ];
 
@@ -346,6 +346,8 @@ function SynthesisPanel({
   filters: Filters;
   setFilters: (f: Filters) => void;
 }) {
+  const { currentMatter } = useMatter();
+  const examplesSynth = currentMatter.config?.examples_synth ?? FALLBACK_EXAMPLES_SYNTH;
   const { state, ask, stop } = useSynthesisStream(SYNTHESIS_ENDPOINT, SUPABASE_ANON_KEY);
   const {
     running,
@@ -418,9 +420,18 @@ function SynthesisPanel({
 
   const runQuery = useCallback(
     (query: string) => {
-      ask(query, buildFilter(filters));
+      ask(query, buildFilter(filters), {
+        case_id: currentMatter.master_case_id,
+        matter: {
+          name: currentMatter.name,
+          short_name: currentMatter.short_name,
+          mdl_number: currentMatter.mdl_number,
+          court: currentMatter.court,
+          judge: currentMatter.judge,
+        },
+      });
     },
-    [ask, filters],
+    [ask, filters, currentMatter],
   );
 
 
@@ -510,7 +521,7 @@ function SynthesisPanel({
               <Sparkles className="h-3 w-3" /> Try a question
             </div>
             <div className="flex flex-col gap-2">
-              {EXAMPLES_SYNTH.map((ex, i) => (
+              {examplesSynth.map((ex: string, i: number) => (
                 <button
                   key={ex}
                   type="button"
@@ -1336,6 +1347,8 @@ function BrowsePanel({
   filters: Filters;
   setFilters: (f: Filters) => void;
 }) {
+  const { currentMatter } = useMatter();
+  const examplesBrowse = currentMatter.config?.examples_browse ?? FALLBACK_EXAMPLES_BROWSE;
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [embedding, setEmbedding] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -1343,7 +1356,7 @@ function BrowsePanel({
 
   const search = useMutation<{ rows: HybridHit[]; notice?: string }, Error, string>({
     mutationFn: async (query) => {
-      const filter = buildFilter(filters);
+      const filter = { ...buildFilter(filters), case_id: currentMatter.master_case_id };
       try {
         setEmbedding(!modelReady());
         const emb = await embedQuery(query);
@@ -1422,7 +1435,7 @@ function BrowsePanel({
               <Sparkles className="h-3 w-3" /> Try
             </div>
             <div className="flex flex-wrap gap-2">
-              {EXAMPLES_BROWSE.map((ex) => (
+              {examplesBrowse.map((ex: string) => (
                 <button
                   key={ex}
                   type="button"
