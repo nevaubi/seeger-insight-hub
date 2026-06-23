@@ -48,8 +48,8 @@ const MIN_SIM = 0.2;            // vector-only floor (lexical hits bypass it); l
 const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
 const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
 const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
-const WRITER_THINKING_BUDGET = 8000;  // extended-thinking budget for the writer (citation planning)
-const WRITER_MAX_TOKENS = 24000;      // must exceed the thinking budget; remainder is the answer
+const WRITER_EFFORT = "high";    // adaptive-thinking depth for the writer (low|medium|high|xhigh|max)
+const WRITER_MAX_TOKENS = 24000; // enforced output ceiling (thinking + answer); we stream, so it's safe
 
 // Backward-compatible default matter (Depo-Provera, MDL 3140). Used when a request omits
 // case_id/matter, so the existing frontend keeps working and stays correctly scoped.
@@ -1025,13 +1025,16 @@ Deno.serve(async (req: Request) => {
               recordIndexBlocks.join("\n\n"),
           });
         }
-        // Extended thinking lets the writer plan structure and, crucially, decide which
-        // passages support which claims BEFORE writing — which materially improves citation
-        // coverage. budget_tokens must be < max_tokens; the rest is left for the answer.
+        // Adaptive thinking lets the writer plan structure and decide which passages support
+        // which claims BEFORE writing — materially improving citation coverage. Opus 4.8 uses
+        // adaptive thinking + output_config.effort (NOT the legacy enabled/budget_tokens, which
+        // 400s). display:"summarized" is required for the reasoning to stream as readable text
+        // (the default "omitted" returns empty thinking blocks).
         const body: any = {
           model: MODEL,
           max_tokens: WRITER_MAX_TOKENS,
-          thinking: { type: "enabled", budget_tokens: WRITER_THINKING_BUDGET },
+          thinking: { type: "adaptive", display: "summarized" },
+          output_config: { effort: WRITER_EFFORT },
           system: [{ type: "text", text: writerSystem, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: writerUser }],
           stream: true,
