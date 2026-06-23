@@ -146,6 +146,14 @@ export function MatterProvider({ children }: { children: ReactNode }) {
 
 export function useMatter(): MatterContextValue {
   const ctx = useContext(MatterContext);
-  if (!ctx) throw new Error('useMatter must be used within MatterProvider');
-  return ctx;
+  if (ctx) return ctx;
+  // Defensive fallback: if a tree somehow renders outside the provider
+  // (e.g. during an SSR error boundary), return a stable default so
+  // useMatter never throws and the shell still renders.
+  return {
+    matters: [FALLBACK_DEPO],
+    currentMatter: FALLBACK_DEPO,
+    setMatter: () => {},
+    loading: false,
+  };
 }
