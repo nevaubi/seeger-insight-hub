@@ -3,6 +3,7 @@ import { useQuery, queryOptions } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { CheckCircle2, Search as SearchIcon, Star } from 'lucide-react';
 import { AppShell, PageHeader } from '@/components/app-shell';
+import { ExportMenu } from '@/components/export-menu';
 import { SideBadge, fmtDate } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -119,7 +120,33 @@ function CasesTab() {
             <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Member & related cases</div>
             <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Case roster</h2>
           </div>
-          <div className="text-[11px] text-muted-foreground font-sans tabular-nums">{filteredRest.length} of {rest.length}</div>
+          <div className="flex items-center gap-4">
+            <div className="text-[11px] text-muted-foreground font-sans tabular-nums">{filteredRest.length} of {rest.length}</div>
+            <ExportMenu
+              baseName={`${currentMatter.short_name}-case-roster`}
+              sheetName="Roster"
+              columns={[
+                { header: 'Role', width: 12 },
+                { header: 'Case name', width: 50 },
+                { header: 'Docket', width: 20 },
+                { header: 'Court', width: 36 },
+                { header: 'Judge', width: 28 },
+                { header: 'Filed', width: 14 },
+                { header: 'Status', width: 18 },
+                { header: 'Certified transfer', width: 16 },
+              ]}
+              rows={[...master, ...filteredRest].map((c) => [
+                c.case_role,
+                c.case_name,
+                c.docket_number ?? '',
+                c.court_name ?? '',
+                c.assigned_judge ?? c.assigned_judge_str ?? '',
+                c.date_filed ?? '',
+                c.case_status ?? '',
+                c.on_jpml_schedule_a ? 'Yes' : '',
+              ])}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-4 px-1">
@@ -212,8 +239,32 @@ function CounselTab() {
           <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Attorneys of record</div>
           <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Counsel & firms</h2>
         </div>
-        <div className="text-[11px] text-muted-foreground font-sans tabular-nums">
-          {filtered.length} of {counsel.length}
+        <div className="flex items-center gap-4">
+          <div className="text-[11px] text-muted-foreground font-sans tabular-nums">
+            {filtered.length} of {counsel.length}
+          </div>
+          <ExportMenu
+            baseName={`${currentMatter.short_name}-counsel`}
+            sheetName="Counsel"
+            columns={[
+              { header: 'Side', width: 12 },
+              { header: 'Attorney', width: 30 },
+              { header: 'Firm', width: 36 },
+              { header: 'Represents', width: 30 },
+              { header: 'Email', width: 32 },
+              { header: 'Phone', width: 18 },
+              { header: 'Address', width: 44 },
+            ]}
+            rows={filtered.map((c) => [
+              c.side,
+              c.attorney_name ?? '',
+              c.firm_name ?? '',
+              c.represents ?? '',
+              c.email ?? '',
+              c.phone ?? '',
+              c.address ?? '',
+            ])}
+          />
         </div>
       </div>
 

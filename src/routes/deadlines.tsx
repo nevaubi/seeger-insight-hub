@@ -3,6 +3,7 @@ import { useQuery, queryOptions } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
 import { AppShell, PageHeader } from '@/components/app-shell';
+import { ExportMenu } from '@/components/export-menu';
 import { CategoryBadge, fmtDateRange, isRule702 } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -59,15 +60,50 @@ function DeadlinesPage() {
     return `${months[+m[2] - 1]} ${m[1]}`;
   };
 
+  const exportColumns = [
+    { header: 'Date', width: 14 },
+    { header: 'End date', width: 14 },
+    { header: 'Time', width: 14 },
+    { header: 'Category', width: 12 },
+    { header: 'Title', width: 48 },
+    { header: 'Description', width: 60 },
+    { header: 'Affects', width: 30 },
+    { header: 'Conflict', width: 10 },
+    { header: 'Source order', width: 40 },
+    { header: 'Citation', width: 28 },
+    { header: 'Source URL', width: 40 },
+  ];
+  const exportRows = rows.map((d) => [
+    d.event_date,
+    d.end_date ?? '',
+    d.event_time ?? '',
+    d.category,
+    d.title,
+    d.description ?? '',
+    d.affects ?? '',
+    d.is_conflicted ? 'Yes' : '',
+    [d.source_order_type, d.source_order_title].filter(Boolean).join(' '),
+    d.citation ?? '',
+    d.source_url ?? '',
+  ]);
+
   return (
     <AppShell>
       <PageHeader
         title="Deadlines & Calendar"
         description="Every hearing, CMC, deadline, and milestone on the docket, with the source order it derives from."
       >
-        <div className="flex items-center gap-2.5 text-sm font-sans">
-          <span className="text-muted-foreground">Upcoming only</span>
-          <Switch checked={upcomingOnly} onCheckedChange={setUpcomingOnly} />
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2.5 text-sm font-sans">
+            <span className="text-muted-foreground">Upcoming only</span>
+            <Switch checked={upcomingOnly} onCheckedChange={setUpcomingOnly} />
+          </div>
+          <ExportMenu
+            baseName={`${currentMatter.short_name}-deadlines`}
+            sheetName="Deadlines"
+            columns={exportColumns}
+            rows={exportRows}
+          />
         </div>
       </PageHeader>
 

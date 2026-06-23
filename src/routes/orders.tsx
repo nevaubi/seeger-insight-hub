@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { ExternalLink, Search as SearchIcon, X, Loader2 } from 'lucide-react';
 import { z } from 'zod';
 import { AppShell, PageHeader } from '@/components/app-shell';
+import { ExportMenu } from '@/components/export-menu';
 import { OrderTypeBadge, TagChips, fmtDate } from '@/components/case-ui';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -84,12 +85,40 @@ function OrdersPage() {
   const selected = id ? orders.find((o) => o.id === id) ?? null : null;
   const close = () => navigate({ to: '/orders', search: {} });
 
+  const exportColumns = [
+    { header: 'Type', width: 10 },
+    { header: 'Number', width: 12 },
+    { header: 'Title', width: 60 },
+    { header: 'Date', width: 14 },
+    { header: 'Pages', width: 8 },
+    { header: 'Tags', width: 34 },
+    { header: 'Summary', width: 70 },
+    { header: 'Source PDF', width: 40 },
+  ];
+  const exportRows = filtered.map((o) => [
+    o.order_type,
+    o.order_number ?? '',
+    o.canonical_title,
+    o.order_date ?? '',
+    o.page_count ?? '',
+    (o.tags ?? []).map(tagLabel).join(', '),
+    o.summary ?? '',
+    o.pdf_url ?? '',
+  ]);
+
   return (
     <AppShell>
       <PageHeader
         title="Orders Intelligence"
         description="All controlling orders from the docket — PTOs, CMOs, CBOs, and JPML orders, with tags and full source text."
-      />
+      >
+        <ExportMenu
+          baseName={`${currentMatter.short_name}-orders`}
+          sheetName="Orders"
+          columns={exportColumns}
+          rows={exportRows}
+        />
+      </PageHeader>
 
       <div className="px-8 py-6 space-y-5">
         <Card className="p-4 space-y-4 motion-safe:motion-fade-rise">
