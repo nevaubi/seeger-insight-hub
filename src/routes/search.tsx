@@ -403,6 +403,18 @@ function SynthesisPanel({
   const reasoningScrollRef = useRef<HTMLDivElement | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
   const nearBottomRef = useRef(true);
+  const elapsedMs = useElapsed(running, submitted);
+
+  // Phase derivation for the live status pill
+  const phase: 'idle' | 'routing' | 'searching' | 'writing' | 'done' = !submitted
+    ? 'idle'
+    : !running && finalRound != null
+      ? 'done'
+      : currentRound != null && currentRound === finalRound
+        ? 'writing'
+        : searches.length === 0
+          ? 'routing'
+          : 'searching';
 
   // collapse reasoning + timeline once final answer is done
   useEffect(() => {
