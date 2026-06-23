@@ -547,41 +547,54 @@ function SynthesisPanel({
             </p>
           </div>
 
-          <Composer
-            q={q}
-            setQ={setQ}
-            onSubmit={() => runQuery(q)}
-            variant="hero"
-            placeholder="Ask the record in plain English…"
-            filters={filters}
-            setFilters={setFilters}
-            filtersOpen={filtersOpen}
-            setFiltersOpen={setFiltersOpen}
-          />
+          <div className="relative w-full max-w-2xl">
+            <div className="composer-halo" aria-hidden />
+            <div className="relative">
+              <Composer
+                q={q}
+                setQ={setQ}
+                onSubmit={() => runQuery(q)}
+                variant="hero"
+                placeholder="Ask the record in plain English…"
+                filters={filters}
+                setFilters={setFilters}
+                filtersOpen={filtersOpen}
+                setFiltersOpen={setFiltersOpen}
+              />
+            </div>
+          </div>
 
           <div className="mt-8 w-full max-w-2xl">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
               <Sparkles className="h-3 w-3" /> Try a question
             </div>
-            <div className="flex flex-col gap-2">
-              {examplesSynth.map((ex: string, i: number) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => {
-                    setQ(ex);
-                    runQuery(ex);
-                  }}
-                  className="motion-fade-rise text-left text-[14px] font-serif italic px-4 py-2.5 rounded-xl border border-border bg-card/60 text-foreground/85 hover:border-accent/60 hover:text-foreground hover:-translate-y-px transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  style={{
-                    animationDelay: `${i * 60}ms`,
-                    transitionDuration: 'var(--dur-fast)',
-                    transitionTimingFunction: 'var(--ease-out-soft)',
-                  }}
-                >
-                  “{ex}”
-                </button>
-              ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {examplesSynth.map((ex: string, i: number) => {
+                const Icon = i % 3 === 0 ? Brain : i % 3 === 1 ? PenLine : SearchIcon;
+                return (
+                  <button
+                    key={ex}
+                    type="button"
+                    onClick={() => {
+                      setQ(ex);
+                      runQuery(ex);
+                    }}
+                    className="motion-stream-in group text-left text-[13.5px] font-serif italic px-4 py-3 rounded-xl border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-start gap-2.5"
+                    style={{
+                      animationDelay: `${i * 60}ms`,
+                      transitionDuration: 'var(--dur-fast)',
+                      transitionTimingFunction: 'var(--ease-out-soft)',
+                    }}
+                  >
+                    <Icon className="h-3.5 w-3.5 mt-1 shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
+                    <span className="flex-1">{ex}</span>
+                    <span className="hidden md:inline-flex items-center gap-0.5 mt-0.5 text-[10px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity font-sans not-italic">
+                      <CommandIcon className="h-2.5 w-2.5" />
+                      <CornerDownLeft className="h-2.5 w-2.5" />
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
