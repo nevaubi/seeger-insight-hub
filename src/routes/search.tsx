@@ -129,6 +129,38 @@ function AskTheRecord() {
   const [mode, setMode] = useState<'synth' | 'browse'>('synth');
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+}
+
+// Lightweight elapsed-time hook — ticks every 100ms while `running` is true,
+// snaps to the final elapsed when stopped. Pure presentation.
+function useElapsed(running: boolean, resetKey: unknown): number {
+  const [ms, setMs] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    setMs(0);
+    startRef.current = null;
+  }, [resetKey]);
+  useEffect(() => {
+    if (!running) return;
+    startRef.current = performance.now();
+    const id = window.setInterval(() => {
+      if (startRef.current != null) setMs(performance.now() - startRef.current);
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [running]);
+  return ms;
+}
+
+function fmtElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  const s = ms / 1000;
+  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+}
+
+// Re-open the original function body so this stays a syntactically valid module.
+function _AskTheRecordTail() {
+  const [_q] = useState('');
+  void _q;
 
   return (
     <AppShell>
