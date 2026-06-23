@@ -214,6 +214,7 @@ function Composer({
   setFilters,
   filtersOpen,
   setFiltersOpen,
+  showFilters = false,
 }: {
   q: string;
   setQ: (s: string) => void;
@@ -226,7 +227,9 @@ function Composer({
   setFilters: (f: Filters) => void;
   filtersOpen: boolean;
   setFiltersOpen: (v: boolean) => void;
+  showFilters?: boolean;
 }) {
+
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeFilterCount = filtersActive(filters);
 
