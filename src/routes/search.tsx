@@ -844,9 +844,6 @@ function EvidenceColumn({
     </div>
   );
 }
-    </div>
-  );
-}
 
 
 // ----- run card with step timeline -----
