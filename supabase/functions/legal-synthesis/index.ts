@@ -1,9 +1,8 @@
 // Supabase Edge Function: legal-synthesis
 // Multi-agent, multi-matter RAG over a litigation record (controlling orders + filings).
 //   Router = Gemini 3.1 Flash-Lite (OpenAI-compatible endpoint): plans and runs up to
-//            3 rounds, calling four tools — search_the_record (semantic+lexical passage
-//            retrieval), list_orders, lookup_counsel, and list_deadlines (structured,
-//            case-scoped docket facts) — streams concise reasoning, then stops.
+//            3 rounds, calling tools — search_the_record, read_order, list_orders,
+//            lookup_counsel, list_deadlines — streams concise reasoning, then stops.
 //   Writer = Claude Opus 4.8: one clean turn over the gathered passages (with native
 //            sentence-level citations) plus a structured record index.
 // SSE streaming throughout.
@@ -14,11 +13,11 @@
 //   scope is enforced server-side: case_id is injected into every retrieval filter and
 //   into every structured-tool call, so one matter's data can never bleed into another's.
 //
-// Passage retrieval is deliberately TARGETED: each search returns up to 10 fresh passages, and
-// every passage gathered persists across rounds and is handed to the writer in full.
-// Structured tools (orders/counsel/deadlines) return the complete matching list and are
-// fed to the writer as a labeled, non-citable record index (the writer anchors statements
-// to order numbers and dates).
+// INTELLIGENT RETRIEVAL: a round's tool calls run in PARALLEL; each search auto-expands its
+// top hits with adjacent passages (neighbor/sibling context); read_order pulls a full order
+// plus its amendment versions (temporal/precedence). All gathered passages persist across
+// rounds, deduped, capped at MAX_TOTAL_CHUNKS, and handed to the writer in full. Structured
+// tools (orders/counsel/deadlines) return the complete matching list as a record index.
 //
 // Router history is kept as PLAIN TEXT (rationale + compact results), not replayed
 // tool-call parts: Gemini 3 requires a thought_signature on any functionCall echoed back
@@ -28,7 +27,7 @@
 // Request (POST JSON):
 //   { question: string, embedding: string ("[...]" 384-dim), initial_filter?: object,
 //     case_id?: string (matter master case), matter?: { name, short_name, mdl_number, court, judge } }
-// Response: text/event-stream (events: round, thinking, search, chunks, tool, text,
+// Response: text/event-stream (events: round, thinking, search, chunks, tool, expand, text,
 //   citation, round_end, search_error, tool_error, error, done).
 //
 // Secrets: ANTHROPIC_API_KEY, GEMINI_API_KEY (user-provided). ROUTER_MODEL optional
@@ -125,7 +124,7 @@ HOW TO ANSWER
 You are a research aid, not a substitute for the attorney's judgment. Accuracy and traceability to the record are paramount.`;
 }
 
-// ---------- Router system prompt builder (all matters; describes all four tools) ----------
+// ---------- Router system prompt builder (all matters; describes all five tools) ----------
 function buildRouterSystem(m: Matter): string {
   return `You are the retrieval router for a litigation research assistant working the ${m.name} record (MDL No. ${m.mdl_number}, before ${m.judge}). You support the plaintiffs' leadership, including Seeger Weiss LLP, co-lead counsel.
 
@@ -223,7 +222,7 @@ const SEARCH_TOOL_DESCRIPTION =
   "Search this matter's record (controlling orders, filings, and the scientific/regulatory background) for passages " +
   "relevant to the user's question. The semantic meaning of the user's question is applied automatically on every " +
   "call; use `keywords` to pin exact terminology and `filter` to constrain by document metadata. Returns up to 10 " +
-  "fresh citable passages with order, page, and section. Call up to three times, refining deliberately to build coverage.";
+  "fresh citable passages with order, page, and section, plus a little adjacent context. Call up to three times.";
 
 const ORDERS_TOOL_SCHEMA = {
   type: "object",
