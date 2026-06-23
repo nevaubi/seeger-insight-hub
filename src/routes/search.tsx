@@ -610,11 +610,47 @@ function SynthesisPanel({
           className="flex-1 overflow-y-auto pr-1 pt-4 pb-6"
         >
           <div className="max-w-3xl mx-auto space-y-4">
+            {/* Conversation header strip */}
+            {submitted && (
+              <div className="motion-fade-rise flex items-center gap-2 text-[11px] text-muted-foreground border-b border-border/60 pb-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      phase === 'done'
+                        ? 'bg-accent'
+                        : phase === 'writing'
+                          ? 'bg-accent motion-pulse-soft'
+                          : phase === 'searching'
+                            ? 'bg-gold motion-pulse-soft'
+                            : 'bg-muted-foreground motion-pulse-soft'
+                    }`}
+                    aria-hidden
+                  />
+                  <span className="uppercase tracking-wider">
+                    {phase === 'routing'
+                      ? 'Routing'
+                      : phase === 'searching'
+                        ? 'Searching the record'
+                        : phase === 'writing'
+                          ? 'Writing the answer'
+                          : 'Research complete'}
+                  </span>
+                </span>
+                <span className="text-border" aria-hidden>·</span>
+                <span className="tabular-nums">{currentMatter.short_name}</span>
+                <span className="text-border" aria-hidden>·</span>
+                <span className="tabular-nums">Claude · router v12</span>
+                <span className="ml-auto tabular-nums">
+                  {fmtElapsed(elapsedMs)}
+                </span>
+              </div>
+            )}
+
             {/* User turn */}
             {submitted && (
               <div className="motion-fade-rise">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 h-7 w-7 shrink-0 rounded-full bg-primary text-primary-foreground inline-flex items-center justify-center text-[11px] font-medium">
+                  <div className="mt-0.5 h-6 px-2 shrink-0 rounded-full border border-border bg-secondary/50 text-foreground/70 inline-flex items-center justify-center text-[10.5px] uppercase tracking-wider">
                     You
                   </div>
                   <div className="font-serif text-[18px] leading-snug text-foreground">
@@ -650,6 +686,8 @@ function SynthesisPanel({
               setReasoningOpen={setReasoningOpen}
               reasoningRounds={reasoningRounds}
               reasoningScrollRef={reasoningScrollRef}
+              elapsedMs={elapsedMs}
+              phase={phase}
             />
 
             <Card className="p-7 border-border shadow-none motion-fade-rise">
