@@ -874,7 +874,7 @@ function RunCard({
 
 
   return (
-    <Card className="p-0 overflow-hidden motion-fade-rise">
+    <Card className="p-0 overflow-hidden motion-fade-rise bg-card/85 backdrop-blur border-border shadow-sm">
       <button
         type="button"
         onClick={() => setTimelineOpen(!timelineOpen)}
@@ -885,96 +885,147 @@ function RunCard({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         )}
-        <Sparkles className={`h-3.5 w-3.5 ${running ? 'text-accent' : 'text-muted-foreground'}`} />
-        <span className="text-[12px] font-medium text-foreground">
-          {running ? 'Researching the record' : 'Research complete'}
+        <span className="relative inline-flex h-2 w-2">
+          <span
+            className={`absolute inset-0 rounded-full ${
+              phase === 'done' ? 'bg-accent' : 'bg-accent motion-pulse-soft'
+            }`}
+            aria-hidden
+          />
         </span>
-        {running && (
-          <span className="ml-2 text-[11px] text-muted-foreground tabular-nums">
-            {searches.length} search{searches.length === 1 ? '' : 'es'} · {chunkOrder.length} passages
-          </span>
-        )}
+        <span className="text-[12px] font-medium text-foreground">
+          {phase === 'done'
+            ? 'Research complete'
+            : phase === 'writing'
+              ? 'Writing the answer'
+              : phase === 'searching'
+                ? 'Searching the record'
+                : phase === 'routing'
+                  ? 'Planning approach'
+                  : 'Agent ready'}
+        </span>
+        <span className="ml-auto inline-flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
+          <span>{fmtElapsed(elapsedMs)}</span>
+          <span aria-hidden className="text-border">·</span>
+          <span>{searches.length}s · {chunkOrder.length}p · {citations.length}c</span>
+        </span>
       </button>
 
       {timelineOpen && (
-        <div className="px-5 pb-4 pt-1 border-t border-border">
-          <ol className="relative pl-5">
-            {/* vertical rail */}
-            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
-            {steps.map((s, i) => (
-              <li
-                key={i}
-                className="relative py-2 motion-fade-rise"
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
-                <span
-                  className={`absolute -left-[14px] top-[14px] h-2.5 w-2.5 rounded-full ring-2 ring-background ${
-                    s.status === 'active'
-                      ? 'bg-accent motion-pulse-soft'
-                      : s.status === 'done'
-                      ? 'bg-accent'
-                      : 'bg-muted-foreground/30'
-                  }`}
-                  aria-hidden
-                />
-                {s.kind === 'search' ? (
-                  <SearchStepRow search={s.search} index={s.idx} status={s.status} />
-                ) : (
-                  <WriterStepRow status={s.status} citations={citations.length} />
-                )}
-              </li>
-            ))}
-          </ol>
-
-          {notes.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-border/50">
-              {notes.map((n) => (
-                <div
-                  key={`note-${n.round}`}
-                  className="text-[11px] text-muted-foreground/80 italic pl-1 py-0.5"
-                >
-                  Round {n.round} note: {truncate(n.text, 240)}
-                </div>
-              ))}
+        <div className="border-t border-border">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as 'timeline' | 'thoughts')}>
+            <div className="px-4 pt-3">
+              <TabsList className="h-8 bg-secondary/40">
+                <TabsTrigger value="timeline" className="text-[11px] px-3 h-6 data-[state=active]:bg-card">
+                  Timeline
+                </TabsTrigger>
+                <TabsTrigger value="thoughts" className="text-[11px] px-3 h-6 data-[state=active]:bg-card">
+                  <Brain className="h-3 w-3 mr-1" /> Thoughts
+                  {reasoningRounds.length > 0 && (
+                    <span className="ml-1.5 tabular-nums opacity-60">{reasoningRounds.length}</span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
             </div>
-          )}
 
-          {reasoningRounds.length > 0 && (
-            <div className="mt-3 rounded-md border border-border/70 bg-secondary/20">
-              <button
-                type="button"
-                onClick={() => setReasoningOpen(!reasoningOpen)}
-                className="w-full px-3 py-1.5 flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {reasoningOpen ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-                <Brain className="h-3 w-3" /> Show reasoning
-              </button>
-              {reasoningOpen && (
+            <TabsContent value="timeline" className="px-5 pb-4 pt-3 mt-0">
+              <ol className="relative pl-5">
+                <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
+                {steps.map((s, i) => {
+                  const status =
+                    s.kind === 'search' ? s.status :
+                    s.kind === 'writer' ? s.status :
+                    'done';
+                  return (
+                    <li
+                      key={i}
+                      className="relative py-2 motion-stream-in"
+                      style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
+                    >
+                      <span
+                        className={`absolute -left-[14px] top-[14px] h-2.5 w-2.5 rounded-full ring-2 ring-background ${
+                          status === 'active'
+                            ? 'bg-accent motion-pulse-soft'
+                            : status === 'done'
+                              ? 'bg-accent'
+                              : 'bg-muted-foreground/30'
+                        }`}
+                        aria-hidden
+                      />
+                      {s.kind === 'search' ? (
+                        <SearchStepRow search={s.search} index={s.idx} status={s.status} />
+                      ) : s.kind === 'tool' ? (
+                        <ToolStepRow note={s.note} />
+                      ) : (
+                        <WriterStepRow status={s.status} citations={citations.length} />
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+
+              {interimNotes.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-border/50">
+                  {interimNotes.map((n) => (
+                    <div
+                      key={`note-${n.round}-${n.text.length}`}
+                      className="text-[11px] text-muted-foreground/80 italic pl-1 py-0.5"
+                    >
+                      Round {n.round} note: {truncate(n.text, 240)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="thoughts" className="px-5 pb-4 pt-3 mt-0">
+              {reasoningRounds.length === 0 ? (
+                <div className="text-[12px] text-muted-foreground italic py-2">
+                  No reasoning emitted yet.
+                </div>
+              ) : (
                 <div
                   ref={reasoningScrollRef}
-                  className="px-3 pb-2 pt-1 border-t border-border/60 max-h-[13rem] overflow-y-auto"
+                  className="max-h-[18rem] overflow-y-auto rounded-md border border-border/60 bg-secondary/20 px-3 py-2 [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]"
                 >
                   {reasoningRounds.map(({ round, text }) => (
-                    <div key={round} className="pt-2">
+                    <div key={round} className="pt-2 first:pt-0">
                       <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
                         Round {round}
                       </div>
-                      <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/70">
+                      <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/75">
                         {text}
+                        {running && <span className="motion-stream-caret" aria-hidden />}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-          )}
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </Card>
+  );
+}
+
+function ToolStepRow({ note }: { note: { round: number; text: string } }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5 inline-flex items-center gap-1">
+          <Wrench className="h-3 w-3" /> Tool call
+        </div>
+        <div className="font-serif italic text-[14px] text-foreground/90">
+          {note.text}
+        </div>
+      </div>
+      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
+        <span className="inline-flex items-center gap-1 text-accent/80">
+          <Check className="h-3 w-3" />
+        </span>
+      </div>
+    </div>
   );
 }
 
