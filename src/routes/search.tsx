@@ -789,6 +789,8 @@ function RunCard({
   setReasoningOpen,
   reasoningRounds,
   reasoningScrollRef,
+  elapsedMs,
+  phase,
 }: {
   running: boolean;
   searches: SearchEvt[];
@@ -803,14 +805,29 @@ function RunCard({
   setReasoningOpen: (v: boolean) => void;
   reasoningRounds: { round: number; text: string }[];
   reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  elapsedMs: number;
+  phase: 'idle' | 'routing' | 'searching' | 'writing' | 'done';
 }) {
+  void reasoningOpen;
+  void setReasoningOpen;
   const done = !running && finalRound != null;
   const writerActive = currentRound != null && currentRound === finalRound && running;
   const writerDone = finalRound != null && !running;
+  const [tab, setTab] = useState<'timeline' | 'thoughts'>('timeline');
 
-  // Steps: one per search + a final "Writing the answer" step
+  // Tool notes are emitted by `tool` SSE events (structured router tools).
+  // Reasoning notes are emitted by interim tool_use round bodies. Separate
+  // them visually in the timeline.
+  const TOOL_PREFIXES = ['Listed ', 'Found ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
+  const isToolNote = (t: string) =>
+    TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
+  const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
+  const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
+
+  // Steps: tool notes (in order) → searches → writer
   const steps = useMemo(() => {
     type Step =
+      | { kind: 'tool'; idx: number; note: { round: number; text: string } }
       | {
           kind: 'search';
           idx: number;
@@ -819,39 +836,42 @@ function RunCard({
         }
       | { kind: 'writer'; status: 'pending' | 'active' | 'done' };
 
-    const out: Step[] = searches.map((s, i) => {
+    const out: Step[] = [];
+    toolNotes.forEach((n, i) => out.push({ kind: 'tool', idx: i, note: n }));
+    searches.forEach((s, i) => {
       const isLast = i === searches.length - 1;
       const stillSearching = running && !writerActive && isLast;
-      return {
-        kind: 'search',
-        idx: i,
-        search: s,
-        status: stillSearching ? 'active' : 'done',
-      };
+      out.push({ kind: 'search', idx: i, search: s, status: stillSearching ? 'active' : 'done' });
     });
     out.push({
       kind: 'writer',
       status: writerDone ? 'done' : writerActive ? 'active' : 'pending',
     });
     return out;
-  }, [searches, running, writerActive, writerDone]);
+  }, [searches, running, writerActive, writerDone, toolNotes]);
 
-  // Collapsed summary line when done
+  // Collapsed summary line when done — includes elapsed time
   if (done && !timelineOpen) {
     return (
       <button
         type="button"
         onClick={() => setTimelineOpen(true)}
-        className="w-full text-left px-4 py-2.5 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors inline-flex items-center gap-2 text-xs text-muted-foreground motion-fade-rise"
+        className="group w-full text-left px-4 py-2.5 rounded-lg border border-border bg-secondary/30 hover:bg-secondary/60 transition-colors inline-flex items-center gap-2 text-xs text-muted-foreground motion-fade-rise"
       >
-        <ChevronRight className="h-3.5 w-3.5" />
         <Check className="h-3.5 w-3.5 text-accent" />
         <span>
-          Searched {searches.length}× · {chunkOrder.length} passages · {citations.length} citations
+          Researched in <span className="tabular-nums text-foreground/80">{fmtElapsed(elapsedMs)}</span>
+          {' · '}
+          {searches.length} search{searches.length === 1 ? '' : 'es'}
+          {toolNotes.length > 0 && ` · ${toolNotes.length} tool call${toolNotes.length === 1 ? '' : 's'}`}
+          {' · '}
+          {chunkOrder.length} passages · {citations.length} citations
         </span>
+        <ChevronRight className="h-3.5 w-3.5 ml-auto opacity-60 group-hover:opacity-100 transition-opacity" />
       </button>
     );
   }
+
 
   return (
     <Card className="p-0 overflow-hidden motion-fade-rise">
