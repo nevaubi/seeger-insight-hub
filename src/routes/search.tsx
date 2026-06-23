@@ -26,12 +26,17 @@ import {
   Check,
   PenLine,
   SlidersHorizontal,
+  Wrench,
+  Route as RouteIcon,
+  Command as CommandIcon,
+  CornerDownLeft,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AppShell } from '@/components/app-shell';
 import { OrderTypeBadge, fmtDate } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 import { Checkbox } from '@/components/ui/checkbox';
 import {
