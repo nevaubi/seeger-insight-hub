@@ -16,12 +16,12 @@ const ordersQuery = (caseId: string) =>
   queryOptions({
     queryKey: ['orders-all', caseId],
     queryFn: async () => {
-      // NOTE: v_orders does not currently expose case_id. Once that column is
-      // added to the view, re-enable: .eq('case_id', caseId)
       const { data, error } = await supabase
         .from('v_orders')
         .select('*')
+        .eq('case_id', caseId)
         .order('order_date', { ascending: false, nullsFirst: false });
+
       if (error) throw error;
       return (data ?? []) as Order[];
     },
