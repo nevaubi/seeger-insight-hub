@@ -12,9 +12,12 @@ create table if not exists public.workspace_documents (
 create index if not exists workspace_documents_case_updated_idx
   on public.workspace_documents (case_id, updated_at desc);
 
--- keep updated_at fresh on every write
+-- keep updated_at fresh on every write (search_path pinned; now() lives in pg_catalog)
 create or replace function public.touch_workspace_documents()
-returns trigger language plpgsql as $$
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
 begin
   new.updated_at = now();
   return new;
