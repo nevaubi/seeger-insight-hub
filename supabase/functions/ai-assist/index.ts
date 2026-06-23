@@ -1,10 +1,13 @@
 // Supabase Edge Function: ai-assist
-// A focused, single-turn writing assistant for the drafting workspace. Two modes:
+// A focused, single-turn writing assistant for the drafting workspace. Three modes:
 //   - "transform": rewrite/expand/shorten/retone/continue a SELECTED passage in the editor.
 //                  Returns clean replacement text only (no citations, no preamble).
 //   - "draft":     generate or revise document content from an instruction + the current
 //                  document, optionally GROUNDED in the matter's record (controlling orders)
 //                  with native sentence-level citations.
+//   - "insight":   explain/analyze a SELECTED passage (e.g. an evidence passage from the
+//                  search view), optionally answering a specific question about it. Returns
+//                  concise analytical prose grounded in the passage itself.
 //
 // Unlike legal-synthesis (multi-round Gemini router + Claude writer), this is one Claude
 // Opus 4.8 turn. Grounding, when requested, runs a single hybrid_search against the same
@@ -32,6 +35,7 @@ const GROUND_K = 8;            // grounding passages per draft request
 const GROUND_MIN_SIM = 0.2;    // vector floor (matches legal-synthesis)
 const TRANSFORM_MAX_TOKENS = 4000;
 const DRAFT_MAX_TOKENS = 8000;
+const INSIGHT_MAX_TOKENS = 2500;
 
 const DEFAULT_CASE_ID = "4ea28a93-3e76-4b10-b6da-6794fef3c7c1";
 const DEFAULT_MATTER = {
@@ -174,6 +178,18 @@ ${grounded
 Return only the requested document content — no meta-commentary about what you did unless the user explicitly asks.`;
 }
 
+function insightSystem(m: Matter): string {
+  return `You are a litigation analyst for ${m.name}, MDL No. ${m.mdl_number}, pending in ${m.court}, before ${m.judge}. You support the attorneys of plaintiffs' leadership. The user is reading the record and has selected a single passage from a controlling order or filing; they want a fast, precise read on it.
+
+Analyze ONLY the selected passage (plus any question the user asks about it). Be concise and concrete — the register of a careful associate giving a partner a quick read:
+- Say what the passage actually requires, establishes, or means in plain terms.
+- Surface the operative language, defined terms, any deadline or trigger, and who it binds.
+- Flag ambiguities, conditions, or open questions a litigator would want to check.
+- Note where the passage is silent if the user's question reaches beyond it.
+
+Stay disciplined to the passage: do not invent surrounding context, other orders, dates, or holdings that are not in the selected text. If answering the question requires material outside the passage, say so and point the attorney to where to look. Do not restate the passage verbatim; interpret it. Use brief Markdown (short paragraphs, the occasional list). Keep it tight.`;
+}
+
 // ---------- Anthropic streaming turn ----------
 
 async function streamAnthropic(
@@ -273,8 +289,10 @@ Deno.serve(async (req: Request) => {
     : DEFAULT_MATTER;
   const history: any[] = Array.isArray(payload?.messages) ? payload.messages : [];
 
-  if (!instruction) return new Response("Missing instruction", { status: 400, headers: CORS });
+  // insight mode allows an empty instruction (defaults to "explain this passage"); other modes require one.
+  if (!instruction && mode !== "insight") return new Response("Missing instruction", { status: 400, headers: CORS });
   if (mode === "transform" && !selection) return new Response("transform mode needs a selection", { status: 400, headers: CORS });
+  if (mode === "insight" && !selection) return new Response("insight mode needs a selection", { status: 400, headers: CORS });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -316,11 +334,22 @@ Deno.serve(async (req: Request) => {
         // ----- Build the Anthropic request -----
         const system = mode === "transform"
           ? transformSystem(matter)
-          : draftSystem(matter, doGround && emittedResults.length > 0);
+          : mode === "insight"
+            ? insightSystem(matter)
+            : draftSystem(matter, doGround && emittedResults.length > 0);
 
         const messages: any[] = [];
 
-        if (mode === "transform") {
+        if (mode === "insight") {
+          const question = instruction || "Explain this passage: what it requires or establishes, its significance, and any ambiguities a litigator should check.";
+          messages.push({
+            role: "user",
+            content: [{
+              type: "text",
+              text: `Selected passage from the record:\n\n<passage>\n${selection.slice(0, 12000)}\n</passage>\n\n${question}`,
+            }],
+          });
+        } else if (mode === "transform") {
           const userBlocks: any[] = [];
           if (document.trim()) {
             userBlocks.push({
@@ -360,7 +389,7 @@ Deno.serve(async (req: Request) => {
 
         const body: any = {
           model: MODEL,
-          max_tokens: mode === "transform" ? TRANSFORM_MAX_TOKENS : DRAFT_MAX_TOKENS,
+          max_tokens: mode === "transform" ? TRANSFORM_MAX_TOKENS : mode === "insight" ? INSIGHT_MAX_TOKENS : DRAFT_MAX_TOKENS,
           system,
           messages,
           stream: true,

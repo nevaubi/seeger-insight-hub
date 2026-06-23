@@ -60,6 +60,7 @@ import {
 import { useSmoothText } from '@/lib/useSmoothText';
 import { buildSynthesisDoc } from '@/lib/synthesis-export';
 import { downloadDocx, printDocument, blocksToHtml } from '@/lib/file-export';
+import { useAiAssist, type AiAssistMatter } from '@/lib/useAiAssist';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -67,6 +68,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from 'sonner';
 
 import { useMatter, type Matter } from '@/lib/matter-context';
@@ -549,6 +551,18 @@ function SynthesisPanel({
     currentRound != null ? rounds[currentRound] : undefined;
   const isFinalActive = currentRound != null && currentRound === finalRound;
 
+  // Stable matter scope for per-passage "Ask AI" insight calls (keeps EvidenceCard memo intact).
+  const insightMatter: AiAssistMatter = useMemo(
+    () => ({
+      name: currentMatter.name,
+      short_name: currentMatter.short_name,
+      mdl_number: currentMatter.mdl_number,
+      court: currentMatter.court,
+      judge: currentMatter.judge,
+    }),
+    [currentMatter],
+  );
+
   const reasoningRounds = useMemo(
     () =>
       Object.keys(thinking)
@@ -787,6 +801,8 @@ function SynthesisPanel({
         chunkOrder={chunkOrder}
         running={running}
         flashRef={flashRef}
+        caseId={currentMatter.master_case_id}
+        matter={insightMatter}
       />
     </div>
   );
@@ -799,6 +815,8 @@ function EvidenceColumn({
   chunkOrder,
   running,
   flashRef,
+  caseId,
+  matter,
 }: {
   chunks: Record<string, Chunk>;
   sortedChunkRefs: string[];
@@ -806,6 +824,8 @@ function EvidenceColumn({
   chunkOrder: string[];
   running: boolean;
   flashRef: string | null;
+  caseId: string;
+  matter: AiAssistMatter;
 }) {
   const [view, setView] = useState<'all' | 'cited' | 'uncited'>('all');
 
@@ -892,6 +912,8 @@ function EvidenceColumn({
               flash={flashRef === ref}
               flashRef={flashRef}
               cited={cites.length > 0 || neighbors.some((n) => n.citations.length > 0)}
+              caseId={caseId}
+              matter={matter}
             />
           );
         })}
@@ -1588,6 +1610,8 @@ const EvidenceCard = memo(function EvidenceCard({
   flash,
   flashRef,
   cited,
+  caseId,
+  matter,
 }: {
   chunk: Chunk;
   citations: CitationEvt[];
@@ -1595,6 +1619,8 @@ const EvidenceCard = memo(function EvidenceCard({
   flash: boolean;
   flashRef?: string | null;
   cited: boolean;
+  caseId: string;
+  matter: AiAssistMatter;
 }) {
   const pageCite =
     chunk.page_start === chunk.page_end
@@ -1714,8 +1740,14 @@ const EvidenceCard = memo(function EvidenceCard({
           return <span key={i}>{s} </span>;
         })}
       </div>
-      {chunk.pdf_url && (
-        <div className="mt-3 text-[11px]">
+      <div className="mt-3 flex items-center gap-3 text-[11px]">
+        <PassageInsight
+          passage={chunk.sentences.join(' ')}
+          label={`${chunk.order_label ?? chunk.doc_label ?? 'this passage'}${chunk.page_start != null ? ` · ${pageCite}` : ''}`}
+          caseId={caseId}
+          matter={matter}
+        />
+        {chunk.pdf_url && (
           <a
             href={chunk.pdf_url}
             target="_blank"
@@ -1724,8 +1756,8 @@ const EvidenceCard = memo(function EvidenceCard({
           >
             <ExternalLink className="h-3 w-3" /> View source PDF
           </a>
-        </div>
-      )}
+        )}
+      </div>
       {neighbors.length > 0 && (
         <div className="mt-3 pt-3 border-t border-border/50">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 inline-flex items-center gap-1">
@@ -1741,6 +1773,108 @@ const EvidenceCard = memo(function EvidenceCard({
     </Card>
   );
 });
+
+// Per-passage "Ask AI" — a popover that runs the ai-assist `insight` mode over this single
+// passage. The attorney can take the default explanation or ask a specific question; the
+// answer streams in. Disciplined to the passage (no record-wide retrieval).
+function PassageInsight({
+  passage,
+  label,
+  caseId,
+  matter,
+}: {
+  passage: string;
+  label: string;
+  caseId: string;
+  matter: AiAssistMatter;
+}) {
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [asked, setAsked] = useState(false);
+  const { run, running } = useAiAssist();
+
+  const ask = async (q: string) => {
+    setAsked(true);
+    setAnswer('');
+    await run({
+      mode: 'insight',
+      instruction: q,
+      selection: passage,
+      caseId,
+      matter,
+      onText: (delta) => setAnswer((a) => a + delta),
+    });
+  };
+
+  const QUICK = [
+    { label: 'Explain', q: '' },
+    { label: 'Obligations', q: 'What obligations or requirements does this passage impose, and on whom?' },
+    { label: 'Deadlines', q: 'Are there any deadlines or time triggers in this passage? State the trigger and interval precisely.' },
+  ];
+
+  return (
+    <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setAnswer(''); setAsked(false); setQuestion(''); } }}>
+      <PopoverTrigger asChild>
+        <button className="inline-flex items-center gap-1 text-accent hover:underline font-sans">
+          <Sparkles className="h-3 w-3" /> Ask AI
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[26rem] max-w-[90vw] p-3">
+        <div className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-2 truncate">
+          Insight · {label}
+        </div>
+        {!asked ? (
+          <>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {QUICK.map((qq) => (
+                <Button key={qq.label} variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => ask(qq.q)}>
+                  {qq.label}
+                </Button>
+              ))}
+            </div>
+            <div className="relative">
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && question.trim()) { e.preventDefault(); ask(question.trim()); }
+                }}
+                placeholder="Or ask a specific question about this passage…"
+                className="w-full text-[13px] rounded-md border border-border bg-background px-2.5 py-2 min-h-[64px] resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <div className="flex justify-end mt-2">
+                <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={!question.trim()} onClick={() => ask(question.trim())}>
+                  Ask <CornerDownLeft className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div>
+            <div className="answer-prose text-[13.5px] leading-[1.6] font-serif max-h-[40vh] overflow-y-auto">
+              {answer ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{answer}</ReactMarkdown>
+              ) : running ? (
+                <span className="text-muted-foreground inline-flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading the passage…</span>
+              ) : (
+                <span className="text-muted-foreground">No response.</span>
+              )}
+              {running && answer && <span className="motion-stream-caret" aria-hidden />}
+            </div>
+            {!running && (
+              <div className="flex justify-end mt-2 pt-2 border-t border-border/60">
+                <Button variant="ghost" size="sm" className="h-7 text-[11px]" onClick={() => { setAsked(false); setAnswer(''); }}>
+                  Ask another
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // A folded neighbor passage shown under its parent evidence card — muted when uncited,
 // highlighted (with cite badges) when the writer cited it. Carries its own chunk id so a

@@ -35,7 +35,7 @@ export type AiAssistMatter = {
 };
 
 export type AiAssistRequest = {
-  mode: 'transform' | 'draft';
+  mode: 'transform' | 'draft' | 'insight';
   instruction: string;
   selection?: string;
   document?: string;
@@ -62,7 +62,10 @@ export function useAiAssist() {
 
   const run = useCallback(async (req: AiAssistRequest): Promise<AiAssistResult | null> => {
     const instruction = req.instruction.trim();
-    if (!instruction) return null;
+    // insight mode may run with an empty instruction (defaults to "explain this passage")
+    // as long as it has a selection; every other mode requires an instruction.
+    if (!instruction && req.mode !== 'insight') return null;
+    if (req.mode === 'insight' && !req.selection?.trim()) return null;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
