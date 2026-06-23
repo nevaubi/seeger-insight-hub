@@ -42,10 +42,13 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const MODEL = "claude-opus-4-8";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 const MAX_ROUNDS = 3;
-const PER_SEARCH_K = 10;       // targeted retrieval: up to 10 fresh passages per search
-const MAX_TOTAL_CHUNKS = 36;   // ~10-12 per search across up to 3 rounds; all gathered passages persist
-const MIN_SIM = 0.2;           // vector-only floor (lexical hits bypass it); lowered from 0.3 to admit
+const PER_SEARCH_K = 10;        // targeted retrieval: up to 10 fresh passages per search
+const MAX_TOTAL_CHUNKS = 60;    // absolute ceiling across primary hits + neighbor/order expansion
+const MIN_SIM = 0.2;            // vector-only floor (lexical hits bypass it); lowered from 0.3 to admit
                                // borderline-relevant passages that bge-small scores in the 0.2-0.3 band
+const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
+const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
+const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
 
 // Backward-compatible default matter (Depo-Provera, MDL 3140). Used when a request omits
 // case_id/matter, so the existing frontend keeps working and stays correctly scoped.
@@ -129,11 +132,14 @@ function buildRouterSystem(m: Matter): string {
 YOUR JOB: read the user's question and gather the material a separate writer agent will need to answer it from the closed record — the controlling orders (PTOs, CMOs, CBOs) and the JPML transfer order, associated filings, and a scientific & regulatory background layer (described below). You do NOT write the answer, analysis, or summary. You ONLY call tools to collect the right material, then stop.
 
 YOUR TOOLS
-  1. search_the_record — semantic + keyword passage retrieval. Returns up to 10 fresh citable passages per call. This is your primary tool for substantive questions about what an order SAYS — its operative text, obligations, holdings, or defined terms — and for the scientific/regulatory background.
-  2. list_orders — the complete list of controlling orders on this matter's docket (type, number, date, title, subject tags, source PDF). Use this for questions that enumerate or survey orders ("list the case management orders", "what CBOs exist", "every order on leadership"). It returns the full matching list, not a sample.
-  3. list_deadlines — the matter's key dates and deadlines (date, category, title, who it affects, source order). Use this for calendar/deadline questions ("what hearings are coming up", "list the deadlines for plaintiffs").
-  4. lookup_counsel — counsel of record (side, firm, attorney, contact). Use this for roster questions ("who represents the defendants", "list plaintiffs' counsel").
-Prefer the structured tools (2-4) when the question is fundamentally an enumeration or a roster/calendar lookup — they are complete and exact. Prefer search_the_record when the question turns on the language or substance of an order, or on the scientific/regulatory record. You may combine tools across rounds (e.g., list_orders to find the right order, then search_the_record to pull its operative text).
+  1. search_the_record — semantic + keyword passage retrieval. Returns up to 10 fresh citable passages per call, and automatically pulls a few adjacent passages around the best hits so you get surrounding context for free. Your primary tool for what an order SAYS — its operative text, obligations, holdings, or defined terms — and for the scientific/regulatory background.
+  2. read_order — the FULL text of one named order plus any amendment versions (read_order PTO 22 returns PTO 22 AND PTO 22A, date-ordered). Use when the question turns on an order's complete operative text, or to compare a base order against its amendment for precedence. Returns citable passages.
+  3. list_orders — the complete list of controlling orders on this matter's docket (type, number, date, title, subject tags, source PDF). Use this for questions that enumerate or survey orders ("list the case management orders", "what CBOs exist", "every order on leadership"). It returns the full matching list, not a sample.
+  4. list_deadlines — the matter's key dates and deadlines (date, category, title, who it affects, source order). Use this for calendar/deadline questions ("what hearings are coming up", "list the deadlines for plaintiffs").
+  5. lookup_counsel — counsel of record (side, firm, attorney, contact). Use this for roster questions ("who represents the defendants", "list plaintiffs' counsel").
+Prefer the structured tools (3-5) when the question is fundamentally an enumeration or a roster/calendar lookup — they are complete and exact. Prefer search_the_record when the question turns on the language or substance of an order, or on the scientific/regulatory record; reach for read_order once you know the specific order whose full text or amendment history matters. You may combine tools across rounds (e.g., list_orders to find the right order, then read_order to pull its full text).
+
+WORK IN PARALLEL: you may issue SEVERAL tool calls in a SINGLE round — they execute concurrently at no extra latency. When a question has distinct facets (e.g. two different provisions, an order plus its deadlines, a base order plus a science-layer question), fire one search per facet in the same round rather than serializing them across rounds. Issue independent retrievals together; reserve later rounds for follow-ups that genuinely depend on what an earlier round returned.
 
 PASSAGE RETRIEVAL IS TARGETED: each search_the_record call returns up to 10 fresh passages. Spend your searches deliberately — every passage you gather persists and is handed to the writer, so build coverage progressively across rounds rather than trying to grab everything at once. Use a later round to fill a SPECIFIC gap left by an earlier one.
 
@@ -163,15 +169,15 @@ Beyond the orders and filings, this matter's record includes a background layer 
 IF A SEARCH RETURNS NOTHING NEW: do NOT re-issue an identical search — the same keywords and filter return the same passages you already hold, which is why a repeat yields zero new passages. Instead, change your approach materially: relax or remove a filter (an over-constrained filter is the most common cause — and note that ANY order_type/order_types filter excludes the entire scientific & regulatory layer, which has no order_type), or try different keywords. Never conclude the record is silent because one narrow query missed.
 
 THE LIVE RESEARCH TRACE — WRITE IT LIKE A LITIGATOR
-Before each tool call, state in ONE short sentence what you are retrieving and why it matters to the question. These lines stream to the attorney in real time as your visible reasoning, so write them in the register of a careful litigation associate: precise, professional, and legally fluent. Name the instrument, provision, party, deadline, or doctrine you are targeting; do not narrate mechanics ("calling search") or pad with filler. Keep each line under about 20 words — short, but substantive enough to show you understand the question.
-  Good: "Pulling the operative common-benefit assessment provisions to identify the holdback percentage and its trigger."
-  Good: "Checking whether a later CMO amends the deposition protocol set by the earlier order."
-  Good: "Enumerating the leadership orders to confirm the full slate of appointed counsel before pulling appointment terms."
+Before each round's tool calls, narrate your retrieval reasoning in ONE to THREE sentences: what you are pulling, why it matters to the question, and — when relevant — how it connects to or fills a gap left by what you already gathered. This streams to the attorney in real time as your visible reasoning, so write in the register of a careful litigation associate: precise, professional, and legally fluent. Name the instruments, provisions, parties, deadlines, or doctrines you are targeting; when you fire several searches at once, say in one breath what each is for. Do not narrate mechanics ("calling search") or pad with filler — every sentence should carry legal substance.
+  Good: "The common-benefit holdback turns on CBO 1, so I'm pulling its operative assessment provisions for the percentage and its trigger, and in parallel checking whether any later CBO amends that rate."
+  Good: "PTO 22 set the threshold proof-of-use regime; I'll read its full text alongside PTO 22A to see exactly what the amendment changed before stating the current obligation."
   Avoid: "Searching the record for information." / "Looking for relevant documents." / "Calling list_orders now."
 
 PROCESS
-  - Use up to THREE rounds. Because each search returns up to 10 fresh passages, use additional rounds to widen coverage or pin an exact term discovered in an earlier result — but stay targeted.
-  - For a single-issue question, one or two precise searches are usually enough. For a question that turns on several orders, provisions, dates, or parties, deliberately use the rounds to build coverage before stopping.
+  - Use up to THREE rounds, but cover each round's independent facets in PARALLEL (multiple tool calls at once) rather than spreading them across rounds. Reserve later rounds for genuine follow-ups — pinning an exact term you just discovered, reading the full text of an order a search surfaced, or filling a specific gap.
+  - For a single-issue question, one or two precise searches are usually enough. For a question that turns on several orders, provisions, dates, or parties, fan out across facets in the first round, then deepen.
+  - Pull MORE when a thread is clearly load-bearing: if a search shows an order is central, follow up with read_order for its full text; if the question hinges on whether an order was amended, read the base and amendment together. Match retrieval depth to how much the answer depends on it.
   - Favor COVERAGE of what the question turns on: the order numbers, dates, deadlines, parties, defined terms, and — for background questions — the studies or regulatory actions it touches.
   - As soon as the gathered material is sufficient to answer comprehensively, STOP: reply with a brief one-line note that retrieval is complete and do NOT call a tool again. Do not write the answer or any analysis.
   - Never exceed three rounds.`;
@@ -204,6 +210,12 @@ const SEARCH_TOOL_SCHEMA = {
       },
     },
     k: { type: "integer", description: "How many fresh passages to retrieve (default 10, max 10)." },
+    expand: {
+      type: "boolean",
+      description:
+        "Whether to also pull a few adjacent passages from the same document around the best hits, " +
+        "for surrounding context (default true). Set false to keep the result tight to exact matches.",
+    },
   },
 };
 
@@ -245,8 +257,33 @@ const DEADLINES_TOOL_SCHEMA = {
   },
 };
 
+const READ_ORDER_TOOL_SCHEMA = {
+  type: "object",
+  properties: {
+    order_type: { type: "string", enum: ["PTO", "CMO", "CBO", "JPML", "OTHER"] },
+    order_number: {
+      type: "string",
+      description:
+        "The order's number, e.g. '22'. Lettered amendment versions are included automatically " +
+        "(read_order PTO 22 returns PTO 22 and PTO 22A). Omit to read every order of the given type.",
+    },
+  },
+};
+
 const GEMINI_TOOLS = [
   { type: "function", function: { name: "search_the_record", description: SEARCH_TOOL_DESCRIPTION, parameters: SEARCH_TOOL_SCHEMA } },
+  {
+    type: "function",
+    function: {
+      name: "read_order",
+      description:
+        "Pull the FULL text of a specific controlling order — all its passages in order — together with any " +
+        "amendment versions (e.g. read_order PTO 22 returns PTO 22 AND its amendment PTO 22A, date-ordered). Use " +
+        "when the question turns on the complete operative text of a named order, or to compare an order against its " +
+        "amendment for temporal precedence. Returns citable passages, like search_the_record.",
+      parameters: READ_ORDER_TOOL_SCHEMA,
+    },
+  },
   {
     type: "function",
     function: {
@@ -336,8 +373,66 @@ async function callRpc(fn: string, body: any): Promise<any[]> {
   return Array.isArray(rows) ? rows : [];
 }
 
+// Build the Anthropic citable search_result block AND the UI chunk payload from one DB
+// row. Shared by hybrid_search, expand_neighbors, and order_chunks so every retrieval path
+// produces identical shapes. `extra` carries provenance flags (e.g. { neighbor: true }).
+function mapRow(r: any, extra: Record<string, unknown> = {}): { searchResult: any; chunk: any } {
+  const sentences = splitSentences(r.content);
+  const label = orderLabel(r);
+  const page = pageCite(r);
+  const title = `${label}${page ? " · " + page : ""}`;
+  const source = r.pdf_url || `mdl:${r.id}`;
+  const searchResult = {
+    type: "search_result",
+    source,
+    title,
+    content: sentences.map((s: string) => ({ type: "text", text: s })),
+    citations: { enabled: true },
+  };
+  const chunk = {
+    ref: r.id,
+    order_label: label,
+    doc_label: r.doc_label ?? null,
+    order_type: r.order_type ?? null,
+    order_number: r.order_number ?? null,
+    order_date: r.order_date ?? null,
+    page_start: r.page_start ?? null,
+    page_end: r.page_end ?? null,
+    section_label: r.section_label ?? null,
+    affects: r.affects ?? null,
+    has_deadline: !!r.has_deadline,
+    tags: r.tags ?? null,
+    pdf_url: r.pdf_url ?? null,
+    score: r.score ?? null,
+    vec_hit: !!r.vec_hit,
+    lex_hit: !!r.lex_hit,
+    sentences,
+    ...extra,
+  };
+  return { searchResult, chunk };
+}
+
+// Take fresh (unseen) rows up to `limit`, registering them in `seen` and respecting the
+// global ceiling. Shared by every retrieval path so dedup + cap behave identically.
+function collectRows(rows: any[], seen: Set<string>, limit: number, extra: Record<string, unknown> = {}) {
+  const searchResults: any[] = [];
+  const chunks: any[] = [];
+  const ids: string[] = [];
+  for (const r of rows) {
+    if (chunks.length >= limit) break;
+    if (seen.has(r.id)) continue;
+    if (seen.size >= MAX_TOTAL_CHUNKS) break;
+    seen.add(r.id);
+    const { searchResult, chunk } = mapRow(r, extra);
+    searchResults.push(searchResult);
+    chunks.push(chunk);
+    ids.push(r.id);
+  }
+  return { searchResults, chunks, ids };
+}
+
 // Call hybrid_search on the same Supabase, scoped to the matter's case_id. Returns new
-// (deduped) chunks as { searchResults: [...searchResultBlocks], chunks: [...uiChunks] }.
+// (deduped) chunks plus `hitIds` (top fresh hits in score order, for neighbor expansion).
 // `displayFilter` is the user-applied filter (shown in the UI); `caseId` is injected into
 // the RPC filter only, so it never appears in the UI filter chips.
 async function runSearch(
@@ -347,7 +442,7 @@ async function runSearch(
   displayFilter: any,
   caseId: string,
   seen: Set<string>,
-): Promise<{ searchResults: any[]; chunks: any[]; rawCount: number }> {
+): Promise<{ searchResults: any[]; chunks: any[]; rawCount: number; hitIds: string[] }> {
   const keywords = (input?.keywords && String(input.keywords).trim()) || question;
   const filter = { ...mergeFilters(displayFilter, input?.filter), case_id: caseId };
   let k = Number.isFinite(input?.k) ? Math.floor(input.k) : PER_SEARCH_K;
@@ -373,46 +468,50 @@ async function runSearch(
     throw new Error(`hybrid_search failed (${resp.status}): ${body.slice(0, 300)}`);
   }
   const rows: any[] = await resp.json();
-  const searchResults: any[] = [];
-  const chunks: any[] = [];
-  for (const r of rows) {
-    if (chunks.length >= k) break;        // cap NEW passages per call at k
-    if (seen.has(r.id)) continue;
-    if (seen.size >= MAX_TOTAL_CHUNKS) break;
-    seen.add(r.id);
-    const sentences = splitSentences(r.content);
-    const label = orderLabel(r);
-    const page = pageCite(r);
-    const title = `${label}${page ? " \u00b7 " + page : ""}`;
-    const source = r.pdf_url || `mdl:${r.id}`;
-    searchResults.push({
-      type: "search_result",
-      source,
-      title,
-      content: sentences.map((s) => ({ type: "text", text: s })),
-      citations: { enabled: true },
-    });
-    chunks.push({
-      ref: r.id,
-      order_label: label,
-      doc_label: r.doc_label ?? null,
-      order_type: r.order_type ?? null,
-      order_number: r.order_number ?? null,
-      order_date: r.order_date ?? null,
-      page_start: r.page_start ?? null,
-      page_end: r.page_end ?? null,
-      section_label: r.section_label ?? null,
-      affects: r.affects ?? null,
-      has_deadline: !!r.has_deadline,
-      tags: r.tags ?? null,
-      pdf_url: r.pdf_url ?? null,
-      score: r.score ?? null,
-      vec_hit: !!r.vec_hit,
-      lex_hit: !!r.lex_hit,
-      sentences,
-    });
-  }
-  return { searchResults, chunks, rawCount: rows.length };
+  const { searchResults, chunks, ids } = collectRows(rows, seen, k);
+  return { searchResults, chunks, rawCount: rows.length, hitIds: ids };
+}
+
+// Neighbor/sibling expansion: pull the chunks adjacent (chunk_index +/- NEIGHBOR_WINDOW,
+// same document) to a set of center hits, so the writer sees contiguous context instead of
+// isolated snippets. Positional \u2014 no embedding needed.
+async function expandNeighbors(
+  caseId: string,
+  centerIds: string[],
+  seen: Set<string>,
+): Promise<{ searchResults: any[]; chunks: any[] }> {
+  if (!centerIds.length || seen.size >= MAX_TOTAL_CHUNKS) return { searchResults: [], chunks: [] };
+  const rows = await callRpc("expand_neighbors", {
+    p_case_id: caseId,
+    p_chunk_ids: centerIds,
+    p_window: NEIGHBOR_WINDOW,
+  });
+  const { searchResults, chunks } = collectRows(rows, seen, MAX_TOTAL_CHUNKS, { neighbor: true });
+  return { searchResults, chunks };
+}
+
+// Read the full text of a named order plus any amendment versions (PTO 22 -> 22 + 22A),
+// ordered by date then position. Citable passages, handed to the writer like search hits.
+async function runReadOrder(
+  input: any,
+  caseId: string,
+  seen: Set<string>,
+): Promise<{ searchResults: any[]; chunks: any[]; count: number; versions: string[] }> {
+  const a = (input && typeof input === "object") ? input : {};
+  const orderType = a.order_type ? String(a.order_type).toUpperCase() : null;
+  const stem = (a.order_number != null && String(a.order_number).trim()) ? String(a.order_number).trim() : null;
+  if (!orderType && !stem) throw new Error("read_order needs an order_type and/or order_number");
+  const rows = await callRpc("order_chunks", {
+    p_case_id: caseId,
+    p_order_type: orderType,
+    p_number_stem: stem,
+    p_limit: READ_ORDER_LIMIT,
+  });
+  const { searchResults, chunks } = collectRows(rows, seen, READ_ORDER_LIMIT, { full_order: true });
+  const versions = [...new Set(
+    rows.map((r: any) => `${r.order_type ?? ""}${r.order_number ? " " + r.order_number : ""}`.trim()).filter(Boolean),
+  )];
+  return { searchResults, chunks, count: chunks.length, versions };
 }
 
 // ---------- structured-tool formatting ----------
@@ -798,38 +897,76 @@ Deno.serve(async (req: Request) => {
           content: r.rationale && r.rationale.trim() ? r.rationale.trim() : "Gathering the record.",
         });
 
-        const resultBlocks: string[] = [];
-        for (const t of r.toolCalls) {
-          const input = (t.args && typeof t.args === "object") ? t.args : {};
+        // Classify the round's tool calls, then ANNOUNCE them in order (instant) so the
+        // research trace reads top-to-bottom even though the retrievals run concurrently.
+        const calls = r.toolCalls.map((t) => ({
+          name: t.name as string,
+          input: (t.args && typeof t.args === "object") ? t.args : {},
+        }));
+        for (const c of calls) {
+          if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
+          else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
+          else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
+        }
 
-          if (STRUCTURED_TOOLS.has(t.name)) {
-            emit({ type: "tool", round, tool: t.name, args: input });
-            try {
-              const sr = await runStructuredTool(t.name, input, caseId);
-              searchesLog.push({ round, tool: t.name, args: input, returned: sr.count });
-              recordIndexBlocks.push(sr.writerText);
-              emit({ type: "tool", round, tool: t.name, count: sr.count, done: true });
-              resultBlocks.push(sr.routerText);
-            } catch (e) {
-              emit({ type: "tool_error", round, tool: t.name, message: (e as Error).message });
-              resultBlocks.push(`${t.name} error: ${(e as Error).message}`);
-            }
-            continue;
-          }
-
-          // Default: passage retrieval (search_the_record).
-          const mergedFilter = mergeFilters(initialFilter, input.filter);
-          emit({ type: "search", round, keywords: input.keywords ?? null, filter: mergedFilter, k: PER_SEARCH_K });
+        // Run every call in this round in PARALLEL. Dedup stays correct: each task folds its
+        // rows into `seen` inside a synchronous loop (no awaits), so the loops never interleave.
+        const settled = await Promise.all(calls.map(async (c) => {
           try {
-            const sr = await runSearch(input, embedding, question, initialFilter, caseId, seen);
-            searchesLog.push({ round, keywords: input.keywords ?? null, filter: input.filter ?? null, k: PER_SEARCH_K, returned: sr.chunks.length });
-            for (const ch of sr.chunks) emittedResults.push(ch);
-            for (const b of sr.searchResults) allSearchResults.push(b);
-            emit({ type: "chunks", round, chunks: sr.chunks });
-            resultBlocks.push(compactResults(sr.chunks, seen.size, round));
+            if (STRUCTURED_TOOLS.has(c.name)) {
+              return { kind: "structured" as const, c, sr: await runStructuredTool(c.name, c.input, caseId) };
+            }
+            if (c.name === "read_order") {
+              return { kind: "read_order" as const, c, ro: await runReadOrder(c.input, caseId, seen) };
+            }
+            const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
+            let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
+            if (c.input.expand !== false && sr.hitIds.length) {
+              try { exp = await expandNeighbors(caseId, sr.hitIds.slice(0, EXPAND_TOP_N), seen); }
+              catch { /* neighbor expansion is best-effort; never fail the search for it */ }
+            }
+            return { kind: "search" as const, c, sr, exp };
           } catch (e) {
-            emit({ type: "search_error", round, message: (e as Error).message });
-            resultBlocks.push(`Search error: ${(e as Error).message}`);
+            return { kind: "error" as const, c, message: (e as Error).message };
+          }
+        }));
+
+        // Fold results in announce order: emit chunks, build the router's result text, log.
+        const resultBlocks: string[] = [];
+        for (const s of settled) {
+          if (s.kind === "structured") {
+            searchesLog.push({ round, tool: s.c.name, args: s.c.input, returned: s.sr.count });
+            recordIndexBlocks.push(s.sr.writerText);
+            emit({ type: "tool", round, tool: s.c.name, count: s.sr.count, done: true });
+            resultBlocks.push(s.sr.routerText);
+          } else if (s.kind === "read_order") {
+            for (const ch of s.ro.chunks) emittedResults.push(ch);
+            for (const b of s.ro.searchResults) allSearchResults.push(b);
+            searchesLog.push({ round, tool: "read_order", args: s.c.input, returned: s.ro.count });
+            emit({ type: "chunks", round, chunks: s.ro.chunks });
+            emit({ type: "tool", round, tool: "read_order", count: s.ro.count, done: true });
+            const label = s.ro.versions.length ? s.ro.versions.join(" + ") : "the order";
+            resultBlocks.push(`read_order pulled the full text of ${label} (${s.ro.count} passage(s), including any amendment versions).`);
+          } else if (s.kind === "search") {
+            for (const ch of s.sr.chunks) emittedResults.push(ch);
+            for (const b of s.sr.searchResults) allSearchResults.push(b);
+            searchesLog.push({ round, keywords: s.c.input.keywords ?? null, filter: s.c.input.filter ?? null, k: PER_SEARCH_K, returned: s.sr.chunks.length, expanded: s.exp.chunks.length });
+            emit({ type: "chunks", round, chunks: s.sr.chunks });
+            if (s.exp.chunks.length) {
+              for (const ch of s.exp.chunks) emittedResults.push(ch);
+              for (const b of s.exp.searchResults) allSearchResults.push(b);
+              emit({ type: "chunks", round, chunks: s.exp.chunks });
+              emit({ type: "expand", round, source: "neighbors", count: s.exp.chunks.length });
+            }
+            resultBlocks.push(
+              compactResults(s.sr.chunks, seen.size, round) +
+              (s.exp.chunks.length ? `\n(+${s.exp.chunks.length} adjacent passage(s) pulled for surrounding context.)` : ""),
+            );
+          } else {
+            const structuredLike = s.c.name === "read_order" || STRUCTURED_TOOLS.has(s.c.name);
+            if (structuredLike) emit({ type: "tool_error", round, tool: s.c.name, message: s.message });
+            else emit({ type: "search_error", round, message: s.message });
+            resultBlocks.push(`${s.c.name} error: ${s.message}`);
           }
         }
 
@@ -839,7 +976,7 @@ Deno.serve(async (req: Request) => {
         // Feed results back as plain text; let the router refine or stop.
         routerMessages.push({
           role: "user",
-          content: `${resultBlocks.join("\n\n")}\n\nIf the gathered material is sufficient to fully answer the question, reply with a brief one-line note that retrieval is complete and do NOT call a tool. Otherwise, call a tool once more to fill the specific gap — but do NOT repeat a search you already ran; change the keywords or relax/remove a filter so it returns NEW passages.`,
+          content: `${resultBlocks.join("\n\n")}\n\nIf the gathered material is sufficient to fully answer the question, reply with a brief one-line note that retrieval is complete and do NOT call a tool. Otherwise, gather what is still missing — issue parallel calls if several gaps are independent, use read_order to pull an order's full text or its amendment, and relax filters where a narrow one came up short. Do NOT repeat a search you already ran; change the keywords, filter, or tool so it returns NEW material.`,
         });
       }
 

@@ -29,6 +29,8 @@ import {
   Wrench,
   Command as CommandIcon,
   CornerDownLeft,
+  Layers,
+  GitBranch,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -401,6 +403,7 @@ function SynthesisPanel({
     citations,
     chunks,
     chunkOrder,
+    expansions,
   } = state;
 
   const [reasoningOpen, setReasoningOpen] = useState(true);
@@ -661,7 +664,7 @@ function SynthesisPanel({
                 <span className="text-border" aria-hidden>·</span>
                 <span className="tabular-nums">{currentMatter.short_name}</span>
                 <span className="text-border" aria-hidden>·</span>
-                <span className="tabular-nums">Claude · router v12</span>
+                <span className="tabular-nums">Gemini router · Claude writer</span>
                 <span className="ml-auto tabular-nums">
                   {fmtElapsed(elapsedMs)}
                 </span>
@@ -708,6 +711,7 @@ function SynthesisPanel({
               setReasoningOpen={setReasoningOpen}
               reasoningRounds={reasoningRounds}
               reasoningScrollRef={reasoningScrollRef}
+              expansions={expansions}
               elapsedMs={elapsedMs}
               phase={phase}
             />
@@ -872,6 +876,7 @@ function RunCard({
   setReasoningOpen,
   reasoningRounds,
   reasoningScrollRef,
+  expansions,
   elapsedMs,
   phase,
 }: {
@@ -888,6 +893,7 @@ function RunCard({
   setReasoningOpen: (v: boolean) => void;
   reasoningRounds: { round: number; text: string }[];
   reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  expansions: Record<number, number>;
   elapsedMs: number;
   phase: 'idle' | 'routing' | 'searching' | 'writing' | 'done';
 }) {
@@ -898,55 +904,31 @@ function RunCard({
   void reasoningOpen;
   void setReasoningOpen;
 
-  // Tool notes are emitted by `tool` SSE events (structured router tools).
-  // Reasoning notes are emitted by interim tool_use round bodies. Separate
-  // them visually in the timeline.
-  const TOOL_PREFIXES = ['Listed ', 'Found ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
+  // Tool notes come from `tool` SSE frames: structured lookups (list_orders / lookup_counsel /
+  // list_deadlines) and read_order are retrievals; everything else is stray interim reasoning.
+  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
   const isToolNote = (t: string) =>
     TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
   const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
   const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
 
+  // The trace is grouped BY ROUND: each round leads with the router's streaming reasoning,
+  // then the retrievals it drove (full-order reads, searches, neighbor expansion). The writer
+  // is appended last; research rounds exclude the writer's final round.
+  const researchRounds = useMemo(() => {
+    const set = new Set<number>();
+    searches.forEach((s) => set.add(s.round));
+    toolNotes.forEach((n) => set.add(n.round));
+    interimNotes.forEach((n) => set.add(n.round));
+    reasoningRounds.forEach(({ round }) => set.add(round));
+    Object.keys(expansions).forEach((k) => set.add(Number(k)));
+    if (currentRound != null && !writerActive) set.add(currentRound);
+    return [...set].filter((r) => r !== finalRound).sort((a, b) => a - b);
+  }, [searches, toolNotes, interimNotes, reasoningRounds, expansions, currentRound, writerActive, finalRound]);
 
-
-
-  // Build a unified timeline ordered by round, interleaving thoughts,
-  // tool calls, and searches. The writer is appended last.
-  type TLItem =
-    | { kind: 'thought'; round: number; text: string }
-    | { kind: 'tool'; round: number; text: string }
-    | { kind: 'search'; round: number; search: SearchEvt; status: 'active' | 'done'; idx: number }
-    | { kind: 'writer'; status: 'pending' | 'active' | 'done' };
-
-  const timeline: TLItem[] = useMemo(() => {
-    const rounds = new Set<number>();
-    searches.forEach((s) => rounds.add(s.round));
-    toolNotes.forEach((n) => rounds.add(n.round));
-    interimNotes.forEach((n) => rounds.add(n.round));
-    reasoningRounds.forEach(({ round }) => rounds.add(round));
-    const ordered = [...rounds].sort((a, b) => a - b);
-    const out: TLItem[] = [];
-    let sIdx = 0;
-    for (const r of ordered) {
-      const thoughtText = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
-      if (thoughtText) out.push({ kind: 'thought', round: r, text: thoughtText });
-      for (const n of toolNotes.filter((n) => n.round === r)) {
-        out.push({ kind: 'tool', round: r, text: n.text });
-      }
-      const rSearches = searches.filter((s) => s.round === r);
-      rSearches.forEach((s) => {
-        const isLast = sIdx === searches.length - 1;
-        const stillSearching = running && !writerActive && isLast;
-        out.push({ kind: 'search', round: r, search: s, status: stillSearching ? 'active' : 'done', idx: sIdx });
-        sIdx += 1;
-      });
-    }
-    out.push({
-      kind: 'writer',
-      status: writerDone ? 'done' : writerActive ? 'active' : 'pending',
-    });
-    return out;
-  }, [searches, toolNotes, interimNotes, reasoningRounds, running, writerActive, writerDone]);
+  // The single live search = the last one emitted, while still retrieving.
+  const lastSearch = searches[searches.length - 1];
+  const writerStatus: 'pending' | 'active' | 'done' = writerDone ? 'done' : writerActive ? 'active' : 'pending';
 
   // Smoothly collapse/expand using a grid-rows trick (animates intrinsic height).
   return (
@@ -958,45 +940,68 @@ function RunCard({
       }}
       aria-hidden={!timelineOpen}
     >
-      <div className="overflow-hidden">
+      <div className="overflow-hidden" ref={reasoningScrollRef}>
         <ol className="relative pl-5 py-1">
           <div
             className="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-border via-border to-transparent"
             aria-hidden
           />
-          {timeline.map((item, i) => {
-            const status =
-              item.kind === 'search' ? item.status :
-              item.kind === 'writer' ? item.status :
-              'done';
+          {researchRounds.map((r, ri) => {
+            const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
+            const rTools = toolNotes.filter((n) => n.round === r);
+            const rSearches = searches.filter((s) => s.round === r);
+            const rInterim = interimNotes.filter((n) => n.round === r);
+            const exp = expansions[r] ?? 0;
+            const reasoningStreaming = running && currentRound === r && !writerActive;
+            const roundActive = reasoningStreaming || (running && !writerActive && lastSearch?.round === r);
+            const hasSteps = rTools.length > 0 || rSearches.length > 0 || rInterim.length > 0 || exp > 0;
             return (
               <li
-                key={`${item.kind}-${i}`}
+                key={`round-${r}`}
                 className="relative py-2 motion-stream-in"
-                style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}
+                style={{ animationDelay: `${Math.min(ri, 8) * 35}ms` }}
               >
                 <span
                   className={`absolute -left-[14px] top-[12px] h-2 w-2 rounded-full ring-2 ring-background transition-colors ${
-                    status === 'active'
-                      ? 'bg-accent motion-pulse-soft'
-                      : status === 'done'
-                        ? 'bg-accent'
-                        : 'bg-muted-foreground/30'
+                    roundActive ? 'bg-accent motion-pulse-soft' : 'bg-accent'
                   }`}
                   aria-hidden
                 />
-                {item.kind === 'thought' ? (
-                  <ThoughtStepRow round={item.round} text={item.text} streaming={running && currentRound === item.round} />
-                ) : item.kind === 'tool' ? (
-                  <ToolStepRow note={{ round: item.round, text: item.text }} />
-                ) : item.kind === 'search' ? (
-                  <SearchStepRow search={item.search} index={item.idx} status={item.status} />
-                ) : (
-                  <WriterStepRow status={item.status} citations={citations.length} />
+                <RoundReasoning round={r} text={reasoning} streaming={reasoningStreaming} />
+                {hasSteps && (
+                  <div className="mt-2 space-y-2">
+                    {rTools.map((n, i) => (
+                      <ToolStepRow key={`tool-${r}-${i}`} text={n.text} />
+                    ))}
+                    {rSearches.map((s, i) => (
+                      <SearchStepRow
+                        key={`search-${r}-${i}`}
+                        search={s}
+                        status={running && !writerActive && s === lastSearch ? 'active' : 'done'}
+                      />
+                    ))}
+                    {exp > 0 && <ExpandRow count={exp} />}
+                    {rInterim.map((n, i) => (
+                      <InterimNoteRow key={`interim-${r}-${i}`} text={n.text} />
+                    ))}
+                  </div>
                 )}
               </li>
             );
           })}
+          <li className="relative py-2">
+            <span
+              className={`absolute -left-[14px] top-[12px] h-2 w-2 rounded-full ring-2 ring-background transition-colors ${
+                writerStatus === 'active'
+                  ? 'bg-accent motion-pulse-soft'
+                  : writerStatus === 'done'
+                    ? 'bg-accent'
+                    : 'bg-muted-foreground/30'
+              }`}
+              aria-hidden
+            />
+            <WriterStepRow status={writerStatus} citations={citations.length} />
+          </li>
         </ol>
       </div>
     </div>
@@ -1004,7 +1009,10 @@ function RunCard({
 }
 
 
-function ThoughtStepRow({
+// The router's streamed rationale for a round — shown inline and in full (it is only a
+// sentence or three now), with a live caret while it streams, so the reasoning sits directly
+// above the retrievals it drove rather than collapsed behind a toggle.
+function RoundReasoning({
   round,
   text,
   streaming,
@@ -1013,100 +1021,90 @@ function ThoughtStepRow({
   text: string;
   streaming: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const preview = text.split('\n')[0].slice(0, 140);
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
+        <Brain className="h-3 w-3" />
+        <span>Reasoning · round {round}</span>
+      </div>
+      {text ? (
+        <div className="font-serif text-[13.5px] leading-[1.6] text-foreground/80">
+          {text}
+          {streaming && <span className="motion-stream-caret" aria-hidden />}
+        </div>
+      ) : streaming ? (
+        <div className="inline-flex items-center gap-2 text-[13px] text-muted-foreground/70 italic">
+          <span className="inline-block h-1 w-16 rounded motion-shimmer" />
+          planning retrieval…
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Shared layout for a retrieval step: a small kind label + icon, the body, and an optional
+// right-aligned meta (count / progress). Keeps searches, reads, and tools visually aligned.
+function StepShell({
+  icon,
+  kind,
+  children,
+  meta,
+}: {
+  icon: ReactNode;
+  kind: string;
+  children: ReactNode;
+  meta?: ReactNode;
+}) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex-1 min-w-0">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/80 hover:text-foreground transition-colors"
-        >
-          <Brain className="h-3 w-3" />
-          <span>Thought · round {round}</span>
-          {open ? (
-            <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-          ) : (
-            <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-          )}
-        </button>
-        {open ? (
-          <div className="mt-1 whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/75">
-            {text}
-            {streaming && <span className="motion-stream-caret" aria-hidden />}
-          </div>
-        ) : (
-          <div className="mt-0.5 font-serif italic text-[13.5px] text-foreground/75 truncate">
-            {preview}
-            {text.length > preview.length && '…'}
-          </div>
-        )}
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-0.5 inline-flex items-center gap-1">
+          {icon} {kind}
+        </div>
+        {children}
       </div>
+      {meta != null && (
+        <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
+          {meta}
+        </div>
+      )}
     </div>
   );
 }
 
 
-function ToolStepRow({ note }: { note: { round: number; text: string } }) {
+function ToolStepRow({ text }: { text: string }) {
+  // read_order IS a retrieval (it returns citable passages); structured lookups are not.
+  const isRead = text.startsWith('Read ');
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5 inline-flex items-center gap-1">
-          <Wrench className="h-3 w-3" /> Tool call
-        </div>
-        <div className="font-serif italic text-[14px] text-foreground/90">
-          {note.text}
-        </div>
-      </div>
-      <div className="text-[11px] text-muted-foreground/70 tabular-nums whitespace-nowrap pt-0.5 italic">
-        no vector search
-      </div>
-    </div>
+    <StepShell
+      icon={isRead ? <Layers className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
+      kind={isRead ? 'Read full text' : 'Record index'}
+      meta={isRead ? undefined : <span className="italic text-muted-foreground/60">no vector search</span>}
+    >
+      <div className="font-serif italic text-[13.5px] text-foreground/90">{text}</div>
+    </StepShell>
   );
 }
 
 
 function SearchStepRow({
   search,
-  index,
   status,
 }: {
   search: SearchEvt;
-  index: number;
   status: 'active' | 'done';
 }) {
-  const label = search.keywords
-    ? `“${search.keywords}”`
-    : 'Searching the record';
+  const label = search.keywords ? `“${search.keywords}”` : 'Semantic search of the record';
+  const filterEntries = Object.entries(search.filter ?? {});
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5">
-          Step {index + 1} · Search
-        </div>
-        <div className={`font-serif italic text-[14px] text-foreground/90 ${status === 'active' ? '' : ''}`}>
-          {label}
-        </div>
-        {Object.keys(search.filter ?? {}).length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {Object.entries(search.filter).map(([k, v]) => (
-              <span
-                key={k}
-                className="px-1.5 py-0.5 rounded border border-border bg-secondary/50 text-[10px] text-muted-foreground"
-              >
-                {k}: {String(v)}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
-        {search.count === undefined ? (
+    <StepShell
+      icon={<SearchIcon className="h-3 w-3" />}
+      kind="Search"
+      meta={
+        search.count === undefined ? (
           status === 'active' ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-1 w-12 rounded motion-shimmer" />
-            </span>
+            <span className="inline-block h-1 w-12 rounded motion-shimmer" />
           ) : (
             `k=${search.k}`
           )
@@ -1114,11 +1112,41 @@ function SearchStepRow({
           <span className="italic text-muted-foreground/70">no matches</span>
         ) : (
           `${search.count}/${search.k} chunks`
-        )}
-      </div>
+        )
+      }
+    >
+      <div className="font-serif italic text-[13.5px] text-foreground/90">{label}</div>
+      {filterEntries.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {filterEntries.map(([k, v]) => (
+            <span
+              key={k}
+              className="px-1.5 py-0.5 rounded border border-border bg-secondary/50 text-[10px] text-muted-foreground"
+            >
+              {k}: {String(v)}
+            </span>
+          ))}
+        </div>
+      )}
+    </StepShell>
+  );
+}
 
+// Neighbor/sibling expansion line — shows the adjacent passages auto-pulled for context.
+function ExpandRow({ count }: { count: number }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80">
+      <GitBranch className="h-3 w-3 text-accent/70" />
+      <span>
+        +{count} adjacent passage{count === 1 ? '' : 's'} pulled for surrounding context
+      </span>
     </div>
   );
+}
+
+// Stray interim narration from a tool_use round body (rare).
+function InterimNoteRow({ text }: { text: string }) {
+  return <div className="font-serif italic text-[13px] text-foreground/70 leading-relaxed">{text}</div>;
 }
 
 function WriterStepRow({
@@ -1450,6 +1478,16 @@ const EvidenceCard = memo(function EvidenceCard({
         {chunk.order_date && (
           <span className="text-xs text-muted-foreground tabular-nums">
             · {fmtDate(chunk.order_date)}
+          </span>
+        )}
+        {chunk.neighbor && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-accent/30 bg-accent/10 text-[10px] text-accent/90">
+            <GitBranch className="h-2.5 w-2.5" /> context
+          </span>
+        )}
+        {chunk.full_order && (
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-border bg-secondary/60 text-[10px] text-muted-foreground">
+            <Layers className="h-2.5 w-2.5" /> full text
           </span>
         )}
       </div>

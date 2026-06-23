@@ -20,6 +20,10 @@ export type Chunk = {
   score?: number;
   vec_hit?: boolean;
   lex_hit?: boolean;
+  // Provenance: neighbor = pulled as adjacent context around a hit; full_order = pulled by
+  // read_order (a full order / amendment chain) rather than by semantic search.
+  neighbor?: boolean;
+  full_order?: boolean;
   sentences: string[];
 };
 
@@ -106,6 +110,9 @@ type SseToolError = {
   tool: string;
   message: string;
 };
+// Neighbor/sibling expansion: the edge function pulled `count` adjacent passages around the
+// round's best hits for surrounding context. Aggregated per round in the UI.
+type SseExpand = { type: 'expand'; round: number; source: string; count: number };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -120,6 +127,7 @@ export type SynthEvent =
   | SseSearchError
   | SseTool
   | SseToolError
+  | SseExpand
   | SseError
   | SseDone;
 
@@ -139,6 +147,7 @@ export type SynthState = {
   citations: CitationEvt[];
   chunks: Record<string, Chunk>;
   chunkOrder: string[];
+  expansions: Record<number, number>; // round -> count of adjacent passages auto-pulled
 };
 
 const INITIAL: SynthState = {
@@ -155,6 +164,7 @@ const INITIAL: SynthState = {
   citations: [],
   chunks: {},
   chunkOrder: [],
+  expansions: {},
 };
 
 type Action =
@@ -185,6 +195,8 @@ function describeTool(tool: string, count: number): string {
       return `Found ${count} counsel record${count === 1 ? '' : 's'}`;
     case 'list_deadlines':
       return `Listed ${count} key date${count === 1 ? '' : 's'}`;
+    case 'read_order':
+      return `Read ${count} passage${count === 1 ? '' : 's'} of full order text`;
     default:
       return `${tool} returned ${count} result${count === 1 ? '' : 's'}`;
   }
@@ -345,6 +357,16 @@ function reducer(state: SynthState, action: Action): SynthState {
               ...state.notes,
               { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}` },
             ],
+          };
+        case 'expand':
+          // Neighbor/sibling expansion: aggregate the adjacent-passage count per round.
+          // The chunks themselves arrive via separate `chunks` events (flagged neighbor).
+          return {
+            ...state,
+            expansions: {
+              ...state.expansions,
+              [evt.round]: (state.expansions[evt.round] ?? 0) + (evt.count ?? 0),
+            },
           };
         case 'search_error':
           return { ...state, error: `Search error (round ${evt.round}): ${evt.message}` };
