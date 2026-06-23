@@ -48,6 +48,8 @@ const MIN_SIM = 0.2;            // vector-only floor (lexical hits bypass it); l
 const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
 const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
 const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
+const WRITER_THINKING_BUDGET = 8000;  // extended-thinking budget for the writer (citation planning)
+const WRITER_MAX_TOKENS = 24000;      // must exceed the thinking budget; remainder is the answer
 
 // Backward-compatible default matter (Depo-Provera, MDL 3140). Used when a request omits
 // case_id/matter, so the existing frontend keeps working and stays correctly scoped.
@@ -480,12 +482,21 @@ async function expandNeighbors(
   seen: Set<string>,
 ): Promise<{ searchResults: any[]; chunks: any[] }> {
   if (!centerIds.length || seen.size >= MAX_TOTAL_CHUNKS) return { searchResults: [], chunks: [] };
-  const rows = await callRpc("expand_neighbors", {
-    p_case_id: caseId,
-    p_chunk_ids: centerIds,
-    p_window: NEIGHBOR_WINDOW,
-  });
-  const { searchResults, chunks } = collectRows(rows, seen, MAX_TOTAL_CHUNKS, { neighbor: true });
+  // Expand each center separately (in parallel) so every neighbor records which hit it sits
+  // next to (parent_ref) — the UI folds neighbors under their parent passage. A neighbor
+  // adjacent to two centers is claimed by whichever is collected first (seen-dedup).
+  const perCenter = await Promise.all(centerIds.map((cid) =>
+    callRpc("expand_neighbors", { p_case_id: caseId, p_chunk_ids: [cid], p_window: NEIGHBOR_WINDOW })
+      .then((rows) => ({ cid, rows }))
+      .catch(() => ({ cid, rows: [] as any[] }))
+  ));
+  const searchResults: any[] = [];
+  const chunks: any[] = [];
+  for (const { cid, rows } of perCenter) {
+    const got = collectRows(rows, seen, MAX_TOTAL_CHUNKS, { neighbor: true, parent_ref: cid });
+    searchResults.push(...got.searchResults);
+    chunks.push(...got.chunks);
+  }
   return { searchResults, chunks };
 }
 
@@ -993,10 +1004,10 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // ----- Phase 2: Opus 4.8 writer synthesizes with citations (no extended thinking) -----
+      // ----- Phase 2: Opus 4.8 writer synthesizes with citations (extended thinking ON) -----
       const writerRound = rounds + 1;
       try {
-        emit({ type: "round", round: writerRound });
+        emit({ type: "round", round: writerRound, writer: true });
         const today = new Date().toISOString().slice(0, 10);
         const haveEvidence = allSearchResults.length > 0 || recordIndexBlocks.length > 0;
         const matterAnchor = `The attorney's question concerns this matter — ${matter.short_name}, MDL ${matter.mdl_number}. Treat the question as pertaining to this matter only; do not assume it relates to any other MDL or litigation, and do not remark on which matter the question is "framed for." Answer it directly from the ${matter.short_name} record.`;
@@ -1014,9 +1025,13 @@ Deno.serve(async (req: Request) => {
               recordIndexBlocks.join("\n\n"),
           });
         }
+        // Extended thinking lets the writer plan structure and, crucially, decide which
+        // passages support which claims BEFORE writing — which materially improves citation
+        // coverage. budget_tokens must be < max_tokens; the rest is left for the answer.
         const body: any = {
           model: MODEL,
-          max_tokens: 16000,
+          max_tokens: WRITER_MAX_TOKENS,
+          thinking: { type: "enabled", budget_tokens: WRITER_THINKING_BUDGET },
           system: [{ type: "text", text: writerSystem, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content: writerUser }],
           stream: true,

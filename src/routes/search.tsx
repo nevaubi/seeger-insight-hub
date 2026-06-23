@@ -400,6 +400,7 @@ function SynthesisPanel({
     rounds,
     currentRound,
     finalRound,
+    writerRound,
     citations,
     chunks,
     chunkOrder,
@@ -420,7 +421,7 @@ function SynthesisPanel({
     ? 'idle'
     : !running && finalRound != null
       ? 'done'
-      : currentRound != null && currentRound === finalRound
+      : currentRound != null && (currentRound === finalRound || currentRound === writerRound)
         ? 'writing'
         : searches.length === 0
           ? 'routing'
@@ -712,6 +713,7 @@ function SynthesisPanel({
               reasoningRounds={reasoningRounds}
               reasoningScrollRef={reasoningScrollRef}
               expansions={expansions}
+              writerRound={writerRound}
               elapsedMs={elapsedMs}
               phase={phase}
             />
@@ -785,11 +787,41 @@ function EvidenceColumn({
   flashRef: string | null;
 }) {
   const [view, setView] = useState<'all' | 'cited' | 'uncited'>('all');
-  const citedCount = sortedChunkRefs.filter((r) => (citationsByRef[r]?.length ?? 0) > 0).length;
-  const visible = sortedChunkRefs.filter((r) => {
-    const isCited = (citationsByRef[r]?.length ?? 0) > 0;
-    if (view === 'cited') return isCited;
-    if (view === 'uncited') return !isCited;
+
+  // Neighbor chunks fold under their parent hit. Group them, and drop them from the
+  // top-level list so the evidence column shows real hits, not the expansion context.
+  const neighborsByParent = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const ref of chunkOrder) {
+      const ch = chunks[ref];
+      if (ch?.neighbor && ch.parent_ref && chunks[ch.parent_ref]) {
+        (m[ch.parent_ref] ??= []).push(ref);
+      }
+    }
+    return m;
+  }, [chunks, chunkOrder]);
+
+  const primaryRefs = useMemo(
+    () =>
+      sortedChunkRefs.filter((r) => {
+        const ch = chunks[r];
+        if (!ch) return false;
+        // fold a neighbor away only if its parent is actually present as a card
+        return !(ch.neighbor && ch.parent_ref && chunks[ch.parent_ref]);
+      }),
+    [sortedChunkRefs, chunks],
+  );
+  const neighborCount = chunkOrder.length - primaryRefs.length;
+
+  // A primary counts as "cited" if it OR any of its folded neighbors is cited.
+  const refCited = (ref: string) =>
+    (citationsByRef[ref]?.length ?? 0) > 0 ||
+    (neighborsByParent[ref] ?? []).some((nr) => (citationsByRef[nr]?.length ?? 0) > 0);
+
+  const citedCount = primaryRefs.filter(refCited).length;
+  const visible = primaryRefs.filter((r) => {
+    if (view === 'cited') return refCited(r);
+    if (view === 'uncited') return !refCited(r);
     return true;
   });
 
@@ -797,7 +829,10 @@ function EvidenceColumn({
     <div className="lg:flex-[2] lg:h-full flex flex-col min-w-0 overflow-hidden">
       <div className="shrink-0 py-3 border-b border-border bg-background z-10 mb-4 px-1 flex items-center justify-between gap-2">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Evidence · {chunkOrder.length} passage{chunkOrder.length === 1 ? '' : 's'}
+          Evidence · {primaryRefs.length} passage{primaryRefs.length === 1 ? '' : 's'}
+          {neighborCount > 0 && (
+            <span className="text-muted-foreground/60 font-normal"> · +{neighborCount} context</span>
+          )}
         </div>
         <div className="inline-flex items-center rounded-md border border-border bg-secondary/40 p-0.5 text-[10.5px]">
           {(['all', 'cited', 'uncited'] as const).map((v) => (
@@ -824,13 +859,18 @@ function EvidenceColumn({
           const ch = chunks[ref];
           if (!ch) return null;
           const cites = citationsByRef[ref] ?? [];
+          const neighbors = (neighborsByParent[ref] ?? [])
+            .map((nr) => ({ chunk: chunks[nr], citations: citationsByRef[nr] ?? [] }))
+            .filter((n): n is { chunk: Chunk; citations: CitationEvt[] } => !!n.chunk);
           return (
             <EvidenceCard
               key={ref}
               chunk={ch}
               citations={cites}
+              neighbors={neighbors}
               flash={flashRef === ref}
-              cited={cites.length > 0}
+              flashRef={flashRef}
+              cited={cites.length > 0 || neighbors.some((n) => n.citations.length > 0)}
             />
           );
         })}
@@ -877,6 +917,7 @@ function RunCard({
   reasoningRounds,
   reasoningScrollRef,
   expansions,
+  writerRound,
   elapsedMs,
   phase,
 }: {
@@ -894,6 +935,7 @@ function RunCard({
   reasoningRounds: { round: number; text: string }[];
   reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
   expansions: Record<number, number>;
+  writerRound: number | null;
   elapsedMs: number;
   phase: 'idle' | 'routing' | 'searching' | 'writing' | 'done';
 }) {
@@ -922,13 +964,23 @@ function RunCard({
     interimNotes.forEach((n) => set.add(n.round));
     reasoningRounds.forEach(({ round }) => set.add(round));
     Object.keys(expansions).forEach((k) => set.add(Number(k)));
-    if (currentRound != null && !writerActive) set.add(currentRound);
-    return [...set].filter((r) => r !== finalRound).sort((a, b) => a - b);
-  }, [searches, toolNotes, interimNotes, reasoningRounds, expansions, currentRound, writerActive, finalRound]);
+    if (currentRound != null && currentRound !== writerRound && !writerActive) set.add(currentRound);
+    // The writer's round (which carries its extended thinking) is rendered as the final step,
+    // not as a research round.
+    return [...set].filter((r) => r !== finalRound && r !== writerRound).sort((a, b) => a - b);
+  }, [searches, toolNotes, interimNotes, reasoningRounds, expansions, currentRound, writerActive, finalRound, writerRound]);
+
+  // The writer's extended-thinking text (streams before the answer, then stays available).
+  const writerReasoning = writerRound != null
+    ? (reasoningRounds.find((t) => t.round === writerRound)?.text ?? '').trim()
+    : '';
 
   // The single live search = the last one emitted, while still retrieving.
   const lastSearch = searches[searches.length - 1];
-  const writerStatus: 'pending' | 'active' | 'done' = writerDone ? 'done' : writerActive ? 'active' : 'pending';
+  // The writer is "active" once its round is current (covers extended thinking, which streams
+  // before the answer text) — finalRound is only set once the answer finishes.
+  const writerActiveNow = running && writerRound != null && currentRound === writerRound;
+  const writerStatus: 'pending' | 'active' | 'done' = writerDone ? 'done' : (writerActive || writerActiveNow) ? 'active' : 'pending';
 
   // Smoothly collapse/expand using a grid-rows trick (animates intrinsic height).
   return (
@@ -1001,6 +1053,9 @@ function RunCard({
               aria-hidden
             />
             <WriterStepRow status={writerStatus} citations={citations.length} />
+            {writerReasoning && (
+              <WriterReasoning text={writerReasoning} streaming={writerActiveNow} />
+            )}
           </li>
         </ol>
       </div>
@@ -1038,6 +1093,37 @@ function RoundReasoning({
           planning retrieval…
         </div>
       ) : null}
+    </div>
+  );
+}
+
+// The Opus writer's extended-thinking stream, shown under the final "Write" step. It can be
+// long, so it's collapsible and scroll-capped; it streams live while the writer reasons,
+// then rides the trace's auto-collapse once the answer is done.
+function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
+      >
+        <Brain className="h-3 w-3" />
+        <span>Writer reasoning</span>
+        {streaming && <span className="normal-case tracking-normal text-accent/80">· thinking</span>}
+        {open ? (
+          <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+        ) : (
+          <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+        )}
+      </button>
+      {open && (
+        <div className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/65 pr-1">
+          {text}
+          {streaming && <span className="motion-stream-caret" aria-hidden />}
+        </div>
+      )}
     </div>
   );
 }
@@ -1417,12 +1503,16 @@ function splitOnSentinel(
 const EvidenceCard = memo(function EvidenceCard({
   chunk,
   citations,
+  neighbors = [],
   flash,
+  flashRef,
   cited,
 }: {
   chunk: Chunk;
   citations: CitationEvt[];
+  neighbors?: { chunk: Chunk; citations: CitationEvt[] }[];
   flash: boolean;
+  flashRef?: string | null;
   cited: boolean;
 }) {
   const pageCite =
@@ -1555,9 +1645,78 @@ const EvidenceCard = memo(function EvidenceCard({
           </a>
         </div>
       )}
+      {neighbors.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-border/50">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mb-2 inline-flex items-center gap-1">
+            <GitBranch className="h-2.5 w-2.5" /> Surrounding context · {neighbors.length}
+          </div>
+          <div className="space-y-2 pl-2.5 border-l border-border/40">
+            {neighbors.map(({ chunk: n, citations: nc }) => (
+              <NeighborPassage key={n.ref} chunk={n} citations={nc} flash={flashRef === n.ref} />
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
   );
 });
+
+// A folded neighbor passage shown under its parent evidence card — muted when uncited,
+// highlighted (with cite badges) when the writer cited it. Carries its own chunk id so a
+// citation click can still scroll to it.
+function NeighborPassage({
+  chunk,
+  citations,
+  flash,
+}: {
+  chunk: Chunk;
+  citations: CitationEvt[];
+  flash: boolean;
+}) {
+  const page =
+    chunk.page_start === chunk.page_end
+      ? `p.${chunk.page_start}`
+      : `p.${chunk.page_start}–${chunk.page_end}`;
+  const cited = citations.length > 0;
+  const sentCites = useMemo(() => {
+    const m: Record<number, number[]> = {};
+    for (const c of citations) for (let i = c.sentence_start; i < c.sentence_end; i++) (m[i] ??= []).push(c.num);
+    return m;
+  }, [citations]);
+  return (
+    <div
+      id={`chunk-${chunk.ref}`}
+      className={`text-[12.5px] leading-relaxed ${cited ? 'text-foreground/85' : 'text-foreground/55'} ${flash ? 'motion-ring-pulse rounded px-1' : ''}`}
+    >
+      <span className="text-[10px] text-muted-foreground/55 tabular-nums mr-1.5 align-baseline">{page}</span>
+      {chunk.sentences.map((s, i) => {
+        const nums = sentCites[i];
+        if (nums && nums.length) {
+          return (
+            <span
+              key={i}
+              className="bg-accent/15 rounded-sm px-0.5"
+              style={{ boxShadow: 'inset 0 -1px 0 hsl(var(--accent) / 0.5)' }}
+            >
+              {s}
+              <span className="inline-flex gap-0.5 ml-1 align-baseline">
+                {nums.map((n) => (
+                  <span
+                    key={n}
+                    className="inline-flex items-center justify-center min-w-[1rem] h-[1rem] px-1 rounded-full text-[9px] font-sans font-medium bg-accent text-accent-foreground tabular-nums"
+                  >
+                    {n}
+                  </span>
+                ))}
+              </span>{' '}
+            </span>
+          );
+        }
+        return <span key={i}>{s} </span>;
+      })}
+    </div>
+  );
+}
 
 // ----- browse passages (legacy hybrid) -----
 

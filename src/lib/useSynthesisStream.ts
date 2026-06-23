@@ -24,6 +24,7 @@ export type Chunk = {
   // read_order (a full order / amendment chain) rather than by semantic search.
   neighbor?: boolean;
   full_order?: boolean;
+  parent_ref?: string | null; // for neighbor chunks: the hit they were expanded around
   sentences: string[];
 };
 
@@ -61,7 +62,7 @@ export type RoundNote = { round: number; text: string };
 
 // ---- Discriminated SSE event union ---------------------------------------
 
-type SseRound = { type: 'round'; round: number };
+type SseRound = { type: 'round'; round: number; writer?: boolean };
 type SseThinking = { type: 'thinking'; round: number; text: string };
 type SseSearch = {
   type: 'search';
@@ -144,6 +145,7 @@ export type SynthState = {
   rounds: Record<number, RoundState>;
   currentRound: number | null;
   finalRound: number | null;
+  writerRound: number | null; // the round the Opus writer runs in (carries its extended thinking)
   citations: CitationEvt[];
   chunks: Record<string, Chunk>;
   chunkOrder: string[];
@@ -161,6 +163,7 @@ const INITIAL: SynthState = {
   rounds: {},
   currentRound: null,
   finalRound: null,
+  writerRound: null,
   citations: [],
   chunks: {},
   chunkOrder: [],
@@ -221,6 +224,7 @@ function reducer(state: SynthState, action: Action): SynthState {
             ...state,
             rounds: { ...state.rounds, [evt.round]: cur },
             currentRound: Math.max(state.currentRound ?? -1, evt.round),
+            writerRound: evt.writer ? evt.round : state.writerRound,
           };
         }
         case 'thinking':
