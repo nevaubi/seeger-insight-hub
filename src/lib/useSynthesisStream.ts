@@ -87,6 +87,25 @@ type SseRoundEnd = {
   stop_reason: 'tool_use' | 'end_turn';
 };
 type SseSearchError = { type: 'search_error'; round: number; message: string };
+// Structured router tools (list_orders / lookup_counsel / list_deadlines).
+// The edge function emits a start frame ({ tool, args }) followed by a done
+// frame ({ tool, count, done: true }) for each structured-tool call, and a
+// tool_error frame if the underlying RPC fails (non-fatal: the router/writer
+// continue with whatever else was gathered).
+type SseTool = {
+  type: 'tool';
+  round: number;
+  tool: string;
+  args?: Record<string, unknown>;
+  count?: number;
+  done?: boolean;
+};
+type SseToolError = {
+  type: 'tool_error';
+  round: number;
+  tool: string;
+  message: string;
+};
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -99,6 +118,8 @@ export type SynthEvent =
   | SseCitation
   | SseRoundEnd
   | SseSearchError
+  | SseTool
+  | SseToolError
   | SseError
   | SseDone;
 
@@ -110,7 +131,7 @@ export type SynthState = {
   error: string | null;
   submitted: string | null;
   searches: SearchEvt[];
-  notes: RoundNote[]; // interim narration from tool_use rounds
+  notes: RoundNote[]; // interim narration from tool_use rounds + structured-tool results
   thinking: Record<number, string>;
   rounds: Record<number, RoundState>;
   currentRound: number | null;
@@ -152,6 +173,21 @@ function ensureRound(rounds: Record<number, RoundState>, round: number): RoundSt
       blockIndex: {},
     }
   );
+}
+
+// Human-readable summary of a completed structured-tool call, shown in the
+// research trace as a round note.
+function describeTool(tool: string, count: number): string {
+  switch (tool) {
+    case 'list_orders':
+      return `Listed ${count} controlling order${count === 1 ? '' : 's'}`;
+    case 'lookup_counsel':
+      return `Found ${count} counsel record${count === 1 ? '' : 's'}`;
+    case 'list_deadlines':
+      return `Listed ${count} key date${count === 1 ? '' : 's'}`;
+    default:
+      return `${tool} returned ${count} result${count === 1 ? '' : 's'}`;
+  }
 }
 
 function reducer(state: SynthState, action: Action): SynthState {
@@ -282,14 +318,48 @@ function reducer(state: SynthState, action: Action): SynthState {
               : state.notes,
           };
         }
+        case 'tool': {
+          // Structured router tool (list_orders / lookup_counsel / list_deadlines).
+          // The done frame carries the result count; surface it as a research
+          // note. The start frame only advances the active round.
+          if (evt.done) {
+            return {
+              ...state,
+              notes: [
+                ...state.notes,
+                { round: evt.round, text: describeTool(evt.tool, evt.count ?? 0) },
+              ],
+            };
+          }
+          return {
+            ...state,
+            currentRound: Math.max(state.currentRound ?? -1, evt.round),
+          };
+        }
+        case 'tool_error':
+          // Non-fatal: the backend continues with whatever else it gathered, so
+          // record this as a note rather than a fatal error.
+          return {
+            ...state,
+            notes: [
+              ...state.notes,
+              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}` },
+            ],
+          };
         case 'search_error':
           return { ...state, error: `Search error (round ${evt.round}): ${evt.message}` };
         case 'error':
           return { ...state, error: evt.message ?? 'Unknown error' };
         case 'done':
           return { ...state, running: false, embedding: false };
+        default:
+          // Unknown/future event type: ignore it rather than returning
+          // undefined (which would blank the reducer state and crash render).
+          return state;
       }
     }
+    default:
+      return state;
   }
 }
 
