@@ -423,21 +423,22 @@ function SynthesisPanel({
           ? 'routing'
           : 'searching';
 
-  // collapse reasoning + timeline once final answer is done
+  // collapse timeline once the writer (final round) starts streaming output
   useEffect(() => {
-    if (!running && finalRound != null) {
-      setReasoningOpen(false);
+    if (currentRound != null && currentRound === finalRound) {
       setTimelineOpen(false);
+      setReasoningOpen(false);
     }
-  }, [running, finalRound]);
+  }, [currentRound, finalRound]);
 
-  // open reasoning at start of a new query
+  // open timeline at start of a new query
   useEffect(() => {
     if (running) {
       setReasoningOpen(true);
       setTimelineOpen(true);
     }
   }, [submitted, running]);
+
 
   // auto-scroll reasoning panel as new thinking streams
   useEffect(() => {
