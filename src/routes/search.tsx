@@ -214,6 +214,7 @@ function Composer({
   setFilters,
   filtersOpen,
   setFiltersOpen,
+  showFilters = false,
 }: {
   q: string;
   setQ: (s: string) => void;
@@ -226,7 +227,9 @@ function Composer({
   setFilters: (f: Filters) => void;
   filtersOpen: boolean;
   setFiltersOpen: (v: boolean) => void;
+  showFilters?: boolean;
 }) {
+
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeFilterCount = filtersActive(filters);
 
@@ -280,31 +283,36 @@ function Composer({
           </div>
         </div>
 
-        <div className="mt-2 flex items-center justify-between px-1">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(!filtersOpen)}
-            className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {filtersOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
-            <SlidersHorizontal className="h-3 w-3" /> Filters
-            {activeFilterCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-accent/15 text-accent text-[10px] tabular-nums">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-        </div>
+        {showFilters && (
+          <>
+            <div className="mt-2 flex items-center justify-between px-1">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(!filtersOpen)}
+                className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {filtersOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <SlidersHorizontal className="h-3 w-3" /> Filters
+                {activeFilterCount > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-accent/15 text-accent text-[10px] tabular-nums">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </div>
 
-        {filtersOpen && (
-          <div className="mt-2 motion-fade-rise">
-            <FilterControls value={filters} onChange={setFilters} />
-          </div>
+            {filtersOpen && (
+              <div className="mt-2 motion-fade-rise">
+                <FilterControls value={filters} onChange={setFilters} />
+              </div>
+            )}
+          </>
         )}
+
       </form>
     </div>
   );
@@ -560,6 +568,7 @@ function SynthesisPanel({
                 filtersOpen={filtersOpen}
                 setFiltersOpen={setFiltersOpen}
               />
+
             </div>
           </div>
 
@@ -737,6 +746,7 @@ function SynthesisPanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
+
           />
         </div>
       </div>
@@ -945,12 +955,74 @@ function RunCard({
   }
 
 
+  // Build a unified timeline ordered by round, interleaving thoughts,
+  // tool calls, and searches. The writer is appended last.
+  type TLItem =
+    | { kind: 'thought'; round: number; text: string }
+    | { kind: 'tool'; round: number; text: string }
+    | { kind: 'search'; round: number; search: SearchEvt; status: 'active' | 'done'; idx: number }
+    | { kind: 'writer'; status: 'pending' | 'active' | 'done' };
+
+  const timeline: TLItem[] = useMemo(() => {
+    const rounds = new Set<number>();
+    searches.forEach((s) => rounds.add(s.round));
+    toolNotes.forEach((n) => rounds.add(n.round));
+    interimNotes.forEach((n) => rounds.add(n.round));
+    reasoningRounds.forEach(({ round }) => rounds.add(round));
+    const ordered = [...rounds].sort((a, b) => a - b);
+    const out: TLItem[] = [];
+    let sIdx = 0;
+    for (const r of ordered) {
+      const thoughtText = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
+      if (thoughtText) out.push({ kind: 'thought', round: r, text: thoughtText });
+      for (const n of toolNotes.filter((n) => n.round === r)) {
+        out.push({ kind: 'tool', round: r, text: n.text });
+      }
+      const rSearches = searches.filter((s) => s.round === r);
+      rSearches.forEach((s) => {
+        const isLast = sIdx === searches.length - 1;
+        const stillSearching = running && !writerActive && isLast;
+        out.push({ kind: 'search', round: r, search: s, status: stillSearching ? 'active' : 'done', idx: sIdx });
+        sIdx += 1;
+      });
+    }
+    out.push({
+      kind: 'writer',
+      status: writerDone ? 'done' : writerActive ? 'active' : 'pending',
+    });
+    return out;
+  }, [searches, toolNotes, interimNotes, reasoningRounds, running, writerActive, writerDone]);
+
+  // Collapsed summary line when done
+  if (done && !timelineOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setTimelineOpen(true)}
+        className="group w-full text-left py-2 inline-flex items-center gap-2 text-xs text-muted-foreground motion-fade-rise hover:text-foreground transition-colors"
+      >
+        <Check className="h-3.5 w-3.5 text-accent" />
+        <span>
+          Researched in <span className="tabular-nums text-foreground/80">{fmtElapsed(elapsedMs)}</span>
+          {' · '}
+          {searches.length} search{searches.length === 1 ? '' : 'es'}
+          {toolNotes.length > 0 && ` · ${toolNotes.length} tool call${toolNotes.length === 1 ? '' : 's'}`}
+          {' · '}
+          {reasoningRounds.length} thought{reasoningRounds.length === 1 ? '' : 's'}
+          {' · '}
+          {chunkOrder.length} passages · {citations.length} citations
+        </span>
+        <ChevronRight className="h-3.5 w-3.5 ml-auto opacity-60 group-hover:opacity-100 transition-opacity" />
+      </button>
+    );
+  }
+
   return (
-    <Card className="p-0 overflow-hidden motion-fade-rise bg-card/85 backdrop-blur border-border shadow-sm">
+    <div className="motion-fade-rise">
       <button
         type="button"
         onClick={() => setTimelineOpen(!timelineOpen)}
-        className="w-full px-4 py-3 flex items-center gap-2 hover:bg-secondary/40 transition-colors"
+        className="w-full flex items-center gap-2 py-1 -mx-1 px-1 rounded text-left hover:bg-secondary/30 transition-colors"
       >
         {timelineOpen ? (
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -984,102 +1056,90 @@ function RunCard({
       </button>
 
       {timelineOpen && (
-        <div className="border-t border-border">
-          <Tabs value={tab} onValueChange={(v) => setTab(v as 'timeline' | 'thoughts')}>
-            <div className="px-4 pt-3">
-              <TabsList className="h-8 bg-secondary/40">
-                <TabsTrigger value="timeline" className="text-[11px] px-3 h-6 data-[state=active]:bg-card">
-                  Timeline
-                </TabsTrigger>
-                <TabsTrigger value="thoughts" className="text-[11px] px-3 h-6 data-[state=active]:bg-card">
-                  <Brain className="h-3 w-3 mr-1" /> Thoughts
-                  {reasoningRounds.length > 0 && (
-                    <span className="ml-1.5 tabular-nums opacity-60">{reasoningRounds.length}</span>
-                  )}
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="timeline" className="px-5 pb-4 pt-3 mt-0">
-              <ol className="relative pl-5">
-                <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden />
-                {steps.map((s, i) => {
-                  const status =
-                    s.kind === 'search' ? s.status :
-                    s.kind === 'writer' ? s.status :
-                    'done';
-                  return (
-                    <li
-                      key={i}
-                      className="relative py-2 motion-stream-in"
-                      style={{ animationDelay: `${Math.min(i, 6) * 40}ms` }}
-                    >
-                      <span
-                        className={`absolute -left-[14px] top-[14px] h-2.5 w-2.5 rounded-full ring-2 ring-background ${
-                          status === 'active'
-                            ? 'bg-accent motion-pulse-soft'
-                            : status === 'done'
-                              ? 'bg-accent'
-                              : 'bg-muted-foreground/30'
-                        }`}
-                        aria-hidden
-                      />
-                      {s.kind === 'search' ? (
-                        <SearchStepRow search={s.search} index={s.idx} status={s.status} />
-                      ) : s.kind === 'tool' ? (
-                        <ToolStepRow note={s.note} />
-                      ) : (
-                        <WriterStepRow status={s.status} citations={citations.length} />
-                      )}
-                    </li>
-                  );
-                })}
-              </ol>
-
-              {interimNotes.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-border/50">
-                  {interimNotes.map((n) => (
-                    <div
-                      key={`note-${n.round}-${n.text.length}`}
-                      className="text-[11px] text-muted-foreground/80 italic pl-1 py-0.5"
-                    >
-                      Round {n.round} note: {truncate(n.text, 240)}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="thoughts" className="px-5 pb-4 pt-3 mt-0">
-              {reasoningRounds.length === 0 ? (
-                <div className="text-[12px] text-muted-foreground italic py-2">
-                  No reasoning emitted yet.
-                </div>
-              ) : (
-                <div
-                  ref={reasoningScrollRef}
-                  className="max-h-[18rem] overflow-y-auto rounded-md border border-border/60 bg-secondary/20 px-3 py-2 [mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]"
-                >
-                  {reasoningRounds.map(({ round, text }) => (
-                    <div key={round} className="pt-2 first:pt-0">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                        Round {round}
-                      </div>
-                      <div className="whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/75">
-                        {text}
-                        {running && <span className="motion-stream-caret" aria-hidden />}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        </div>
+        <ol className="relative mt-2 pl-5">
+          <div className="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-border via-border to-transparent" aria-hidden />
+          {timeline.map((item, i) => {
+            const status =
+              item.kind === 'search' ? item.status :
+              item.kind === 'writer' ? item.status :
+              'done';
+            return (
+              <li
+                key={`${item.kind}-${i}`}
+                className="relative py-2 motion-stream-in"
+                style={{ animationDelay: `${Math.min(i, 8) * 35}ms` }}
+              >
+                <span
+                  className={`absolute -left-[14px] top-[12px] h-2 w-2 rounded-full ring-2 ring-background transition-colors ${
+                    status === 'active'
+                      ? 'bg-accent motion-pulse-soft'
+                      : status === 'done'
+                        ? 'bg-accent'
+                        : 'bg-muted-foreground/30'
+                  }`}
+                  aria-hidden
+                />
+                {item.kind === 'thought' ? (
+                  <ThoughtStepRow round={item.round} text={item.text} streaming={running && currentRound === item.round} />
+                ) : item.kind === 'tool' ? (
+                  <ToolStepRow note={{ round: item.round, text: item.text }} />
+                ) : item.kind === 'search' ? (
+                  <SearchStepRow search={item.search} index={item.idx} status={item.status} />
+                ) : (
+                  <WriterStepRow status={item.status} citations={citations.length} />
+                )}
+              </li>
+            );
+          })}
+        </ol>
       )}
-    </Card>
+    </div>
   );
 }
+
+function ThoughtStepRow({
+  round,
+  text,
+  streaming,
+}: {
+  round: number;
+  text: string;
+  streaming: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const preview = text.split('\n')[0].slice(0, 140);
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/80 hover:text-foreground transition-colors"
+        >
+          <Brain className="h-3 w-3" />
+          <span>Thought · round {round}</span>
+          {open ? (
+            <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+          ) : (
+            <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+          )}
+        </button>
+        {open ? (
+          <div className="mt-1 whitespace-pre-wrap font-mono text-[11.5px] leading-[1.55] text-foreground/75">
+            {text}
+            {streaming && <span className="motion-stream-caret" aria-hidden />}
+          </div>
+        ) : (
+          <div className="mt-0.5 font-serif italic text-[13.5px] text-foreground/75 truncate">
+            {preview}
+            {text.length > preview.length && '…'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function ToolStepRow({ note }: { note: { round: number; text: string } }) {
   return (
@@ -1666,6 +1726,7 @@ function BrowsePanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
+            showFilters
           />
           <div className="mt-8 w-full max-w-2xl">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
@@ -1836,6 +1897,7 @@ function BrowsePanel({
           setFilters={setFilters}
           filtersOpen={filtersOpen}
           setFiltersOpen={setFiltersOpen}
+            showFilters
         />
       </div>
     </div>
