@@ -423,21 +423,22 @@ function SynthesisPanel({
           ? 'routing'
           : 'searching';
 
-  // collapse reasoning + timeline once final answer is done
+  // collapse timeline once the writer (final round) starts streaming output
   useEffect(() => {
-    if (!running && finalRound != null) {
-      setReasoningOpen(false);
+    if (currentRound != null && currentRound === finalRound) {
       setTimelineOpen(false);
+      setReasoningOpen(false);
     }
-  }, [running, finalRound]);
+  }, [currentRound, finalRound]);
 
-  // open reasoning at start of a new query
+  // open timeline at start of a new query
   useEffect(() => {
     if (running) {
       setReasoningOpen(true);
       setTimelineOpen(true);
     }
   }, [submitted, running]);
+
 
   // auto-scroll reasoning panel as new thinking streams
   useEffect(() => {
@@ -993,71 +994,22 @@ function RunCard({
     return out;
   }, [searches, toolNotes, interimNotes, reasoningRounds, running, writerActive, writerDone]);
 
-  // Collapsed summary line when done
-  if (done && !timelineOpen) {
-    return (
-      <button
-        type="button"
-        onClick={() => setTimelineOpen(true)}
-        className="group w-full text-left py-2 inline-flex items-center gap-2 text-xs text-muted-foreground motion-fade-rise hover:text-foreground transition-colors"
-      >
-        <Check className="h-3.5 w-3.5 text-accent" />
-        <span>
-          Researched in <span className="tabular-nums text-foreground/80">{fmtElapsed(elapsedMs)}</span>
-          {' · '}
-          {searches.length} search{searches.length === 1 ? '' : 'es'}
-          {toolNotes.length > 0 && ` · ${toolNotes.length} tool call${toolNotes.length === 1 ? '' : 's'}`}
-          {' · '}
-          {reasoningRounds.length} thought{reasoningRounds.length === 1 ? '' : 's'}
-          {' · '}
-          {chunkOrder.length} passages · {citations.length} citations
-        </span>
-        <ChevronRight className="h-3.5 w-3.5 ml-auto opacity-60 group-hover:opacity-100 transition-opacity" />
-      </button>
-    );
-  }
-
+  // Smoothly collapse/expand using a grid-rows trick (animates intrinsic height).
   return (
-    <div className="motion-fade-rise">
-      <button
-        type="button"
-        onClick={() => setTimelineOpen(!timelineOpen)}
-        className="w-full flex items-center gap-2 py-1 -mx-1 px-1 rounded text-left hover:bg-secondary/30 transition-colors"
-      >
-        {timelineOpen ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-        <span className="relative inline-flex h-2 w-2">
-          <span
-            className={`absolute inset-0 rounded-full ${
-              phase === 'done' ? 'bg-accent' : 'bg-accent motion-pulse-soft'
-            }`}
+    <div
+      className="grid transition-[grid-template-rows,opacity] duration-500 ease-out"
+      style={{
+        gridTemplateRows: timelineOpen ? '1fr' : '0fr',
+        opacity: timelineOpen ? 1 : 0,
+      }}
+      aria-hidden={!timelineOpen}
+    >
+      <div className="overflow-hidden">
+        <ol className="relative pl-5 py-1">
+          <div
+            className="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-border via-border to-transparent"
             aria-hidden
           />
-        </span>
-        <span className="text-[12px] font-medium text-foreground">
-          {phase === 'done'
-            ? 'Research complete'
-            : phase === 'writing'
-              ? 'Writing the answer'
-              : phase === 'searching'
-                ? 'Searching the record'
-                : phase === 'routing'
-                  ? 'Planning approach'
-                  : 'Agent ready'}
-        </span>
-        <span className="ml-auto inline-flex items-center gap-3 text-[11px] text-muted-foreground tabular-nums">
-          <span>{fmtElapsed(elapsedMs)}</span>
-          <span aria-hidden className="text-border">·</span>
-          <span>{searches.length}s · {chunkOrder.length}p · {citations.length}c</span>
-        </span>
-      </button>
-
-      {timelineOpen && (
-        <ol className="relative mt-2 pl-5">
-          <div className="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-border via-border to-transparent" aria-hidden />
           {timeline.map((item, i) => {
             const status =
               item.kind === 'search' ? item.status :
@@ -1092,10 +1044,11 @@ function RunCard({
             );
           })}
         </ol>
-      )}
+      </div>
     </div>
   );
 }
+
 
 function ThoughtStepRow({
   round,
