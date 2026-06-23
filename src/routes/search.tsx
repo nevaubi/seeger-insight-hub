@@ -283,31 +283,36 @@ function Composer({
           </div>
         </div>
 
-        <div className="mt-2 flex items-center justify-between px-1">
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(!filtersOpen)}
-            className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {filtersOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
-            <SlidersHorizontal className="h-3 w-3" /> Filters
-            {activeFilterCount > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-accent/15 text-accent text-[10px] tabular-nums">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-        </div>
+        {showFilters && (
+          <>
+            <div className="mt-2 flex items-center justify-between px-1">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(!filtersOpen)}
+                className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {filtersOpen ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                <SlidersHorizontal className="h-3 w-3" /> Filters
+                {activeFilterCount > 0 && (
+                  <span className="ml-1 inline-flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-accent/15 text-accent text-[10px] tabular-nums">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </div>
 
-        {filtersOpen && (
-          <div className="mt-2 motion-fade-rise">
-            <FilterControls value={filters} onChange={setFilters} />
-          </div>
+            {filtersOpen && (
+              <div className="mt-2 motion-fade-rise">
+                <FilterControls value={filters} onChange={setFilters} />
+              </div>
+            )}
+          </>
         )}
+
       </form>
     </div>
   );
