@@ -129,6 +129,25 @@ function AskTheRecord() {
   const [mode, setMode] = useState<'synth' | 'browse'>('synth');
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+
+  return (
+    <AppShell>
+      <div className="px-6 lg:px-10 pt-6 pb-2 flex items-center gap-1 text-xs">
+        <ModeButton active={mode === 'synth'} onClick={() => setMode('synth')}>
+          <Brain className="h-3 w-3" /> Ask the record
+        </ModeButton>
+        <ModeButton active={mode === 'browse'} onClick={() => setMode('browse')}>
+          <BookOpen className="h-3 w-3" /> Browse passages
+        </ModeButton>
+      </div>
+
+      {mode === 'synth' ? (
+        <SynthesisPanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
+      ) : (
+        <BrowsePanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
+      )}
+    </AppShell>
+  );
 }
 
 // Lightweight elapsed-time hook — ticks every 100ms while `running` is true,
@@ -155,31 +174,6 @@ function fmtElapsed(ms: number): string {
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   const s = ms / 1000;
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
-}
-
-// Re-open the original function body so this stays a syntactically valid module.
-function _AskTheRecordTail() {
-  const [_q] = useState('');
-  void _q;
-
-  return (
-    <AppShell>
-      <div className="px-6 lg:px-10 pt-6 pb-2 flex items-center gap-1 text-xs">
-        <ModeButton active={mode === 'synth'} onClick={() => setMode('synth')}>
-          <Brain className="h-3 w-3" /> Ask the record
-        </ModeButton>
-        <ModeButton active={mode === 'browse'} onClick={() => setMode('browse')}>
-          <BookOpen className="h-3 w-3" /> Browse passages
-        </ModeButton>
-      </div>
-
-      {mode === 'synth' ? (
-        <SynthesisPanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
-      ) : (
-        <BrowsePanel q={q} setQ={setQ} filters={filters} setFilters={setFilters} />
-      )}
-    </AppShell>
-  );
 }
 
 function ModeButton({
