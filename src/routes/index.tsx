@@ -14,19 +14,17 @@ const dashboardQuery = (caseId: string) =>
     queryKey: ['dashboard', caseId],
     queryFn: async () => {
       const todayStr = today();
-      // NOTE: v_orders has no case_id column today, so order counts/lists are
-      // not per-matter yet. Other views (v_counsel, v_key_dates, v_case_roster)
-      // are properly scoped.
       const rosterBase = () => supabase.from('v_case_roster').select('id', { count: 'exact', head: true })
         .or(`id.eq.${caseId},parent_case_id.eq.${caseId}`);
       const [ordersCount, casesCount, jpmlCount, counselAll, upcoming, recent] = await Promise.all([
-        supabase.from('v_orders').select('id', { count: 'exact', head: true }),
+        supabase.from('v_orders').select('id', { count: 'exact', head: true }).eq('case_id', caseId),
         rosterBase(),
         rosterBase().eq('on_jpml_schedule_a', true),
         supabase.from('v_counsel').select('firm_name').eq('case_id', caseId),
         supabase.from('v_key_dates').select('*').eq('case_id', caseId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(6),
-        supabase.from('v_orders').select('*').not('order_date', 'is', null).order('order_date', { ascending: false }).limit(6),
+        supabase.from('v_orders').select('*').eq('case_id', caseId).not('order_date', 'is', null).order('order_date', { ascending: false }).limit(6),
       ]);
+
 
       const firms = new Set((counselAll.data ?? []).map((r: { firm_name: string | null }) => r.firm_name).filter(Boolean));
       return {
