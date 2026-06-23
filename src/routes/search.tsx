@@ -31,6 +31,9 @@ import {
   CornerDownLeft,
   Layers,
   GitBranch,
+  Download,
+  FileText,
+  Printer,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -55,6 +58,16 @@ import {
   type SearchEvt,
 } from '@/lib/useSynthesisStream';
 import { useSmoothText } from '@/lib/useSmoothText';
+import { buildSynthesisDoc } from '@/lib/synthesis-export';
+import { downloadDocx, printDocument, blocksToHtml } from '@/lib/file-export';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
 
 import { useMatter, type Matter } from '@/lib/matter-context';
 
@@ -723,6 +736,14 @@ function SynthesisPanel({
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                   Answer
                 </div>
+                {!running && finalRound != null && rounds[finalRound] && (
+                  <AnswerExportMenu
+                    question={submitted ?? 'Research memorandum'}
+                    round={rounds[finalRound]}
+                    citations={citations.filter((c) => c.round === finalRound)}
+                    matter={currentMatter}
+                  />
+                )}
               </div>
               <div className="max-w-[68ch]">
                 <AnswerStream
@@ -1274,6 +1295,66 @@ function truncate(s: string, n: number) {
 // ----- Answer rendering -----
 
 const CITE_SENTINEL_RE = /⟦cite:([\d,]+)⟧/g;
+
+function AnswerExportMenu({
+  question,
+  round,
+  citations,
+  matter,
+}: {
+  question: string;
+  round: RoundState;
+  citations: CitationEvt[];
+  matter: Matter;
+}) {
+  const exportMatter = {
+    name: matter.name,
+    short_name: matter.short_name,
+    mdl_number: matter.mdl_number,
+    court: matter.court,
+    judge: matter.judge,
+  };
+
+  const doc = () => buildSynthesisDoc({ question, round, citations, matter: exportMatter });
+
+  const doDocx = () => {
+    const d = doc();
+    downloadDocx(`${matter.short_name}-${question}`.slice(0, 80), d.blocks);
+    toast.success('Exported answer to Word (.docx)');
+  };
+  const doPrint = () => {
+    const d = doc();
+    const ok = printDocument({
+      title: question,
+      metaLine: `<span class="matter">${matter.short_name}</span> · MDL ${matter.mdl_number} · ${matter.court} · ${matter.judge}`,
+      // Keep the title heading; drop the italic meta paragraph + its rule (index 1,2)
+      // since the print template renders the matter line in its own header.
+      bodyHtml: blocksToHtml([d.blocks[0], ...d.blocks.slice(3)]),
+    });
+    if (!ok) toast.error('Allow pop-ups to print / save as PDF');
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2 font-sans h-7 text-xs">
+          <Download className="h-3.5 w-3.5" />
+          Export
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onClick={doDocx} className="gap-2 cursor-pointer">
+          <FileText className="h-4 w-4 text-[hsl(215_60%_40%)]" />
+          Word document (.docx)
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={doPrint} className="gap-2 cursor-pointer">
+          <Printer className="h-4 w-4 text-muted-foreground" />
+          Print / Save as PDF
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function AnswerStream({
   activeRound,
