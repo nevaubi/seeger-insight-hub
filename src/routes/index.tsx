@@ -1,45 +1,49 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useSuspenseQuery, queryOptions } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, FileText, Users, Building2, Gavel, CheckCircle2 } from 'lucide-react';
+import { useQuery, queryOptions } from '@tanstack/react-query';
+import { AlertTriangle, ArrowRight, FileText, Users, Building2, Gavel, CheckCircle2, Loader2 } from 'lucide-react';
 import { AppShell, PageHeader } from '@/components/app-shell';
 import { OrderTypeBadge, TagChips, CategoryBadge, fmtDate, fmtDateRange, isRule702 } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
 import { supabase, type Order, type KeyDate } from '@/lib/supabase';
+import { useMatter } from '@/lib/matter-context';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const dashboardQuery = queryOptions({
-  queryKey: ['dashboard'],
-  queryFn: async () => {
-    const todayStr = today();
-    const [orders, ordersCount, casesCount, jpmlCount, counselAll, upcoming, recent] = await Promise.all([
-      supabase.from('v_orders').select('id', { count: 'exact', head: true }),
-      supabase.from('v_orders').select('id', { count: 'exact', head: true }),
-      supabase.from('v_case_roster').select('id', { count: 'exact', head: true }),
-      supabase.from('v_case_roster').select('id', { count: 'exact', head: true }).eq('on_jpml_schedule_a', true),
-      supabase.from('v_counsel').select('firm_name'),
-      supabase.from('v_key_dates').select('*').gte('event_date', todayStr).order('event_date', { ascending: true }).limit(6),
-      supabase.from('v_orders').select('*').not('order_date', 'is', null).order('order_date', { ascending: false }).limit(6),
-    ]);
+const dashboardQuery = (caseId: string) =>
+  queryOptions({
+    queryKey: ['dashboard', caseId],
+    queryFn: async () => {
+      const todayStr = today();
+      // NOTE: v_orders has no case_id column today, so order counts/lists are
+      // not per-matter yet. Other views (v_counsel, v_key_dates, v_case_roster)
+      // are properly scoped.
+      const rosterBase = () => supabase.from('v_case_roster').select('id', { count: 'exact', head: true })
+        .or(`id.eq.${caseId},parent_case_id.eq.${caseId}`);
+      const [ordersCount, casesCount, jpmlCount, counselAll, upcoming, recent] = await Promise.all([
+        supabase.from('v_orders').select('id', { count: 'exact', head: true }),
+        rosterBase(),
+        rosterBase().eq('on_jpml_schedule_a', true),
+        supabase.from('v_counsel').select('firm_name').eq('case_id', caseId),
+        supabase.from('v_key_dates').select('*').eq('case_id', caseId).gte('event_date', todayStr).order('event_date', { ascending: true }).limit(6),
+        supabase.from('v_orders').select('*').not('order_date', 'is', null).order('order_date', { ascending: false }).limit(6),
+      ]);
 
-    const firms = new Set((counselAll.data ?? []).map((r: any) => r.firm_name).filter(Boolean));
-    void orders;
-    return {
-      counts: {
-        orders: ordersCount.count ?? 0,
-        cases: casesCount.count ?? 0,
-        jpml: jpmlCount.count ?? 0,
-        counsel: counselAll.data?.length ?? 0,
-        firms: firms.size,
-      },
-      upcoming: (upcoming.data ?? []) as KeyDate[],
-      recent: (recent.data ?? []) as Order[],
-    };
-  },
-});
+      const firms = new Set((counselAll.data ?? []).map((r: { firm_name: string | null }) => r.firm_name).filter(Boolean));
+      return {
+        counts: {
+          orders: ordersCount.count ?? 0,
+          cases: casesCount.count ?? 0,
+          jpml: jpmlCount.count ?? 0,
+          counsel: counselAll.data?.length ?? 0,
+          firms: firms.size,
+        },
+        upcoming: (upcoming.data ?? []) as KeyDate[],
+        recent: (recent.data ?? []) as Order[],
+      };
+    },
+  });
 
 export const Route = createFileRoute('/')({
-  loader: ({ context }) => context.queryClient.ensureQueryData(dashboardQuery),
   component: Dashboard,
   errorComponent: ({ error }) => (
     <AppShell>
@@ -50,15 +54,32 @@ export const Route = createFileRoute('/')({
 });
 
 function Dashboard() {
-  const { data } = useSuspenseQuery(dashboardQuery);
+  const { currentMatter } = useMatter();
+  const { data, isLoading } = useQuery(dashboardQuery(currentMatter.master_case_id));
   const navigate = useNavigate();
+
+  const cfg = currentMatter.config ?? {};
+  const headerTitle = currentMatter.name;
+  const headerDesc = `MDL No. ${currentMatter.mdl_number} · ${currentMatter.court} · Hon. ${currentMatter.judge}`;
+
+  if (isLoading || !data) {
+    return (
+      <AppShell>
+        <PageHeader title={headerTitle} description={headerDesc} />
+        <div className="px-8 py-10 text-sm text-muted-foreground inline-flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
       <PageHeader
-        title="In re: Depo-Provera Products Liability Litigation"
-        description="MDL No. 3140 · U.S. District Court, Northern District of Florida, Pensacola Division · Hon. M. Casey Rodgers · Mag. Judge Hope T. Cannon"
+        title={headerTitle}
+        description={headerDesc}
       />
+
 
       <div className="px-8 py-6 space-y-10">
         {/* Stat cards */}
@@ -138,26 +159,16 @@ function Dashboard() {
           {/* Strategic posture */}
           <Card className="p-5 bg-secondary/40">
             <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Context</div>
-            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Strategic posture</h2>
+            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">{currentMatter.short_name}</h2>
             <div className="mt-4 text-sm leading-relaxed text-foreground/85 space-y-3 font-serif">
-              <p>
-                The MDL is in <strong>pretrial</strong>, with general-causation discovery
-                ongoing. Plaintiffs allege long-term use of Depo-Provera (depot
-                medroxyprogesterone acetate) causes intracranial meningioma and that
-                defendants failed to warn.
-              </p>
-              <p>
-                The <strong>Rule 702 (Daubert) hearing on general causation</strong> is
-                the gating event — its outcome will materially determine the trajectory
-                of the entire MDL.
-              </p>
+              <p>{cfg.subtitle ?? currentMatter.name}</p>
               <p className="text-xs text-muted-foreground font-sans not-italic pt-1 border-t border-border">
-                Defendants: Pfizer, Pharmacia &amp; Upjohn, Pharmacia LLC, Greenstone
-                LLC, Viatris Inc., Prasco LLC.
+                MDL {currentMatter.mdl_number} · {currentMatter.court} · Hon. {currentMatter.judge}
               </p>
             </div>
           </Card>
         </section>
+
 
         {/* Recent orders */}
         <section className="motion-safe:motion-fade-rise">

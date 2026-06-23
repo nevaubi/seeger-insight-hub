@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useSuspenseQuery, queryOptions } from '@tanstack/react-query';
+import { useQuery, queryOptions } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { CheckCircle2, Search as SearchIcon, Star } from 'lucide-react';
 import { AppShell, PageHeader } from '@/components/app-shell';
@@ -9,36 +9,37 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { supabase, type CaseRow, type CounselRow } from '@/lib/supabase';
+import { useMatter } from '@/lib/matter-context';
 import { cn } from '@/lib/utils';
 
-const casesQuery = queryOptions({
-  queryKey: ['roster-cases'],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('v_case_roster')
-      .select('*')
-      .order('date_filed', { ascending: false, nullsFirst: false });
-    if (error) throw error;
-    return (data ?? []) as CaseRow[];
-  },
-});
+const casesQuery = (masterCaseId: string) =>
+  queryOptions({
+    queryKey: ['roster-cases', masterCaseId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('v_case_roster')
+        .select('*')
+        .or(`id.eq.${masterCaseId},parent_case_id.eq.${masterCaseId}`)
+        .order('date_filed', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as CaseRow[];
+    },
+  });
 
-const counselQuery = queryOptions({
-  queryKey: ['roster-counsel'],
-  queryFn: async () => {
-    const { data, error } = await supabase.from('v_counsel').select('*');
-    if (error) throw error;
-    return (data ?? []) as CounselRow[];
-  },
-});
+const counselQuery = (masterCaseId: string) =>
+  queryOptions({
+    queryKey: ['roster-counsel', masterCaseId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('v_counsel')
+        .select('*')
+        .eq('case_id', masterCaseId);
+      if (error) throw error;
+      return (data ?? []) as CounselRow[];
+    },
+  });
 
 export const Route = createFileRoute('/roster')({
-  loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(casesQuery),
-      context.queryClient.ensureQueryData(counselQuery),
-    ]);
-  },
   component: RosterPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
@@ -47,11 +48,12 @@ export const Route = createFileRoute('/roster')({
 });
 
 function RosterPage() {
+  const { currentMatter } = useMatter();
   return (
     <AppShell>
       <PageHeader
         title="Roster & Key Players"
-        description="The MDL master case and member roster, plus counsel of record across both sides."
+        description={`${currentMatter.short_name} master case and member roster, plus counsel of record across both sides.`}
       />
       <div className="px-8 py-6">
         <Tabs defaultValue="cases">
@@ -68,7 +70,8 @@ function RosterPage() {
 }
 
 function CasesTab() {
-  const { data: cases } = useSuspenseQuery(casesQuery);
+  const { currentMatter } = useMatter();
+  const { data: cases = [] } = useQuery(casesQuery(currentMatter.master_case_id));
   const [courtFilter, setCourtFilter] = useState<string>('all');
   const [certifiedOnly, setCertifiedOnly] = useState(false);
 
@@ -185,7 +188,8 @@ function CaseRowEl({ c }: { c: CaseRow }) {
 }
 
 function CounselTab() {
-  const { data: counsel } = useSuspenseQuery(counselQuery);
+  const { currentMatter } = useMatter();
+  const { data: counsel = [] } = useQuery(counselQuery(currentMatter.master_case_id));
   const [sideFilter, setSideFilter] = useState<'all' | 'plaintiff' | 'defendant'>('all');
   const [q, setQ] = useState('');
 
