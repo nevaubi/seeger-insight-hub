@@ -1442,14 +1442,27 @@ const EvidenceCard = memo(function EvidenceCard({
     return m;
   }, [citations]);
 
+  const citeNums = useMemo(() => Array.from(new Set(citations.map((c) => c.num))).sort((a, b) => a - b), [citations]);
+
   return (
     <Card
       id={`chunk-${chunk.ref}`}
-      className={`p-4 motion-fade-rise transition-shadow ${
+      className={`relative p-4 motion-fade-rise transition-shadow ${
         cited ? 'border-l-[3px] border-l-accent' : ''
-      } ${flash ? 'motion-flash-ring' : ''}`}
+      } ${flash ? 'motion-ring-pulse' : ''}`}
       style={{ transitionDuration: 'var(--dur-base)' }}
     >
+      {citeNums.length > 0 && (
+        <div className="absolute -top-2 -right-2 inline-flex items-center gap-0.5 px-1.5 h-5 rounded-full bg-accent text-accent-foreground text-[10px] font-medium font-sans tabular-nums shadow-sm">
+          {citeNums.slice(0, 3).map((n, i) => (
+            <span key={n}>
+              {i > 0 && <span className="opacity-60 mx-0.5">·</span>}
+              #{n}
+            </span>
+          ))}
+          {citeNums.length > 3 && <span className="opacity-70 ml-0.5">+{citeNums.length - 3}</span>}
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap">
         {chunk.order_type ? (
           <OrderTypeBadge type={chunk.order_type} number={chunk.order_number ?? null} />
