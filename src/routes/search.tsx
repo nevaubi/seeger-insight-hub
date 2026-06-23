@@ -1059,14 +1059,13 @@ function ToolStepRow({ note }: { note: { round: number; text: string } }) {
           {note.text}
         </div>
       </div>
-      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
-        <span className="inline-flex items-center gap-1 text-accent/80">
-          <Check className="h-3 w-3" />
-        </span>
+      <div className="text-[11px] text-muted-foreground/70 tabular-nums whitespace-nowrap pt-0.5 italic">
+        no vector search
       </div>
     </div>
   );
 }
+
 
 function SearchStepRow({
   search,
@@ -1103,16 +1102,21 @@ function SearchStepRow({
         )}
       </div>
       <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
-        {search.count !== undefined ? (
-          `${search.count} passage${search.count === 1 ? '' : 's'}`
-        ) : status === 'active' ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-1 w-12 rounded motion-shimmer" />
-          </span>
+        {search.count === undefined ? (
+          status === 'active' ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-1 w-12 rounded motion-shimmer" />
+            </span>
+          ) : (
+            `k=${search.k}`
+          )
+        ) : search.count === 0 ? (
+          <span className="italic text-muted-foreground/70">no matches</span>
         ) : (
-          `k=${search.k}`
+          `${search.count}/${search.k} chunks`
         )}
       </div>
+
     </div>
   );
 }
