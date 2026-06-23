@@ -27,7 +27,6 @@ import {
   PenLine,
   SlidersHorizontal,
   Wrench,
-  Route as RouteIcon,
   Command as CommandIcon,
   CornerDownLeft,
 } from 'lucide-react';
