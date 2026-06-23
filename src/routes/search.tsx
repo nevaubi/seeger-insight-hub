@@ -567,6 +567,7 @@ function SynthesisPanel({
                 setFilters={setFilters}
                 filtersOpen={filtersOpen}
                 setFiltersOpen={setFiltersOpen}
+            showFilters
               />
             </div>
           </div>
@@ -745,6 +746,7 @@ function SynthesisPanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
+            showFilters
           />
         </div>
       </div>
@@ -1674,6 +1676,7 @@ function BrowsePanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
+            showFilters
           />
           <div className="mt-8 w-full max-w-2xl">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
@@ -1844,6 +1847,7 @@ function BrowsePanel({
           setFilters={setFilters}
           filtersOpen={filtersOpen}
           setFiltersOpen={setFiltersOpen}
+            showFilters
         />
       </div>
     </div>
