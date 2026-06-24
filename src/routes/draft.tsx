@@ -24,6 +24,10 @@ import {
   AlertTriangle,
   XCircle,
   X,
+  Mail,
+  ListChecks,
+  CalendarClock,
+  Gavel,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -691,6 +695,29 @@ function CustomTransform({ disabled, onRun }: { disabled: boolean; onRun: (instr
   );
 }
 
+const DRAFT_TEMPLATES: { icon: typeof Mail; title: string; prompt: string }[] = [
+  {
+    icon: Mail,
+    title: 'Meet-and-confer letter',
+    prompt: 'Draft a meet-and-confer letter to opposing counsel addressing outstanding discovery deficiencies, citing the controlling discovery order.',
+  },
+  {
+    icon: ListChecks,
+    title: 'Status-conference agenda',
+    prompt: 'Outline an agenda for the next status conference, organized by open issues, pending motions, and upcoming deadlines.',
+  },
+  {
+    icon: CalendarClock,
+    title: 'Deadline & obligations summary',
+    prompt: "Summarize the upcoming deadlines and each party's obligations under the operative case management order.",
+  },
+  {
+    icon: Gavel,
+    title: 'Motion-to-compel outline',
+    prompt: 'Draft an outline for a motion to compel discovery, with argument headings and the governing legal standard.',
+  },
+];
+
 function AssistantPane({
   caseId, matter, documentText, onInsert, onAppend,
 }: {
@@ -712,10 +739,10 @@ function AssistantPane({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (override?: string) => {
+    const text = (override ?? input).trim();
     if (!text || running) return;
-    setInput('');
+    if (!override) setInput('');
     const userMsg: ChatMsg = { id: `u${idRef.current++}`, role: 'user', content: text };
     const asstId = `a${idRef.current++}`;
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
@@ -753,13 +780,33 @@ function AssistantPane({
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[40vh]">
           {messages.length === 0 && (
-            <div className="text-center text-sm text-muted-foreground py-10 px-4">
-              <Sparkles className="h-5 w-5 mx-auto mb-3 text-accent/70" />
-              <p className="font-serif text-[15px] text-foreground/80 mb-2">Ask the assistant to draft for you.</p>
-              <p className="text-xs leading-relaxed">
-                “Draft a meet-and-confer letter on the deposition protocol,” or “Outline a status-conference agenda.”
-                With grounding on, factual claims are cited to the controlling orders.
-              </p>
+            <div className="py-8 px-2">
+              <div className="text-center text-sm text-muted-foreground mb-5">
+                <Sparkles className="h-5 w-5 mx-auto mb-3 text-accent/70" />
+                <p className="font-serif text-[15px] text-foreground/80 mb-2">Ask the assistant to draft for you.</p>
+                <p className="text-xs leading-relaxed">
+                  Start from a template below, or describe what you need. With grounding on, factual
+                  claims are cited to the controlling orders.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {DRAFT_TEMPLATES.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.title}
+                      type="button"
+                      onClick={() => send(t.prompt)}
+                      disabled={running}
+                      title={t.prompt}
+                      className="group flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
+                      <span className="text-[12px] font-sans font-medium text-foreground/90 leading-snug">{t.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
           {messages.map((m) => (
@@ -779,7 +826,7 @@ function AssistantPane({
               className="resize-none min-h-[72px] pr-12 text-[14px]"
               disabled={running}
             />
-            <Button size="sm" className="absolute bottom-2 right-2 h-8 w-8 p-0" disabled={!input.trim() || running} onClick={send}>
+            <Button size="sm" className="absolute bottom-2 right-2 h-8 w-8 p-0" disabled={!input.trim() || running} onClick={() => send()}>
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <CornerDownLeft className="h-4 w-4" />}
             </Button>
           </div>
