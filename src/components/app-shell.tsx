@@ -7,6 +7,7 @@ import {
   Users,
   PenLine,
   ScrollText,
+  Table2,
   Scale,
   PanelLeftClose,
   PanelLeftOpen,
@@ -33,6 +34,7 @@ const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: bo
   { to: '/deadlines', label: 'Deadlines & Calendar', icon: CalendarDays },
   { to: '/roster', label: 'Roster & Key Players', icon: Users },
   { to: '/draft', label: 'Drafting Workspace', icon: PenLine },
+  { to: '/review', label: 'Tabular Review', icon: Table2 },
 ];
 
 function MatterSwitcher({ collapsed }: { collapsed: boolean }) {

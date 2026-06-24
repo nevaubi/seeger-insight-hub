@@ -7,6 +7,9 @@ export const SYNTHESIS_ENDPOINT = `${SUPABASE_URL}/functions/v1/legal-synthesis`
 export const AI_ASSIST_ENDPOINT = `${SUPABASE_URL}/functions/v1/ai-assist`;
 export const RECAP_SYNC_ENDPOINT = `${SUPABASE_URL}/functions/v1/recap-sync`;
 export const CITE_CHECK_ENDPOINT = `${SUPABASE_URL}/functions/v1/cite-check`;
+export const TABULAR_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-ingest`;
+export const TABULAR_EXTRACT_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-extract`;
+export const REVIEW_FILES_BUCKET = 'review-files';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -139,6 +142,70 @@ export interface CiteCheckSummary {
   invalid: number;
   results: CiteCheckResult[];
 }
+
+// ---- Tabular Review (document-grid) ----
+export type ReviewFileStatus = 'uploaded' | 'transcribing' | 'ready' | 'error';
+export type ReviewColumnType = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'list' | 'currency';
+export type ReviewCellState = 'pending' | 'running' | 'done' | 'not_found' | 'needs_review' | 'error';
+
+export interface ReviewSet {
+  id: string;
+  case_id: string | null;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewFile {
+  id: string;
+  review_set_id: string;
+  filename: string;
+  storage_path: string;
+  mime_type: string | null;
+  byte_size: number | null;
+  page_count: number | null;
+  char_count: number | null;
+  status: ReviewFileStatus;
+  error: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewColumn {
+  id: string;
+  review_set_id: string;
+  ordinal: number;
+  name: string;
+  prompt: string | null;
+  data_type: ReviewColumnType;
+  enum_options: string[] | null;
+  created_at: string;
+}
+
+export interface ReviewCell {
+  id: string;
+  review_set_id: string;
+  review_file_id: string;
+  review_column_id: string;
+  value_text: string | null;
+  value_json: unknown;
+  state: ReviewCellState;
+  confidence: number | null;
+  model: string | null;
+  error: string | null;
+  run_at: string | null;
+}
+
+export interface ReviewCellCitation {
+  id: string;
+  cell_id: string;
+  page_number: number | null;
+  quote: string | null;
+  verified: boolean;
+}
+
+export const MAX_REVIEW_FILES = 5;
 
 export interface WorkspaceDocument {
   id: string;
