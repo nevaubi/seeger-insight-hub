@@ -13,6 +13,7 @@ import { Route as SearchRouteImport } from './routes/search'
 import { Route as RosterRouteImport } from './routes/roster'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as DraftRouteImport } from './routes/draft'
+import { Route as DocketRouteImport } from './routes/docket'
 import { Route as DeadlinesRouteImport } from './routes/deadlines'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -24,6 +25,11 @@ const SearchRoute = SearchRouteImport.update({
 const DraftRoute = DraftRouteImport.update({
   id: '/draft',
   path: '/draft',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocketRoute = DocketRouteImport.update({
+  id: '/docket',
+  path: '/docket',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RosterRoute = RosterRouteImport.update({
@@ -50,6 +56,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
@@ -67,6 +75,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/roster': typeof RosterRoute
@@ -74,15 +83,16 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
+  fullPaths: '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/roster' | '/search'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
-  id: '__root__' | '/' | '/deadlines' | '/draft' | '/orders' | '/roster' | '/search'
+  to: '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/roster' | '/search'
+  id: '__root__' | '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/roster' | '/search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DeadlinesRoute: typeof DeadlinesRoute
+  DocketRoute: typeof DocketRoute
   DraftRoute: typeof DraftRoute
   OrdersRoute: typeof OrdersRoute
   RosterRoute: typeof RosterRoute
@@ -119,6 +129,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DraftRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docket': {
+      id: '/docket'
+      path: '/docket'
+      fullPath: '/docket'
+      preLoaderRoute: typeof DocketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/deadlines': {
       id: '/deadlines'
       path: '/deadlines'
@@ -139,6 +156,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DeadlinesRoute: DeadlinesRoute,
+  DocketRoute: DocketRoute,
   DraftRoute: DraftRoute,
   OrdersRoute: OrdersRoute,
   RosterRoute: RosterRoute,
