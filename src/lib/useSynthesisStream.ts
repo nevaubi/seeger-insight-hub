@@ -10,8 +10,8 @@ export type Chunk = {
   order_type?: string | null;
   order_number?: string | null;
   order_date?: string | null;
-  page_start: number;
-  page_end: number;
+  page_start: number | null;
+  page_end: number | null;
   section_label?: string | null;
   affects?: string | null;
   has_deadline?: boolean;
@@ -25,6 +25,18 @@ export type Chunk = {
   neighbor?: boolean;
   full_order?: boolean;
   parent_ref?: string | null; // for neighbor chunks: the hit they were expanded around
+  // External case-law authority (kind: 'caselaw') retrieved via CourtListener. These carry a
+  // case citation instead of an order/page, and pdf_url points to courtlistener.com.
+  kind?: 'caselaw' | null;
+  case_name?: string | null;
+  full_citation?: string | null;
+  reporter_cite?: string | null;
+  court?: string | null;
+  case_date?: string | null;
+  cite_count?: number | null;
+  status?: string | null;
+  docket_number?: string | null;
+  excerpted?: boolean;
   sentences: string[];
 };
 
@@ -200,6 +212,8 @@ function describeTool(tool: string, count: number): string {
       return `Listed ${count} key date${count === 1 ? '' : 's'}`;
     case 'read_order':
       return `Read ${count} passage${count === 1 ? '' : 's'} of full order text`;
+    case 'search_caselaw':
+      return `Searched case law — ${count} opinion${count === 1 ? '' : 's'}`;
     default:
       return `${tool} returned ${count} result${count === 1 ? '' : 's'}`;
   }

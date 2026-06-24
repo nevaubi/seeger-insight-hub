@@ -1520,12 +1520,14 @@ function CitationChip({
   onClick: (ref: string) => void;
 }) {
   if (!cite) return null;
-  const label = `Citation ${num}: ${cite.order_label ?? cite.title ?? 'source'} page ${cite.page}`;
+  const src = cite.order_label ?? cite.title ?? 'source';
+  const pageStr = cite.page ? ` page ${cite.page}` : '';
+  const label = `Citation ${num}: ${src}${pageStr}`;
   return (
     <button
       type="button"
       onClick={() => onClick(cite.ref)}
-      title={`${cite.order_label ?? ''} p.${cite.page}`}
+      title={cite.page ? `${cite.order_label ?? ''} p.${cite.page}` : (cite.order_label ?? '')}
       aria-label={label}
       className="inline-flex items-center justify-center min-w-[1.4rem] h-[1.4rem] px-1 mx-0.5 rounded-full text-[10.5px] font-sans font-medium bg-accent text-accent-foreground hover:brightness-110 transition cursor-pointer tabular-nums align-baseline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1"
     >
@@ -1622,10 +1624,13 @@ const EvidenceCard = memo(function EvidenceCard({
   caseId: string;
   matter: AiAssistMatter;
 }) {
+  const isCaselaw = chunk.kind === 'caselaw';
   const pageCite =
-    chunk.page_start === chunk.page_end
-      ? `p.${chunk.page_start}`
-      : `p.${chunk.page_start}–${chunk.page_end}`;
+    chunk.page_start == null
+      ? ''
+      : chunk.page_start === chunk.page_end
+        ? `p.${chunk.page_start}`
+        : `p.${chunk.page_start}–${chunk.page_end}`;
 
   const sentCites = useMemo(() => {
     const m: Record<number, number[]> = {};
@@ -1659,23 +1664,45 @@ const EvidenceCard = memo(function EvidenceCard({
         </div>
       )}
       <div className="flex items-center gap-2 flex-wrap">
-        {chunk.order_type ? (
-          <OrderTypeBadge type={chunk.order_type} number={chunk.order_number ?? null} />
+        {isCaselaw ? (
+          <>
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-[10px] font-medium text-primary uppercase tracking-wide">
+              <BookOpen className="h-2.5 w-2.5" /> Case law
+            </span>
+            <span className="text-sm font-medium text-foreground font-serif">
+              {chunk.case_name ?? chunk.order_label ?? 'Opinion'}
+            </span>
+            {chunk.reporter_cite && (
+              <span className="text-xs text-muted-foreground tabular-nums">· {chunk.reporter_cite}</span>
+            )}
+            {chunk.court && (
+              <span className="text-xs text-muted-foreground">· {chunk.court}</span>
+            )}
+            {chunk.case_date && (
+              <span className="text-xs text-muted-foreground tabular-nums">· {fmtDate(chunk.case_date)}</span>
+            )}
+          </>
         ) : (
-          <span className="text-sm font-medium text-foreground">
-            {chunk.order_label ?? chunk.doc_label ?? 'Document'}
-          </span>
-        )}
-        {chunk.order_type && (chunk.order_label || chunk.doc_label) && (
-          <span className="text-sm text-foreground/80 truncate max-w-[16rem]">
-            {chunk.order_label ?? chunk.doc_label}
-          </span>
-        )}
-        <span className="text-xs text-muted-foreground">· {pageCite}</span>
-        {chunk.order_date && (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            · {fmtDate(chunk.order_date)}
-          </span>
+          <>
+            {chunk.order_type ? (
+              <OrderTypeBadge type={chunk.order_type} number={chunk.order_number ?? null} />
+            ) : (
+              <span className="text-sm font-medium text-foreground">
+                {chunk.order_label ?? chunk.doc_label ?? 'Document'}
+              </span>
+            )}
+            {chunk.order_type && (chunk.order_label || chunk.doc_label) && (
+              <span className="text-sm text-foreground/80 truncate max-w-[16rem]">
+                {chunk.order_label ?? chunk.doc_label}
+              </span>
+            )}
+            {pageCite && <span className="text-xs text-muted-foreground">· {pageCite}</span>}
+            {chunk.order_date && (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                · {fmtDate(chunk.order_date)}
+              </span>
+            )}
+          </>
         )}
         {chunk.neighbor && (
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-accent/30 bg-accent/10 text-[10px] text-accent/90">
@@ -1694,24 +1721,50 @@ const EvidenceCard = memo(function EvidenceCard({
         </div>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px]">
-        {chunk.affects && (
-          <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
-            affects: {chunk.affects}
-          </span>
+        {isCaselaw ? (
+          <>
+            {chunk.status && (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
+                {chunk.status}
+              </span>
+            )}
+            {chunk.cite_count != null && (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground tabular-nums">
+                cited {chunk.cite_count}×
+              </span>
+            )}
+            {chunk.excerpted ? (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
+                holding excerpt
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
+                matched excerpt
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            {chunk.affects && (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
+                affects: {chunk.affects}
+              </span>
+            )}
+            {chunk.has_deadline && (
+              <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
+                deadline
+              </span>
+            )}
+            {(chunk.tags ?? []).slice(0, 4).map((t) => (
+              <span
+                key={t}
+                className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground"
+              >
+                {tagLabel(t)}
+              </span>
+            ))}
+          </>
         )}
-        {chunk.has_deadline && (
-          <span className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground">
-            deadline
-          </span>
-        )}
-        {(chunk.tags ?? []).slice(0, 4).map((t) => (
-          <span
-            key={t}
-            className="px-1.5 py-0.5 rounded border border-border bg-secondary/60 text-muted-foreground"
-          >
-            {tagLabel(t)}
-          </span>
-        ))}
       </div>
       <div className="mt-3 font-serif text-[14px] leading-relaxed text-foreground/90">
         {chunk.sentences.map((s, i) => {
@@ -1754,7 +1807,7 @@ const EvidenceCard = memo(function EvidenceCard({
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-accent hover:underline"
           >
-            <ExternalLink className="h-3 w-3" /> View source PDF
+            <ExternalLink className="h-3 w-3" /> {isCaselaw ? 'View on CourtListener' : 'View source PDF'}
           </a>
         )}
       </div>

@@ -2,7 +2,8 @@
 // Multi-agent, multi-matter RAG over a litigation record (controlling orders + filings).
 //   Router = Gemini 3.1 Flash-Lite (OpenAI-compatible endpoint): plans and runs up to
 //            3 rounds, calling tools — search_the_record, read_order, list_orders,
-//            lookup_counsel, list_deadlines — streams concise reasoning, then stops.
+//            lookup_counsel, list_deadlines, and search_caselaw (external published
+//            opinions via CourtListener) — streams concise reasoning, then stops.
 //   Writer = Claude Opus 4.8: one clean turn over the gathered passages (with native
 //            sentence-level citations) plus a structured record index.
 // SSE streaming throughout.
@@ -30,8 +31,9 @@
 // Response: text/event-stream (events: round, thinking, search, chunks, tool, expand, text,
 //   citation, round_end, search_error, tool_error, error, done).
 //
-// Secrets: ANTHROPIC_API_KEY, GEMINI_API_KEY (user-provided). ROUTER_MODEL optional
-//   (default gemini-3.1-flash-lite). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY auto-injected.
+// Secrets: ANTHROPIC_API_KEY, GEMINI_API_KEY (user-provided). COURTLISTENER_API_KEY optional
+//   (enables search_caselaw; without it that one tool degrades gracefully). ROUTER_MODEL
+//   optional (default gemini-3.1-flash-lite). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY auto-injected.
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
@@ -50,6 +52,19 @@ const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each sear
 const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
 const WRITER_EFFORT = "high";    // adaptive-thinking depth for the writer (low|medium|high|xhigh|max)
 const WRITER_MAX_TOKENS = 24000; // enforced output ceiling (thinking + answer); we stream, so it's safe
+
+// ---------- CourtListener (external case-law authority) ----------
+// The deployed edge function reaches CourtListener's REST API directly (it cannot use the
+// MCP connector, which is an authoring-time tool). A token is strongly recommended for
+// production rate limits; without one the tool degrades gracefully (the router is told case
+// law is unavailable, and the rest of the pipeline runs unchanged).
+const COURTLISTENER_API_KEY = Deno.env.get("COURTLISTENER_API_KEY") ?? "";
+const CL_BASE = "https://www.courtlistener.com/api/rest/v4";
+const CL_WEB = "https://www.courtlistener.com";
+const CASELAW_MAX_RESULTS = 6;       // opinions returned per search_caselaw call
+const CASELAW_FULLTEXT_TOP_N = 3;    // fetch fuller holding text for the top N hits
+const CASELAW_EXCERPT_CHARS = 4200;  // bounded lead excerpt per opinion handed to the writer
+const CL_TIMEOUT_MS = 12000;         // hard cap on any single CourtListener request
 
 // Backward-compatible default matter (Depo-Provera, MDL 3140). Used when a request omits
 // case_id/matter, so the existing frontend keeps working and stays correctly scoped.
@@ -91,11 +106,18 @@ You write for experienced litigators. Assume fluency with multidistrict-litigati
 THE MATTER AND ITS RECORD
 This is a single MDL proceeding governed by a closed set of controlling orders — Pretrial Orders ("PTO"), Case Management Orders ("CMO"), Common Benefit Orders ("CBO"), and the JPML transfer order — together with associated filings, a structured record index (orders, counsel of record, key dates), and, where relevant, a scientific and regulatory background layer (general-causation studies and FDA/EMA/WHO actions) that frames the litigation. These orders form a hierarchy in time: a later order can amend, supersede, or supplement an earlier one, and an obligation is current only if no later order has changed it. Hold that structure in mind as you read.
 
-YOUR SOURCE OF TRUTH — A CLOSED RECORD
-The material needed to answer has already been gathered from the actual docket and is provided to you below as citable search results, plus — where applicable — a structured record index. You answer ONLY from that provided material. Do not rely on your own legal knowledge, outside facts, recollection of other litigation, or anything not present in what you were given. If the provided record does not contain the answer, say so plainly — never fill the gap with general knowledge, assumption, or inference beyond what the material supports. A precise "the record before me does not address that" is correct and valuable; a plausible fabrication is a serious failure.
+YOUR SOURCE OF TRUTH — THE PROVIDED MATERIAL
+The material needed to answer has already been gathered and is provided to you below as citable search results, plus — where applicable — a structured record index. It is of two kinds: (1) THE MATTER RECORD — passages from this MDL's own docket (controlling orders, filings, and the scientific/regulatory background layer), and (2) EXTERNAL LEGAL AUTHORITY — published court opinions (case law) retrieved from CourtListener, identifiable because their title is a case citation and their source is a courtlistener.com URL. You answer ONLY from that provided material — both kinds. Do not rely on your own legal knowledge, outside facts, recollection of other litigation, half-remembered case names or holdings, or anything not present in what you were given. In particular, do NOT cite, quote, or paraphrase any case, statute, or rule that is not among the provided opinions — if you have not been handed the opinion, you do not have it. If the provided material does not contain the answer, say so plainly — never fill the gap with general knowledge, assumption, or inference beyond what the material supports. A precise "the provided material does not address that" is correct and valuable; a plausible fabrication — especially an invented or misremembered citation — is a serious failure.
 
 A DELIBERATELY TARGETED RECORD SET
 Passage retrieval for this question was intentionally focused — a small, high-precision set (up to 10 passages per search) rather than an exhaustive dump. Treat the provided passages as the focused evidence selected for this question, but do NOT assume they are complete. If the operative text, a specific subsection, an exact figure, or a date the question turns on is not present in what you were given, name that gap explicitly and tell the attorney where to look (e.g., "the full text of that order is not in the retrieved passages; consult the order directly on the docket"). Never extrapolate missing provisions from related ones. Partial coverage, clearly flagged, is the correct outcome — not a reason to reconstruct or guess.
+
+EXTERNAL LEGAL AUTHORITY — CASE LAW, USED WITH DISCIPLINE
+Where the question turns on a legal standard or doctrine, you may be given published court opinions as external authority. Use them, but keep their role distinct from the matter record:
+  - DISTINGUISH the two registers explicitly. The matter's orders state what THIS proceeding requires; case law states what the governing LAW holds. Never blur them — do not describe a precedent as if it were an order of this court, and do not describe one of this MDL's orders as if it were external precedent. When both bear on a point (e.g. the court's Rule 702 schedule and the circuit's Daubert precedent), present the record obligation and the legal standard as separate, each cited to its own source.
+  - WEIGHT authority honestly by court and posture, using only what the provided opinion states about itself (court, year, and that it was subsequently cited). Treat decisions of a higher court in the governing jurisdiction as controlling and others as persuasive, but do NOT assert that a specific precedent binds this MDL, or dictates how this court will rule, unless the matter record itself ties them together. Where the provided opinion is from another jurisdiction, say so and treat it as persuasive only.
+  - CITE case law by its case name and reporter citation exactly as given in the provided opinion's title; never reconstruct or "correct" a citation from memory, and never add a parallel cite, pincite, or subsequent history that is not in the provided material. If the provided excerpt is only part of an opinion, cite it for the proposition the excerpt actually supports and note that the full opinion should be consulted before relying on it in a filing.
+  - The opinions provided are those retrieved for this question; they are not a complete survey of the law. If the controlling authority on a point was not provided, say that the retrieved authority does not settle it rather than supplying a case from memory.
 
 TEMPORAL AWARENESS — REASON CAREFULLY ABOUT TIME
 Today's date is supplied at the top of the user message. Dates and sequence carry legal weight in this record; handle them with precision:
@@ -138,7 +160,10 @@ YOUR TOOLS
   3. list_orders — the complete list of controlling orders on this matter's docket (type, number, date, title, subject tags, source PDF). Use this for questions that enumerate or survey orders ("list the case management orders", "what CBOs exist", "every order on leadership"). It returns the full matching list, not a sample.
   4. list_deadlines — the matter's key dates and deadlines (date, category, title, who it affects, source order). Use this for calendar/deadline questions ("what hearings are coming up", "list the deadlines for plaintiffs").
   5. lookup_counsel — counsel of record (side, firm, attorney, contact). Use this for roster questions ("who represents the defendants", "list plaintiffs' counsel").
+  6. search_caselaw — EXTERNAL published court opinions (federal/state case law via CourtListener), with full Bluebook citations and holding text. This is the ONLY tool that reaches OUTSIDE this matter's closed record. Use it when the question turns on what the LAW is — a doctrine, legal standard, or test (e.g. the Daubert/Rule 702 standard for expert admissibility, general-causation proof requirements, pleading standards, preemption, choice-of-law) — rather than on what this matter's own orders provide. Restrict to the controlling jurisdiction with court when you know it (this MDL sits in the Eleventh Circuit — court: "ca11" — and N.D. Fla. — court: "flnd"; the Supreme Court is "scotus"). Set most_cited: true to surface the leading authority on a settled doctrine.
 Prefer the structured tools (3-5) when the question is fundamentally an enumeration or a roster/calendar lookup — they are complete and exact. Prefer search_the_record when the question turns on the language or substance of an order, or on the scientific/regulatory record; reach for read_order once you know the specific order whose full text or amendment history matters. You may combine tools across rounds (e.g., list_orders to find the right order, then read_order to pull its full text).
+
+WHEN TO REACH OUTSIDE THE RECORD (search_caselaw): the matter tools (1-5) answer "what does this MDL require?"; search_caselaw answers "what does the governing law hold?". Use it when the question asks about a legal standard, the basis for a ruling, or how a court would analyze an issue — and especially when an attorney needs the controlling precedent behind an order (e.g. "what is the Daubert standard the court will apply at the Rule 702 hearing?" warrants both search_the_record for the matter's 702 schedule AND search_caselaw, court: "ca11", for the circuit's expert-admissibility precedent). Do NOT use it for the matter's own orders, deadlines, or roster. When a question has both a record facet and a law facet, fire the matter search and the caselaw search in PARALLEL in the same round. If a pure record question needs no external law, do not call it.
 
 WORK IN PARALLEL: you may issue SEVERAL tool calls in a SINGLE round — they execute concurrently at no extra latency. When a question has distinct facets (e.g. two different provisions, an order plus its deadlines, a base order plus a science-layer question), fire one search per facet in the same round rather than serializing them across rounds. Issue independent retrievals together; reserve later rounds for follow-ups that genuinely depend on what an earlier round returned.
 
@@ -271,8 +296,51 @@ const READ_ORDER_TOOL_SCHEMA = {
   },
 };
 
+const CASELAW_TOOL_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description:
+        "The legal issue, doctrine, or standard to research as natural language (e.g. " +
+        "'Daubert standard for general causation expert testimony', 'Rule 702 reliability of " +
+        "epidemiological evidence'). Drives semantic + keyword matching over published opinions.",
+    },
+    court: {
+      type: "string",
+      description:
+        "Optional court id to restrict to a jurisdiction whose law governs (e.g. 'ca11' for the " +
+        "Eleventh Circuit, 'scotus' for the Supreme Court, 'flnd' for N.D. Fla.). Omit for all courts.",
+    },
+    filed_after: { type: "string", description: "Optional YYYY-MM-DD lower bound on decision date." },
+    filed_before: { type: "string", description: "Optional YYYY-MM-DD upper bound on decision date." },
+    most_cited: {
+      type: "boolean",
+      description:
+        "Order by citation count (most-cited first) instead of relevance — use to surface the " +
+        "leading/controlling authority on a settled doctrine. Default false (relevance).",
+    },
+  },
+  required: ["query"],
+};
+
 const GEMINI_TOOLS = [
   { type: "function", function: { name: "search_the_record", description: SEARCH_TOOL_DESCRIPTION, parameters: SEARCH_TOOL_SCHEMA } },
+  {
+    type: "function",
+    function: {
+      name: "search_caselaw",
+      description:
+        "Search EXTERNAL published court opinions (federal and state case law, via CourtListener) for " +
+        "legal authority — controlling or persuasive precedent on a doctrine, standard, or test. This is " +
+        "NOT part of this MDL's closed record; use it when the question turns on what the LAW is (e.g. the " +
+        "Daubert/Rule 702 standard, pleading standards, choice-of-law, preemption) rather than on what this " +
+        "matter's own orders say. Restrict to the governing jurisdiction with `court` when known (e.g. the " +
+        "circuit that controls this MDL). Returns citable opinions with full Bluebook citations and holding " +
+        "text. Do NOT use it for the matter's own PTOs/CMOs/CBOs — use search_the_record / read_order for those.",
+      parameters: CASELAW_TOOL_SCHEMA,
+    },
+  },
   {
     type: "function",
     function: {
@@ -522,6 +590,207 @@ async function runReadOrder(
     rows.map((r: any) => `${r.order_type ?? ""}${r.order_number ? " " + r.order_number : ""}`.trim()).filter(Boolean),
   )];
   return { searchResults, chunks, count: chunks.length, versions };
+}
+
+// ---------- CourtListener case-law retrieval ----------
+
+// HTTP GET against the CourtListener REST API. Sends the token when configured; bounded by
+// a hard timeout so a slow upstream can never hang the whole synthesis stream.
+async function clFetch(path: string, params: Record<string, string | undefined>): Promise<any> {
+  const url = new URL(`${CL_BASE}${path}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v != null && String(v).trim() !== "") url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = { "Accept": "application/json" };
+  if (COURTLISTENER_API_KEY) headers["Authorization"] = `Token ${COURTLISTENER_API_KEY}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CL_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url.toString(), { headers, signal: ctrl.signal });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      throw new Error(`CourtListener ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Title-case an ALL-CAPS party string (CourtListener stores many case names in caps), while
+// leaving normally-cased names untouched. Keeps short connectors ("v.", "of", "the") lower.
+function tidyCaseName(name: string): string {
+  const raw = (name ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return "Opinion";
+  const isShouty = raw === raw.toUpperCase() && /[A-Z]/.test(raw);
+  if (!isShouty) return raw;
+  const small = new Set(["v.", "of", "the", "and", "for", "in", "on", "a", "an", "&"]);
+  return raw
+    .toLowerCase()
+    .split(" ")
+    .map((w, i) => {
+      if (i > 0 && small.has(w)) return w;
+      if (w === "v.") return "v.";
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(" ");
+}
+
+const REPORTER_RE = /\b(U\.?\s?S\.?|S\.?\s?Ct\.?|L\.?\s?Ed\.?|F\.?\s?(?:2d|3d|4th)?|F\.?\s?Supp\.?|So\.?|N\.?[EW]\.?|S\.?[EW]\.?|P\.?|A\.?|Cal\.?|Fed\.?\s?Appx\.?)\b/;
+
+// Pick the official reporter citation from CourtListener's citation array, skipping
+// vendor-neutral DB cites (Westlaw "WL", LexisNexis "LEXIS", "U.S. App. LEXIS").
+function pickReporterCite(citations: any): string | null {
+  if (!Array.isArray(citations) || !citations.length) return null;
+  const strs = citations.map((c) => String(c).trim()).filter(Boolean);
+  const reporter = strs.find((c) => REPORTER_RE.test(c) && !/\bWL\b|\bLEXIS\b/i.test(c));
+  return reporter ?? strs[0] ?? null;
+}
+
+function caseYear(dateFiled: string | null | undefined): string | null {
+  const m = /^(\d{4})/.exec(String(dateFiled ?? ""));
+  return m ? m[1] : null;
+}
+
+// Full Bluebook-style citation: "Guinn v. AstraZeneca Pharmaceuticals LP, 602 F.3d 1245 (11th Cir. 2010)".
+function fullCaseCitation(r: any): string {
+  const name = tidyCaseName(r.caseName || r.caseNameFull || "Opinion");
+  const rep = pickReporterCite(r.citation);
+  const courtStr = (r.court_citation_string || "").toString().trim();
+  const yr = caseYear(r.dateFiled);
+  const paren = [courtStr, yr].filter(Boolean).join(" ");
+  let out = name;
+  if (rep) out += `, ${rep}`;
+  if (paren) out += ` (${paren})`;
+  return out;
+}
+
+// Shorter label for the evidence card / citation chip: "Guinn, 602 F.3d 1245 (11th Cir. 2010)".
+function shortCaseLabel(r: any): string {
+  const name = tidyCaseName(r.caseName || r.caseNameFull || "Opinion");
+  const firstParty = name.split(/\s+v\.?\s+/i)[0]?.trim() || name;
+  const rep = pickReporterCite(r.citation);
+  const yr = caseYear(r.dateFiled);
+  const courtStr = (r.court_citation_string || "").toString().trim();
+  const paren = [courtStr, yr].filter(Boolean).join(" ");
+  let out = firstParty;
+  if (rep) out += `, ${rep}`;
+  if (paren) out += ` (${paren})`;
+  return out;
+}
+
+// Fetch a bounded plain-text excerpt of one opinion (best effort; returns "" on any failure).
+async function fetchOpinionExcerpt(opinionId: number): Promise<string> {
+  try {
+    const data = await clFetch(`/opinions/${opinionId}/`, {});
+    let text: string = data?.plain_text || "";
+    if (!text && data?.html_with_citations) {
+      text = String(data.html_with_citations).replace(/<[^>]+>/g, " ");
+    }
+    text = text.replace(/\s+/g, " ").trim();
+    return text.slice(0, CASELAW_EXCERPT_CHARS);
+  } catch {
+    return "";
+  }
+}
+
+// search_caselaw: query CourtListener Opinions for external legal authority, map each hit to a
+// citable Anthropic search_result block + a UI chunk (kind: "caselaw"). Holding text for the
+// top hits is pulled in parallel; the rest fall back to the keyword-matched search snippet.
+async function runCaselawSearch(
+  input: any,
+  question: string,
+  seen: Set<string>,
+): Promise<{ searchResults: any[]; chunks: any[]; count: number; total: number; unavailable?: string }> {
+  if (!COURTLISTENER_API_KEY) {
+    return { searchResults: [], chunks: [], count: 0, total: 0, unavailable: "COURTLISTENER_API_KEY not configured" };
+  }
+  const a = (input && typeof input === "object") ? input : {};
+  const q = (a.query && String(a.query).trim()) || (a.keywords && String(a.keywords).trim()) || question;
+  const params: Record<string, string | undefined> = {
+    type: "o",
+    q,
+    order_by: a.most_cited ? "citeCount desc" : "score desc",
+    court: a.court ? String(a.court).toLowerCase() : undefined,
+    filed_after: a.filed_after ? String(a.filed_after) : undefined,
+    filed_before: a.filed_before ? String(a.filed_before) : undefined,
+    stat_Published: "on",
+  };
+  const data = await clFetch("/search/", params);
+  const total = Number.isFinite(data?.count) ? data.count : 0;
+  const raw: any[] = Array.isArray(data?.results) ? data.results.slice(0, CASELAW_MAX_RESULTS) : [];
+
+  // Pull fuller holding text for the top N (parallel, best effort).
+  const topIds = raw.slice(0, CASELAW_FULLTEXT_TOP_N)
+    .map((r) => r?.opinions?.[0]?.id)
+    .filter((id) => Number.isInteger(id)) as number[];
+  const excerptMap = new Map<number, string>();
+  await Promise.all(topIds.map(async (id) => { excerptMap.set(id, await fetchOpinionExcerpt(id)); }));
+
+  const searchResults: any[] = [];
+  const chunks: any[] = [];
+  let count = 0;
+  for (const r of raw) {
+    const opId = r?.opinions?.[0]?.id;
+    const ref = `cl:op:${opId ?? r.cluster_id ?? Math.abs(hashStr(JSON.stringify(r)))}`;
+    if (seen.has(ref)) continue;
+    if (seen.size >= MAX_TOTAL_CHUNKS) break;
+    seen.add(ref);
+
+    const fullCite = fullCaseCitation(r);
+    const shortLabel = shortCaseLabel(r);
+    const url = r.absolute_url ? `${CL_WEB}${r.absolute_url}` : CL_WEB;
+    const courtStr = (r.court_citation_string || r.court || "").toString().trim();
+    const status = (r.status || "").toString().trim();
+    const citeCount = Number.isFinite(r.citeCount) ? r.citeCount : null;
+
+    const header =
+      `${fullCite}.` +
+      (courtStr ? ` Court: ${courtStr}.` : "") +
+      (r.dateFiled ? ` Decided ${r.dateFiled}.` : "") +
+      (status ? ` ${status} opinion.` : "") +
+      (citeCount != null ? ` Subsequently cited by ${citeCount} decision(s).` : "");
+
+    const excerpt = (opId != null && excerptMap.get(opId)) || "";
+    const snippet = String(r?.opinions?.[0]?.snippet || "").replace(/\s+/g, " ").trim();
+    const bodyText = excerpt || snippet || "";
+    const bodySentences = bodyText ? splitSentences(bodyText) : [];
+    const sentences = [header, ...bodySentences];
+
+    searchResults.push({
+      type: "search_result",
+      source: url,
+      title: fullCite,
+      content: sentences.map((s) => ({ type: "text", text: s })),
+      citations: { enabled: true },
+    });
+    chunks.push({
+      ref,
+      kind: "caselaw",
+      order_label: shortLabel,
+      case_name: tidyCaseName(r.caseName || r.caseNameFull || "Opinion"),
+      full_citation: fullCite,
+      reporter_cite: pickReporterCite(r.citation),
+      court: courtStr || null,
+      case_date: r.dateFiled ?? null,
+      cite_count: citeCount,
+      status: status || null,
+      docket_number: r.docketNumber ?? null,
+      page_start: null,
+      page_end: null,
+      pdf_url: url,
+      excerpted: !!excerpt,
+      sentences,
+    });
+    count++;
+  }
+  return { searchResults, chunks, count, total };
+}
+
+function hashStr(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) { h = (h << 5) - h + s.charCodeAt(i); h |= 0; }
+  return h;
 }
 
 // ---------- structured-tool formatting ----------
@@ -916,6 +1185,7 @@ Deno.serve(async (req: Request) => {
         for (const c of calls) {
           if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
           else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
+          else if (c.name === "search_caselaw") emit({ type: "tool", round, tool: "search_caselaw", args: c.input });
           else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
         }
 
@@ -928,6 +1198,9 @@ Deno.serve(async (req: Request) => {
             }
             if (c.name === "read_order") {
               return { kind: "read_order" as const, c, ro: await runReadOrder(c.input, caseId, seen) };
+            }
+            if (c.name === "search_caselaw") {
+              return { kind: "caselaw" as const, c, cl: await runCaselawSearch(c.input, question, seen) };
             }
             const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
             let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
@@ -957,6 +1230,25 @@ Deno.serve(async (req: Request) => {
             emit({ type: "tool", round, tool: "read_order", count: s.ro.count, done: true });
             const label = s.ro.versions.length ? s.ro.versions.join(" + ") : "the order";
             resultBlocks.push(`read_order pulled the full text of ${label} (${s.ro.count} passage(s), including any amendment versions).`);
+          } else if (s.kind === "caselaw") {
+            if (s.cl.unavailable) {
+              emit({ type: "tool", round, tool: "search_caselaw", count: 0, done: true });
+              emit({ type: "tool_error", round, tool: "search_caselaw", message: `Case-law search unavailable: ${s.cl.unavailable}.` });
+              resultBlocks.push(`search_caselaw is unavailable (${s.cl.unavailable}); proceed with the matter record only and note that external case law was not consulted.`);
+            } else {
+              for (const ch of s.cl.chunks) emittedResults.push(ch);
+              for (const b of s.cl.searchResults) allSearchResults.push(b);
+              searchesLog.push({ round, tool: "search_caselaw", args: s.c.input, returned: s.cl.count });
+              emit({ type: "chunks", round, chunks: s.cl.chunks });
+              emit({ type: "tool", round, tool: "search_caselaw", count: s.cl.count, done: true });
+              const lines = s.cl.chunks.map((c: any) => `- ${c.full_citation}${c.cite_count != null ? ` (cited ${c.cite_count}×)` : ""}`);
+              const moreNote = s.cl.total > s.cl.count ? ` of ${s.cl.total} matching` : "";
+              resultBlocks.push(
+                s.cl.count
+                  ? `search_caselaw found ${s.cl.count} published opinion(s)${moreNote} (external legal authority):\n${lines.join("\n")}`
+                  : `search_caselaw returned no opinions for that query; try a broader query or remove the court restriction.`,
+              );
+            }
           } else if (s.kind === "search") {
             for (const ch of s.sr.chunks) emittedResults.push(ch);
             for (const b of s.sr.searchResults) allSearchResults.push(b);
@@ -973,7 +1265,7 @@ Deno.serve(async (req: Request) => {
               (s.exp.chunks.length ? `\n(+${s.exp.chunks.length} adjacent passage(s) pulled for surrounding context.)` : ""),
             );
           } else {
-            const structuredLike = s.c.name === "read_order" || STRUCTURED_TOOLS.has(s.c.name);
+            const structuredLike = s.c.name === "read_order" || s.c.name === "search_caselaw" || STRUCTURED_TOOLS.has(s.c.name);
             if (structuredLike) emit({ type: "tool_error", round, tool: s.c.name, message: s.message });
             else emit({ type: "search_error", round, message: s.message });
             resultBlocks.push(`${s.c.name} error: ${s.message}`);
@@ -1010,9 +1302,13 @@ Deno.serve(async (req: Request) => {
         emit({ type: "round", round: writerRound, writer: true });
         const today = new Date().toISOString().slice(0, 10);
         const haveEvidence = allSearchResults.length > 0 || recordIndexBlocks.length > 0;
+        const haveCaselaw = emittedResults.some((c: any) => c.kind === "caselaw");
+        const caselawNote = haveCaselaw
+          ? ` Some of the provided sources are EXTERNAL court opinions (their titles are case citations and their sources are courtlistener.com URLs) — treat those as legal authority, kept distinct from this matter's own orders, exactly as instructed; cite case law only from those provided opinions and never from memory.`
+          : "";
         const matterAnchor = `The attorney's question concerns this matter — ${matter.short_name}, MDL ${matter.mdl_number}. Treat the question as pertaining to this matter only; do not assume it relates to any other MDL or litigation, and do not remark on which matter the question is "framed for." Answer it directly from the ${matter.short_name} record.`;
         const leadIn = haveEvidence
-          ? `Today's date is ${today}.\n\n${matterAnchor}\n\nQuestion: ${question}\n\nThe material gathered from the ${matter.short_name} (MDL ${matter.mdl_number}) record follows — document passages (citable search results) and, where applicable, a structured record index. Using only that material, answer the question for the attorney, citing each assertion to its source as you write. Reason carefully about dates, order precedence, and deadlines as instructed, synthesize across the passages where the question calls for it, and flag anything the gathered material does not cover.`
+          ? `Today's date is ${today}.\n\n${matterAnchor}\n\nQuestion: ${question}\n\nThe material gathered for this question follows — document passages (citable search results) and, where applicable, a structured record index.${caselawNote} Using only that material, answer the question for the attorney, citing each assertion to its source as you write. Reason carefully about dates, order precedence, and deadlines as instructed, synthesize across the passages where the question calls for it, and flag anything the gathered material does not cover.`
           : `Today's date is ${today}.\n\n${matterAnchor}\n\nQuestion: ${question}\n\nNo material was retrieved from the record for this question. If you cannot answer from the record, say so plainly.`;
         const writerUser: any[] = [{ type: "text", text: leadIn }, ...allSearchResults];
         if (recordIndexBlocks.length) {
