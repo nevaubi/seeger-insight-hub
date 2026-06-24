@@ -19,6 +19,11 @@ import {
   ArrowDownToLine,
   Copy,
   Check,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,7 +53,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { supabase, type WorkspaceDocument } from '@/lib/supabase';
+import {
+  supabase,
+  CITE_CHECK_ENDPOINT,
+  SUPABASE_ANON_KEY,
+  type WorkspaceDocument,
+  type CiteCheckSummary,
+  type CiteCheckResult,
+  type CiteState,
+} from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
 import { useAiAssist, type AiAssistCitation, type AiAssistChunk } from '@/lib/useAiAssist';
 import { downloadDocx, printDocument, blocksToHtml, markdownToBlocks, downloadBlob, exportFilename } from '@/lib/file-export';
@@ -107,6 +120,8 @@ function DraftPage() {
   const [preview, setPreview] = useState(false);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [transforming, setTransforming] = useState(false);
+  const [citeResult, setCiteResult] = useState<CiteCheckSummary | null>(null);
+  const [citeRunning, setCiteRunning] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const cursorRef = useRef<number>(0);
 
@@ -252,6 +267,35 @@ function DraftPage() {
     if (result) toast.success('Selection updated');
   };
 
+  // ---- cite-check (verify citations against CourtListener) ----
+  const runCiteCheck = async () => {
+    if (!content.trim() || citeRunning) return;
+    setCiteRunning(true);
+    try {
+      const res = await fetch(CITE_CHECK_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ text: content }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Cite-check failed (${res.status})`);
+      const s = body as CiteCheckSummary;
+      setCiteResult(s);
+      const flagged = s.not_found + s.invalid;
+      if (s.count === 0) toast.info('No case citations found in this draft');
+      else if (flagged === 0 && s.ambiguous === 0) toast.success(`All ${s.count} citation${s.count === 1 ? '' : 's'} verified against CourtListener`);
+      else toast.warning(`${flagged + s.ambiguous} of ${s.count} citation${s.count === 1 ? '' : 's'} need review`);
+    } catch (e) {
+      toast.error('Cite-check failed', { description: (e as Error).message });
+    } finally {
+      setCiteRunning(false);
+    }
+  };
+
   // ---- export ----
   const exportDocx = () => {
     downloadDocx(`${currentMatter.short_name}-${title}`.slice(0, 80), markdownToBlocks(content || `# ${title}`));
@@ -287,6 +331,17 @@ function DraftPage() {
     setContent(next);
     setDirty(true);
     toast.success('Appended to document');
+  };
+
+  const jumpToCite = (r: CiteCheckResult) => {
+    if (preview) setPreview(false);
+    const el = textareaRef.current;
+    if (!el || r.start == null || r.end == null) return;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(r.start as number, r.end as number);
+      setSelection({ start: r.start as number, end: r.end as number });
+    });
   };
 
   const wordCount = useMemo(() => (content.trim() ? content.trim().split(/\s+/).length : 0), [content]);
@@ -349,6 +404,18 @@ function DraftPage() {
               />
               <div className="ml-auto flex items-center gap-1.5 shrink-0">
                 <span className="text-[11px] text-muted-foreground tabular-nums font-sans mr-1">{wordCount} words</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={!content.trim() || citeRunning}
+                  onClick={runCiteCheck}
+                  title="Verify the case citations in this draft against CourtListener"
+                >
+                  {citeRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                  Cite-check
+                </Button>
+                <div className="w-px h-5 bg-border mx-0.5" />
                 <Button variant={preview ? 'ghost' : 'secondary'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setPreview(false)}>
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </Button>
@@ -402,6 +469,14 @@ function DraftPage() {
                 />
               )}
             </div>
+
+            {citeResult && (
+              <CiteCheckPanel
+                summary={citeResult}
+                onClose={() => setCiteResult(null)}
+                onJump={jumpToCite}
+              />
+            )}
           </Card>
         </div>
 
@@ -415,6 +490,123 @@ function DraftPage() {
         />
       </div>
     </AppShell>
+  );
+}
+
+const CITE_STATE_META: Record<CiteState, { label: string; cls: string; Icon: typeof CheckCircle2 }> = {
+  valid: { label: 'Verified', cls: 'text-emerald-600', Icon: CheckCircle2 },
+  not_found: { label: 'Not found', cls: 'text-destructive', Icon: XCircle },
+  invalid: { label: 'Invalid', cls: 'text-destructive', Icon: XCircle },
+  ambiguous: { label: 'Ambiguous', cls: 'text-amber-600', Icon: AlertTriangle },
+  error: { label: 'Unverified', cls: 'text-muted-foreground', Icon: AlertTriangle },
+};
+
+function CiteCheckPanel({
+  summary,
+  onClose,
+  onJump,
+}: {
+  summary: CiteCheckSummary;
+  onClose: () => void;
+  onJump: (r: CiteCheckResult) => void;
+}) {
+  const flagged = summary.not_found + summary.invalid;
+  return (
+    <div className="border-t border-border bg-card/70 max-h-[38vh] flex flex-col">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-border/70 shrink-0">
+        <ShieldCheck className="h-4 w-4 text-accent shrink-0" />
+        <span className="text-[12px] font-sans font-medium text-foreground">Citation check</span>
+        <div className="flex items-center gap-2.5 text-[11px] font-sans tabular-nums">
+          {summary.count === 0 ? (
+            <span className="text-muted-foreground">No case citations detected</span>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 className="h-3 w-3" /> {summary.valid} verified
+              </span>
+              {flagged > 0 && (
+                <span className="inline-flex items-center gap-1 text-destructive">
+                  <XCircle className="h-3 w-3" /> {flagged} not found
+                </span>
+              )}
+              {summary.ambiguous > 0 && (
+                <span className="inline-flex items-center gap-1 text-amber-600">
+                  <AlertTriangle className="h-3 w-3" /> {summary.ambiguous} ambiguous
+                </span>
+              )}
+            </>
+          )}
+        </div>
+        <span className="ml-auto text-[10px] text-muted-foreground hidden sm:inline">
+          via CourtListener{summary.truncated ? ' · checked first part of a long draft' : ''}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close citation check"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {summary.count > 0 && (
+        <div className="overflow-y-auto px-2 py-2 space-y-1">
+          {summary.results.map((r, i) => {
+            const meta = CITE_STATE_META[r.state] ?? CITE_STATE_META.error;
+            const Icon = meta.Icon;
+            const jumpable = r.start != null && r.end != null;
+            return (
+              <div
+                key={i}
+                className={cn(
+                  'flex items-start gap-2.5 rounded-sm px-2.5 py-2 text-[12px]',
+                  jumpable && 'cursor-pointer hover:bg-secondary/60',
+                )}
+                onClick={() => jumpable && onJump(r)}
+                title={jumpable ? 'Jump to this citation in the draft' : undefined}
+              >
+                <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', meta.cls)} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-sans font-medium text-foreground tabular-nums">{r.citation ?? '—'}</span>
+                    <span className={cn('text-[10px] uppercase tracking-wide font-medium', meta.cls)}>{meta.label}</span>
+                  </div>
+                  {r.state === 'valid' && r.case_name && (
+                    <div className="mt-0.5 text-muted-foreground font-serif">
+                      {r.case_name}
+                      {r.year ? ` (${r.year})` : ''}
+                      {r.citation_count != null ? ` · cited ${r.citation_count}×` : ''}
+                    </div>
+                  )}
+                  {r.state === 'ambiguous' && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      Matches {r.match_count} cases — disambiguate before relying on it.
+                    </div>
+                  )}
+                  {(r.state === 'not_found' || r.state === 'invalid') && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      {r.message || 'No matching opinion on CourtListener — verify this citation is real and correctly formatted.'}
+                    </div>
+                  )}
+                  {r.url && (
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1 inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" /> View on CourtListener
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

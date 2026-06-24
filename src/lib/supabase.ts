@@ -6,6 +6,7 @@ export const SUPABASE_ANON_KEY =
 export const SYNTHESIS_ENDPOINT = `${SUPABASE_URL}/functions/v1/legal-synthesis`;
 export const AI_ASSIST_ENDPOINT = `${SUPABASE_URL}/functions/v1/ai-assist`;
 export const RECAP_SYNC_ENDPOINT = `${SUPABASE_URL}/functions/v1/recap-sync`;
+export const CITE_CHECK_ENDPOINT = `${SUPABASE_URL}/functions/v1/cite-check`;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -109,6 +110,34 @@ export interface RecapSyncState {
   last_new_count: number | null;
   last_updated_count: number | null;
   last_error: string | null;
+}
+
+export type CiteState = 'valid' | 'not_found' | 'ambiguous' | 'invalid' | 'error';
+
+export interface CiteCheckResult {
+  citation: string | null;
+  normalized: string[] | null;
+  start: number | null;
+  end: number | null;
+  status: number | null;
+  state: CiteState;
+  case_name: string | null;
+  url: string | null;
+  year: number | null;
+  citation_count: number | null;
+  match_count: number;
+  message: string | null;
+}
+
+export interface CiteCheckSummary {
+  ok: boolean;
+  truncated?: boolean;
+  count: number;
+  valid: number;
+  not_found: number;
+  ambiguous: number;
+  invalid: number;
+  results: CiteCheckResult[];
 }
 
 export interface WorkspaceDocument {
