@@ -5,7 +5,9 @@
 // scans, tables, stamps, handwriting). Plain text/markdown is stored directly. Pages are split
 // on explicit page markers so downstream extraction can cite by page number.
 //
-// Request (POST JSON): { review_file_id: string }
+// Request (POST JSON): { review_file_id: string, storage_path?, mime_type?, filename? }
+//   storage_path/mime_type/filename are passed by the client so the function does writes only
+//   (no read-after-insert dependency). If omitted, it falls back to reading the row.
 // Response (JSON): { ok, review_file_id, status, page_count, char_count }
 //
 // Secrets: GEMINI_API_KEY (already configured). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY auto-injected.
@@ -51,11 +53,16 @@ async function sbFetch(path: string, init: RequestInit = {}): Promise<Response> 
 }
 
 async function patchFile(id: string, patch: Record<string, unknown>): Promise<void> {
-  await sbFetch(`/rest/v1/review_files?id=eq.${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
-  }).catch(() => {});
+  try {
+    const r = await sbFetch(`/rest/v1/review_files?id=eq.${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+    });
+    if (!r.ok) console.error(`patchFile ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+  } catch (e) {
+    console.error(`patchFile threw: ${(e as Error).message}`);
+  }
 }
 
 // Split a Gemini transcription into { page_number, text } using the `=== PAGE n ===` markers.
@@ -124,15 +131,22 @@ Deno.serve(async (req: Request) => {
   const fileId = (payload?.review_file_id ?? "").toString().trim();
   if (!fileId) return json({ ok: false, error: "review_file_id required" }, 400);
 
-  // Load the file row.
-  let file: any;
-  try {
-    const r = await sbFetch(`/rest/v1/review_files?id=eq.${fileId}&select=*`);
-    const rows = await r.json();
-    if (!Array.isArray(rows) || !rows.length) return json({ ok: false, error: "review_file not found" }, 404);
-    file = rows[0];
-  } catch (e) {
-    return json({ ok: false, error: `Load failed: ${(e as Error).message}` }, 500);
+  // Resolve the file. The client passes storage_path/mime_type/filename so we don't depend on a
+  // read-after-insert (which can miss a just-committed row through the pooler). Fall back to a
+  // retried read only if those weren't supplied.
+  let file: any = null;
+  const passedPath = (payload?.storage_path ?? "").toString().trim();
+  if (passedPath) {
+    file = { id: fileId, storage_path: passedPath, mime_type: payload?.mime_type ?? null, filename: payload?.filename ?? "" };
+  } else {
+    for (let attempt = 0; attempt < 3 && !file; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 400));
+      const r = await sbFetch(`/rest/v1/review_files?id=eq.${fileId}&select=*`);
+      if (!r.ok) { console.error(`review_files read ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`); continue; }
+      const rows = await r.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length) file = rows[0];
+    }
+    if (!file) return json({ ok: false, error: "review_file not found" }, 404);
   }
 
   await patchFile(fileId, { status: "transcribing", error: null });

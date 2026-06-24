@@ -206,12 +206,12 @@ function ReviewPage() {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const ingest = async (reviewFileId: string) => {
+  const ingest = async (file: Pick<ReviewFile, 'id' | 'storage_path' | 'mime_type' | 'filename'>) => {
     try {
       const res = await fetch(TABULAR_INGEST_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ review_file_id: reviewFileId }),
+        body: JSON.stringify({ review_file_id: file.id, storage_path: file.storage_path, mime_type: file.mime_type, filename: file.filename }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body?.ok === false) throw new Error(body?.error || `Transcription failed (${res.status})`);
@@ -246,7 +246,7 @@ function ReviewPage() {
           .select('*').single();
         if (insErr || !row) { toast.error(`Could not register ${file.name}`); continue; }
         qc.invalidateQueries({ queryKey: ['review-files', sid] });
-        void ingest((row as ReviewFile).id);
+        void ingest(row as ReviewFile);
       }
     } finally {
       setUploading(false);
@@ -425,7 +425,7 @@ function ReviewPage() {
                 {files.map((f) => (
                   <tr key={f.id} className="hover:bg-secondary/20">
                     <td className="sticky left-0 z-10 bg-card px-3 py-2.5 border-b border-r border-border align-top min-w-[15rem]">
-                      <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f.id)} />
+                      <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
                     {columns.map((col) => (
                       <td key={col.id} className="px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]">

@@ -291,16 +291,17 @@ Deno.serve(async (req: Request) => {
   const fileIds: string[] | null = Array.isArray(payload?.file_ids) ? payload.file_ids : null;
   if (!setId || !columnId) return json({ ok: false, error: "review_set_id and column_id required" }, 400);
 
-  // Load the column.
-  let column: any;
-  try {
+  // Load the column. Retry to tolerate a read-after-insert lag (column may have just been added,
+  // which triggers this run immediately).
+  let column: any = null;
+  for (let attempt = 0; attempt < 4 && !column; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 400));
     const r = await sbFetch(`/rest/v1/review_columns?id=eq.${columnId}&select=*`);
-    const rows = await r.json();
-    if (!Array.isArray(rows) || !rows.length) return json({ ok: false, error: "column not found" }, 404);
-    column = rows[0];
-  } catch (e) {
-    return json({ ok: false, error: `Load column: ${(e as Error).message}` }, 500);
+    if (!r.ok) { console.error(`column read ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`); continue; }
+    const rows = await r.json().catch(() => null);
+    if (Array.isArray(rows) && rows.length) column = rows[0];
   }
+  if (!column) return json({ ok: false, error: "column not found" }, 404);
 
   // Load ready files (optionally filtered).
   let files: any[];
