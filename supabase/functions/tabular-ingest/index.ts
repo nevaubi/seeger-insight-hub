@@ -15,7 +15,7 @@
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const VISION_MODEL = Deno.env.get("VISION_MODEL") ?? "gemini-3.1-flash";
+const VISION_MODEL = Deno.env.get("VISION_MODEL") ?? "gemini-3.1-flash-lite";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const BUCKET = "review-files";
