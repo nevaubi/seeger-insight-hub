@@ -34,6 +34,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
@@ -568,7 +569,10 @@ function AddColumnDialog({ onAdd }: { onAdd: (c: { name: string; data_type: Revi
         <Button variant="outline" size="sm" className="gap-1.5 w-full"><Plus className="h-3.5 w-3.5" /> Add column</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader><DialogTitle>Add a column</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Add a column</DialogTitle>
+          <DialogDescription>Name the field, pick its type, and optionally describe exactly what to extract.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-4">
           <div className="flex flex-wrap gap-1.5">
             {COLUMN_PRESETS.map((p) => (

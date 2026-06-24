@@ -113,7 +113,6 @@ async function callClaude(systemPrompt: string, userContent: string): Promise<Ex
       body: JSON.stringify({
         model: EXTRACT_MODEL,
         max_tokens: 1500,
-        temperature: 0,
         system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
         tools: [{
