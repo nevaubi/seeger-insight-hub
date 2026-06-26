@@ -204,8 +204,8 @@ function DraftPage() {
     onSuccess: (d) => {
       setActiveId(d.id);
       setDirty(false);
+      setLastSavedAt(Date.now());
       qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
-      toast.success('Document saved');
     },
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
