@@ -15,7 +15,7 @@ import {
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMatter } from '@/lib/matter-context';
-import logoAsset from '@/assets/seeger-weiss-logo.png.asset.json';
+import logoUrl from '@/assets/seeger-weiss-logo-white.png';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
