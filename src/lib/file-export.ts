@@ -506,6 +506,11 @@ const PRINT_CSS = `
   ul, ol { margin: 0 0 10px; padding-left: 22px; }
   li { margin: 0 0 4px; }
   hr { border: none; border-top: 1px solid #c9c2b4; margin: 16px 0; }
+  table.doc-table { width: 100%; border-collapse: collapse; margin: 4px 0 14px; font-size: 10.5pt; page-break-inside: auto; }
+  .doc-table th, .doc-table td { border: 1px solid #c9c2b4; padding: 6px 9px; vertical-align: top; text-align: left; }
+  .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2a44; }
+  .doc-table tr { page-break-inside: avoid; }
+  .doc-table thead { display: table-header-group; }
   .sources { margin-top: 28px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5pt; }
   .sources h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: 0.08em; font-family: Inter, sans-serif; }
   .cite { font-family: Inter, sans-serif; font-size: 8pt; vertical-align: super; color: #1f2a44; font-weight: 600; }
