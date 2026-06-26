@@ -379,11 +379,26 @@ function DraftPage() {
         description="Draft litigation documents with an AI assistant grounded in the matter's record — highlight any passage to refine it, or generate new sections by chat."
       >
         <div className="flex items-center gap-2">
-          <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
-          <Button variant="default" size="sm" onClick={() => saveDoc.mutate()} disabled={saveDoc.isPending || (!dirty && !!activeId)} className="gap-2">
-            {saveDoc.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save{dirty ? ' •' : ''}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setRailOpen((v) => !v)}
+            className="gap-1.5 hidden lg:inline-flex"
+            title={railOpen ? 'Hide document list' : 'Show document list'}
+          >
+            {railOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
           </Button>
+          <div className="lg:hidden">
+            <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
+          </div>
+          <SaveStatus
+            dirty={dirty}
+            saving={saveDoc.isPending}
+            lastSavedAt={lastSavedAt}
+            hasActive={!!activeId}
+            onSave={() => saveDoc.mutate()}
+          />
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
