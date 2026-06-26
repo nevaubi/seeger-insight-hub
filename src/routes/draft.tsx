@@ -603,6 +603,7 @@ function DraftPage() {
           documentText={content}
           onInsert={insertAtCursor}
           onAppend={appendToDoc}
+          onInsertCite={insertCitation}
         />
       </div>
     </AppShell>
