@@ -334,9 +334,70 @@ function ReviewPage() {
     columns.forEach((c) => runColumn(c.id));
   }, [columns, runColumn]);
 
+  const addMetadataColumns = useCallback(async () => {
+    const existing = new Set(columns.map((c) => c.name.toLowerCase()));
+    const todo = METADATA_COLUMNS.filter((c) => !existing.has(c.name.toLowerCase()));
+    if (todo.length === 0) {
+      toast.info('Metadata columns already added');
+      return;
+    }
+    for (const c of todo) {
+      await addColumn.mutateAsync({
+        name: c.name,
+        data_type: c.data_type,
+        prompt: c.prompt,
+        enum_options: c.enum_options ?? null,
+      });
+    }
+    toast.success(`Added ${todo.length} metadata column${todo.length === 1 ? '' : 's'}`);
+  }, [columns, addColumn]);
+
+  // Source preview drawer state
+  const [drawer, setDrawer] = useState<{
+    open: boolean;
+    file: ReviewFile | null;
+    cellId: string | null;
+    citations: ReviewCellCitation[];
+    page: number | null;
+    quote: string | null;
+  }>({ open: false, file: null, cellId: null, citations: [], page: null, quote: null });
+
+  const openSource = useCallback((file: ReviewFile, cell: CellWithCites | undefined) => {
+    const cites = cell?.review_cell_citations ?? [];
+    const first = cites.slice().sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0))[0];
+    setDrawer({
+      open: true,
+      file,
+      cellId: cell?.id ?? null,
+      citations: cites,
+      page: first?.page_number ?? 1,
+      quote: first?.quote ?? null,
+    });
+  }, []);
+
+  const setName = activeSet?.name ?? 'review';
+  const doExport = useCallback(
+    (kind: 'csv' | 'xlsx' | 'md') => {
+      if (kind === 'csv') {
+        for (const f of toCsvDownloads(setName, files, columns, cellMap)) downloadBlob(f.blob, f.name);
+        toast.success('CSV downloaded');
+      } else if (kind === 'xlsx') {
+        downloadBlob(toXlsxBlob(setName, files, columns, cellMap), `${setName.replace(/[^\w]+/g, '_').toLowerCase()}.xlsx`);
+        toast.success('Excel file downloaded');
+      } else {
+        navigator.clipboard.writeText(toMarkdownTable(files, columns, cellMap));
+        toast.success('Markdown table copied to clipboard');
+      }
+    },
+    [setName, files, columns, cellMap],
+  );
+
   const anyRunning = runningCols.size > 0 || cells.some((c) => c.state === 'running');
   const atLimit = files.length >= MAX_REVIEW_FILES;
   const canRun = readyFiles.length > 0 && columns.length > 0;
+  const hasExportable = files.length > 0 && columns.length > 0;
+
+
 
   return (
     <AppShell>
