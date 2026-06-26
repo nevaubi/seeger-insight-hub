@@ -1011,18 +1011,154 @@ function dedupeCitations(citations?: AiAssistCitation[], chunks?: AiAssistChunk[
   return Array.from(seen.values());
 }
 
-function dedupeSources(chunks?: AiAssistChunk[], citations?: AiAssistCitation[]): { label: string; pdf_url: string | null }[] {
-  const out: { label: string; pdf_url: string | null }[] = [];
-  const seen = new Set<string>();
-  // Prefer the actually-cited passages; fall back to grounding chunks.
-  const fromCites = (citations ?? []).map((c) => ({ label: [c.order_label, c.page].filter(Boolean).join(' · ') || c.title || 'Source', pdf_url: null as string | null, ref: c.ref }));
-  const byRef = new Map((chunks ?? []).map((c) => [c.ref, c]));
-  for (const c of fromCites) {
-    const chunk = c.ref ? byRef.get(c.ref) : undefined;
-    const label = c.label;
-    if (seen.has(label)) continue;
-    seen.add(label);
-    out.push({ label, pdf_url: chunk?.pdf_url ?? null });
-  }
-  return out.slice(0, 8);
+function SaveStatus({
+  dirty, saving, lastSavedAt, hasActive, onSave,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  lastSavedAt: number | null;
+  hasActive: boolean;
+  onSave: () => void;
+}) {
+  const ago = useRelativeTime(lastSavedAt);
+  let status: { label: string; cls: string };
+  if (saving) status = { label: 'Saving…', cls: 'text-muted-foreground' };
+  else if (!hasActive) status = { label: 'Not saved', cls: 'text-muted-foreground' };
+  else if (dirty) status = { label: 'Unsaved changes', cls: 'text-amber-600' };
+  else if (lastSavedAt) status = { label: `Saved ${ago}`, cls: 'text-muted-foreground' };
+  else status = { label: 'Saved', cls: 'text-muted-foreground' };
+
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={saving || (!dirty && hasActive)}
+      title={dirty ? 'Save now' : 'Up to date'}
+      className={cn(
+        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-card text-[11.5px] font-sans tabular-nums transition',
+        'hover:border-accent/40 disabled:opacity-70 disabled:cursor-default',
+        status.cls,
+      )}
+    >
+      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+      {status.label}
+    </button>
+  );
 }
+
+function useRelativeTime(ts: number | null): string {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!ts) return;
+    const id = setInterval(() => force((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, [ts]);
+  if (!ts) return '';
+  const secs = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function DocumentRail({
+  docs, activeId, isLoading, query, setQuery, onPick, onNew,
+}: {
+  docs: WorkspaceDocument[];
+  activeId: string | null;
+  isLoading: boolean;
+  query: string;
+  setQuery: (s: string) => void;
+  onPick: (d: WorkspaceDocument) => void;
+  onNew: () => void;
+}) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return docs;
+    return docs.filter((d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q));
+  }, [docs, query]);
+
+  const groups = useMemo(() => {
+    const now = Date.now();
+    const today: WorkspaceDocument[] = [];
+    const week: WorkspaceDocument[] = [];
+    const older: WorkspaceDocument[] = [];
+    for (const d of filtered) {
+      const age = now - new Date(d.updated_at).getTime();
+      if (age < 86400000) today.push(d);
+      else if (age < 7 * 86400000) week.push(d);
+      else older.push(d);
+    }
+    return [
+      { label: 'Today', items: today },
+      { label: 'Past week', items: week },
+      { label: 'Older', items: older },
+    ].filter((g) => g.items.length);
+  }, [filtered]);
+
+  return (
+    <aside className="hidden lg:flex lg:w-60 shrink-0 flex-col">
+      <Card className="p-0 flex flex-col flex-1 overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-border bg-card/60 flex items-center gap-2">
+          <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+            {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
+          </span>
+          <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-[11.5px]" onClick={onNew}>
+            <Plus className="h-3.5 w-3.5" /> New
+          </Button>
+        </div>
+        <div className="px-3 py-2 border-b border-border">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search documents…"
+              className="h-8 pl-7 text-[12.5px]"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {groups.length === 0 && !isLoading && (
+            <div className="p-4 text-[12px] text-muted-foreground">
+              {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
+            </div>
+          )}
+          {groups.map((g) => (
+            <div key={g.label} className="py-1.5">
+              <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
+                {g.label}
+              </div>
+              {g.items.map((d) => {
+                const active = d.id === activeId;
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => onPick(d)}
+                    className={cn(
+                      'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                      active
+                        ? 'bg-secondary/70 border-accent'
+                        : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                    )}
+                  >
+                    <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                      {d.title || 'Untitled document'}
+                    </span>
+                    <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
+                      {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </aside>
+  );
+}
+
