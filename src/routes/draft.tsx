@@ -871,6 +871,135 @@ const TEMPLATE_CATEGORIES: DraftTemplate['category'][] = [
   'Correspondence', 'Motions & Briefs', 'Discovery', 'Case Management', 'Hearing Prep', 'Leadership / PSC',
 ];
 
+function TemplateLauncher({
+  onPick, disabled,
+}: { onPick: (t: DraftTemplate) => void; disabled: boolean }) {
+  const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
+  const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
+  return (
+    <div className="py-3 px-1">
+      <div className="text-center mb-4 px-2">
+        <Sparkles className="h-5 w-5 mx-auto mb-2.5 text-accent/70" />
+        <p className="font-serif text-[15px] text-foreground/85 mb-1">Draft from a litigation template.</p>
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+          Pick a starting form below, or describe what you need. With grounding on, factual claims are
+          cited to the controlling orders in Bluebook short form.
+        </p>
+      </div>
+
+      <div className="-mx-1 mb-3 overflow-x-auto">
+        <div className="flex gap-1 px-1 min-w-min">
+          {TEMPLATE_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCat(c)}
+              className={cn(
+                'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
+                cat === c
+                  ? 'bg-accent/10 border-accent/40 text-accent'
+                  : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
+              )}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {items.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.title}
+              type="button"
+              onClick={() => onPick(t)}
+              disabled={disabled}
+              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">{t.title}</span>
+                  <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">{t.docType}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{t.summary}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bluebook citation formatting ----------
+
+/** Short-form record cite: "(PTO-12, at 4)" */
+function formatShortCite(c: CiteChip): string {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? formatPagePin(c.page) : '';
+  return page ? ` (${label}, at ${page})` : ` (${label})`;
+}
+
+/** Full-form record cite: "(Pretrial Order No. 12, *Case Management Order*, at 4)" */
+function formatFullCite(c: CiteChip): string {
+  const label = c.order_label || 'Order';
+  const title = c.title && c.title !== c.order_label ? `, *${stripLabelEcho(c.title, label)}*` : '';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  return ` (${expandLabel(label)}${title}${page})`;
+}
+
+/** Markdown footnote pieces. Caller inserts inline marker and appends definition. */
+function formatFootnoteCite(c: CiteChip, n: number): { marker: string; definition: string } {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
+  return {
+    marker: `[^${n}]`,
+    definition: `[^${n}]: ${expandLabel(label)}${page}.${url}`,
+  };
+}
+
+/** "*Id.* at 5" / "*Id.*" for an immediately repeated source. */
+function formatIdCite(prev: CiteChip, c: CiteChip): string | null {
+  const sameSource = (prev.order_label || prev.title) === (c.order_label || c.title);
+  if (!sameSource) return null;
+  if (c.page && c.page !== prev.page) return ` (*Id.* at ${formatPagePin(c.page)})`;
+  return ' (*Id.*)';
+}
+
+function expandLabel(label: string): string {
+  // "PTO-12" → "Pretrial Order No. 12"; "CMO-3" → "Case Management Order No. 3"; "CBO-2" → "Common Benefit Order No. 2"
+  const m = label.match(/^(PTO|CMO|CBO|JPML)[-\s]?(\d+)$/i);
+  if (!m) return label;
+  const kind = m[1].toUpperCase();
+  const num = m[2];
+  const expanded: Record<string, string> = {
+    PTO: 'Pretrial Order No.',
+    CMO: 'Case Management Order No.',
+    CBO: 'Common Benefit Order No.',
+    JPML: 'JPML Transfer Order No.',
+  };
+  return `${expanded[kind] ?? label} ${num}`;
+}
+
+function formatPagePin(page: string): string {
+  // "p.4" → "4"; "p.4–5" → "4–5"; "4-5" → "4–5"
+  return page.replace(/^p\.?\s*/i, '').replace(/-/g, '–');
+}
+
+function stripLabelEcho(title: string, label: string): string {
+  return title.replace(new RegExp(`^${label}[\\s:·—-]+`, 'i'), '').trim() || title;
+}
+
+function citeSourceKey(c: CiteChip): string {
+  return `${c.order_label ?? ''}|${c.title ?? ''}`;
+}
+
+
+
 function AssistantPane({
   caseId, matter, documentText, onInsert, onAppend,
 }: {
