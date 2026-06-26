@@ -28,6 +28,9 @@ import {
   ListChecks,
   CalendarClock,
   Gavel,
+  Search,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
