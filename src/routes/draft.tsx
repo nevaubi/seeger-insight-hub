@@ -933,34 +933,10 @@ function AssistantPane({
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[40vh]">
           {messages.length === 0 && (
-            <div className="py-8 px-2">
-              <div className="text-center text-sm text-muted-foreground mb-5">
-                <Sparkles className="h-5 w-5 mx-auto mb-3 text-accent/70" />
-                <p className="font-serif text-[15px] text-foreground/80 mb-2">Ask the assistant to draft for you.</p>
-                <p className="text-xs leading-relaxed">
-                  Start from a template below, or describe what you need. With grounding on, factual
-                  claims are cited to the controlling orders.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {DRAFT_TEMPLATES.map((t) => {
-                  const Icon = t.icon;
-                  return (
-                    <button
-                      key={t.title}
-                      type="button"
-                      onClick={() => send(t.prompt)}
-                      disabled={running}
-                      title={t.prompt}
-                      className="group flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                    >
-                      <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
-                      <span className="text-[12px] font-sans font-medium text-foreground/90 leading-snug">{t.title}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <TemplateLauncher
+              disabled={running}
+              onPick={(t) => send(t.prompt)}
+            />
           )}
           {messages.map((m) => (
             <ChatBubble key={m.id} msg={m} onInsert={onInsert} onAppend={onAppend} />
