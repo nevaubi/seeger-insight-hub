@@ -432,8 +432,21 @@ function DraftPage() {
       </PageHeader>
 
       <div className="px-6 lg:px-8 py-5 lg:h-[calc(100vh-9.5rem)] lg:flex lg:gap-5 lg:overflow-hidden">
+        {/* DOCUMENT RAIL */}
+        {railOpen && (
+          <DocumentRail
+            docs={docs}
+            activeId={activeId}
+            isLoading={isLoading}
+            query={railQuery}
+            setQuery={setRailQuery}
+            onPick={loadDoc}
+            onNew={newDocument}
+          />
+        )}
         {/* EDITOR */}
         <div className="lg:flex-[3] min-w-0 flex flex-col mb-5 lg:mb-0">
+
           <Card className="p-0 flex flex-col flex-1 overflow-hidden">
             {/* editor toolbar */}
             <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card/60">
