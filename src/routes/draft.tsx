@@ -365,6 +365,62 @@ function DraftPage() {
     toast.success('Appended to document');
   };
 
+  // Insert a citation in one of three Bluebook forms; auto-substitute *Id.* on repeats.
+  const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
+    const key = citeSourceKey(c);
+    if (variant === 'footnote') {
+      const n = ++footnoteCounterRef.current;
+      const { marker, definition } = formatFootnoteCite(c, n);
+      // marker at cursor, definition appended to doc end
+      const pos = Math.min(cursorRef.current, content.length);
+      const withMarker = content.slice(0, pos) + marker + content.slice(pos);
+      const withDef = withMarker.trimEnd() + `\n\n${definition}\n`;
+      setContent(withDef);
+      setDirty(true);
+      lastCiteKeyRef.current = key;
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          const newPos = pos + marker.length;
+          el.focus();
+          el.setSelectionRange(newPos, newPos);
+          cursorRef.current = newPos;
+        }
+      });
+      toast.success(`Inserted footnote [^${n}]`);
+      return;
+    }
+    // Inline (short or full). Substitute *Id.* when the immediately preceding cite is the same source.
+    let text: string;
+    if (lastCiteKeyRef.current === key) {
+      // Look at the last ~6 chars before cursor: if a recent ")" suggests an immediately preceding cite, emit Id.
+      const pos = Math.min(cursorRef.current, content.length);
+      const tail = content.slice(Math.max(0, pos - 4), pos);
+      if (/[).”"]\s*$/.test(tail) || /\)\s*\.?\s*$/.test(tail)) {
+        // need a previous chip to diff page; without prior chip object we just emit *Id.* at <page>
+        text = c.page ? ` (*Id.* at ${formatPagePin(c.page)})` : ' (*Id.*)';
+      } else {
+        text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
+      }
+    } else {
+      text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
+    }
+    lastCiteKeyRef.current = key;
+    const pos = Math.min(cursorRef.current, content.length);
+    const next = content.slice(0, pos) + text + content.slice(pos);
+    setContent(next);
+    setDirty(true);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(pos + text.length, pos + text.length);
+        cursorRef.current = pos + text.length;
+      }
+    });
+    toast.success('Citation inserted');
+  };
+
   const jumpToCite = (r: CiteCheckResult) => {
     if (preview) setPreview(false);
     const el = textareaRef.current;
