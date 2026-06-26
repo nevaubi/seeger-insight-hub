@@ -1,23 +1,29 @@
-## Hide the "Live Docket" tab from the sidebar
+## Goal
+Replace the "MDL 3140 Command Center" wordmark with the Seeger Weiss LLP logo, and tighten the sidebar so it feels lean and well-organized instead of bulky.
 
-Remove the Live Docket entry from the sidebar navigation across all matters so users can't reach it from the UI, while leaving the underlying route, data, and sync function intact (safe, fully reversible).
+## 1. Brand the sidebar with the Seeger Weiss logo
+- Upload `ChatGPT_Image_Jun_25_2026_08_31_37_PM.png` via `lovable-assets` and import it as `src/assets/seeger-weiss-logo.png.asset.json` (CDN pointer, no binary in repo).
+- Logo is navy-on-white. Sidebar is dark navy, so render it white using Tailwind `brightness-0 invert` on the `<img>`. Sized ~`h-7` expanded, `h-6` collapsed (icon rail).
+- Replace the entire brand block:
+  - Expanded: white Seeger Weiss logo, then a small `MDL {number} · Command Center` overline beneath it, then the MatterSwitcher. Drop the large serif title, the Scale icon, and the italic subtitle paragraph.
+  - Collapsed: just the centered logo mark (no Scale icon).
 
-### Change
+## 2. Compact + organize the nav
+- Reduce row height from `h-10` to `h-8`, icon `14px`, tracking `0.06em`, font-size `[10.5px]`. Group spacing `space-y-px`.
+- Group items under tiny section overlines (hidden when collapsed):
+  ```text
+  WORKSPACE        Dashboard
+  INTELLIGENCE     Orders Intelligence · Ask the Record
+  CASE             Deadlines & Calendar · Roster & Key Players
+  WORK PRODUCT     Drafting Workspace · Tabular Review
+  ```
+- Section label style: `px-4 pt-4 pb-1 text-[9.5px] uppercase tracking-[0.16em] text-sidebar-foreground/40`.
+- Tighten brand block padding (`py-7` → `py-5`) and footer (`pt-5 pb-3` → `pt-3 pb-2`).
+- Court-info footer block: collapse to a single muted line (`N.D. Fla. · Pensacola · Judge Rodgers`) to reduce visual weight.
 
-**File:** `src/components/app-shell.tsx`
-- Delete the `{ to: '/docket', label: 'Live Docket', icon: ScrollText }` entry from the `NAV` array.
-- Remove the now-unused `ScrollText` import from `lucide-react`.
+## 3. Files touched
+- `src/components/app-shell.tsx` — brand block + grouped/compact nav.
+- `src/assets/seeger-weiss-logo.png.asset.json` — new CDN pointer (no binary added).
 
-### Intentionally NOT changed
-
-- `src/routes/docket.tsx` — left in place. The route still exists at `/docket` (reachable only by typing the URL), so nothing breaks and we can restore the tab in one line if you change your mind.
-- `supabase/functions/recap-sync/index.ts` and `recap_sync_state` / `v_recap_docket` queries — untouched.
-- No other page references `/docket` via `<Link>`, so removing the nav item leaves no dangling links.
-
-### Why this is safe
-
-- The nav is the only entry point in the app — no other component links to `/docket`.
-- Routing, data, and the sync edge function continue to work, so if any background process or future page needs the docket data it's still there.
-- Reversal = re-add one array entry and one icon import.
-
-If you'd rather also delete the route file entirely (harder to reverse, removes the URL too), say the word and I'll fold that in.
+## Out of scope
+No route changes, no theme/color token edits, no page-content changes.
