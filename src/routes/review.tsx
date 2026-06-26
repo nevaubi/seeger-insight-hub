@@ -91,6 +91,22 @@ const COLUMN_PRESETS: { name: string; data_type: ReviewColumnType; prompt: strin
   { name: 'Arbitration clause?', data_type: 'boolean', prompt: 'Does the document contain a binding arbitration clause?' },
 ];
 
+// Auto-extractable document metadata — one click creates all six.
+const METADATA_COLUMNS: { name: string; data_type: ReviewColumnType; prompt: string; enum_options?: string[] }[] = [
+  {
+    name: 'Document type',
+    data_type: 'enum',
+    prompt: 'Classify this document into exactly one of the listed categories based on its form and content.',
+    enum_options: ['Order', 'Motion', 'Brief', 'Letter', 'Agreement', 'Expert Report', 'Deposition', 'Email', 'Pleading', 'Other'],
+  },
+  { name: 'Title / caption', data_type: 'text', prompt: 'The full title or caption of this document, exactly as it appears.' },
+  { name: 'Date', data_type: 'date', prompt: 'The principal date of the document (date filed, signed, or issued).' },
+  { name: 'Parties', data_type: 'list', prompt: 'All named parties to this document (plaintiffs, defendants, signatories).' },
+  { name: 'Court / forum', data_type: 'text', prompt: 'The court, tribunal, or forum named in the document. Leave blank if none.' },
+  { name: 'Author / signer', data_type: 'text', prompt: 'The author or signing party (judge, attorney, executive, etc.).' },
+];
+
+
 type CellWithCites = ReviewCell & { review_cell_citations: ReviewCellCitation[] };
 
 const setsQuery = (caseId: string) =>
