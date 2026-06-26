@@ -187,7 +187,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         {/* Footer: toggle */}
-        <div className="border-t border-sidebar-border">
+        <div className="border-t border-sidebar-border shrink-0">
           <div className={cn('flex', collapsed ? 'justify-center py-2' : 'justify-end px-2 py-2')}>
             <button
               type="button"
