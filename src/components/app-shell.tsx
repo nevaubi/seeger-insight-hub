@@ -125,14 +125,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <img
               src={logoUrl}
               alt="Seeger Weiss"
-              className="h-6 w-auto brightness-0 invert opacity-95"
+              className="h-10 w-auto brightness-0 invert opacity-95"
             />
           ) : (
             <>
               <img
                 src={logoUrl}
                 alt="Seeger Weiss LLP"
-                className="h-8 w-auto brightness-0 invert opacity-95"
+                className="h-16 w-auto brightness-0 invert opacity-95"
               />
               <div className="mt-2 text-[9px] uppercase tracking-[0.16em] text-sidebar-foreground/55 font-sans font-medium">
                 {overline}
