@@ -54,10 +54,12 @@ export function AskReview({ reviewSetId, files }: Props) {
     saveRecents(reviewSetId, next);
   };
 
-  const text = state.rounds
+  const text = Object.values(state.rounds)
+    .sort((a, b) => a.round - b.round)
     .flatMap((r) => r.textOrder.map((id) => r.textBlocks.find((b) => b.id === id)?.text ?? ''))
     .join('\n\n')
     .trim();
+
 
   return (
     <div className="mb-5 rounded-md border border-border bg-card">
