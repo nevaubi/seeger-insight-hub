@@ -381,16 +381,6 @@ function DraftPage() {
     toast.success('Citation inserted');
   };
 
-  const jumpToCite = (r: CiteCheckResult) => {
-    if (preview) setPreview(false);
-    const el = textareaRef.current;
-    if (!el || r.start == null || r.end == null) return;
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(r.start as number, r.end as number);
-      setSelection({ start: r.start as number, end: r.end as number });
-    });
-  };
 
   const wordCount = useMemo(() => (content.trim() ? content.trim().split(/\s+/).length : 0), [content]);
 
