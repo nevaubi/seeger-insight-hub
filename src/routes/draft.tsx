@@ -908,7 +908,7 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
     );
   }
 
-  const sources = dedupeSources(msg.chunks, msg.citations);
+  const citeChips = dedupeCitations(msg.citations, msg.chunks);
   return (
     <div className="space-y-2">
       <div className="rounded-2xl rounded-bl-sm bg-secondary/50 border border-border px-3.5 py-2.5">
@@ -921,19 +921,45 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
           {msg.streaming && msg.content && <span className="motion-stream-caret" aria-hidden />}
         </div>
 
-        {sources.length > 0 && (
+        {citeChips.length > 0 && (
           <div className="mt-2.5 pt-2 border-t border-border/60">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1">Sources</div>
+            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5">
+              Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+            </div>
             <div className="flex flex-wrap gap-1.5">
-              {sources.map((s, i) => (
-                s.pdf_url ? (
-                  <a key={i} href={s.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-border bg-card hover:border-accent/50 text-foreground/80">
-                    {s.label}<ExternalLink className="h-2.5 w-2.5" />
-                  </a>
-                ) : (
-                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-foreground/80">{s.label}</span>
-                )
-              ))}
+              {citeChips.map((c, i) => {
+                const insertText = ` (${[c.order_label, c.page].filter(Boolean).join(', ')})`;
+                return (
+                  <span
+                    key={i}
+                    className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
+                    title={c.cited_text ? `"${c.cited_text}"` : undefined}
+                  >
+                    {c.pdf_url ? (
+                      <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
+                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
+                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
+                        <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
+                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
+                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onInsert(insertText)}
+                      title="Insert this citation at the cursor"
+                      className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
+                    >
+                      <Plus className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}
@@ -954,6 +980,35 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
       )}
     </div>
   );
+}
+
+type CiteChip = {
+  num: number;
+  order_label: string | null;
+  page: string | null;
+  title?: string;
+  cited_text?: string;
+  pdf_url: string | null;
+};
+
+function dedupeCitations(citations?: AiAssistCitation[], chunks?: AiAssistChunk[]): CiteChip[] {
+  if (!citations?.length) return [];
+  const byRef = new Map((chunks ?? []).map((c) => [c.ref, c]));
+  const seen = new Map<string, CiteChip>();
+  for (const c of citations) {
+    const key = `${c.order_label ?? c.title ?? ''}|${c.page ?? ''}`;
+    if (seen.has(key)) continue;
+    const chunk = c.ref ? byRef.get(c.ref) : undefined;
+    seen.set(key, {
+      num: c.num,
+      order_label: c.order_label,
+      page: c.page,
+      title: c.title,
+      cited_text: c.cited_text,
+      pdf_url: chunk?.pdf_url ?? null,
+    });
+  }
+  return Array.from(seen.values());
 }
 
 function dedupeSources(chunks?: AiAssistChunk[], citations?: AiAssistCitation[]): { label: string; pdf_url: string | null }[] {
