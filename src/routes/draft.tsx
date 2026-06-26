@@ -470,18 +470,6 @@ function DraftPage() {
               />
               <div className="ml-auto flex items-center gap-1.5 shrink-0">
                 <span className="text-[11px] text-muted-foreground tabular-nums font-sans mr-1">{wordCount} words</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  disabled={!content.trim() || citeRunning}
-                  onClick={runCiteCheck}
-                  title="Verify the case citations in this draft against CourtListener"
-                >
-                  {citeRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                  Cite-check
-                </Button>
-                <div className="w-px h-5 bg-border mx-0.5" />
                 <Button variant={preview ? 'ghost' : 'secondary'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setPreview(false)}>
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </Button>
