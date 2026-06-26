@@ -1033,9 +1033,6 @@ function ChatBubble({
 
       {!msg.streaming && msg.content && (
         <div className="flex items-center gap-1.5 px-1">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onInsert(msg.content)}>
-            <ArrowDownToLine className="h-3 w-3" /> Insert
-          </Button>
           <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onAppend(msg.content)}>
             <Plus className="h-3 w-3" /> Append
           </Button>
