@@ -193,12 +193,65 @@ function parseInline(text: string): Run[] {
   return runs.length ? runs : [{ text }];
 }
 
-/** Lightweight Markdown → DocBlock parser (headings, lists, rules, paragraphs, inline bold/italic). */
+// ---------- GFM pipe-table helpers ----------
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+const TABLE_ROW_RE = /\|/;
+
+function splitTableCells(line: string): string[] {
+  // Strip a single leading/trailing pipe (with optional whitespace), then split on
+  // unescaped `|`. Backslash-escaped pipes (`\|`) are unescaped into literal pipes.
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const out: string[] = [];
+  let buf = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && s[i + 1] === '|') {
+      buf += '|';
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      out.push(buf.trim());
+      buf = '';
+    } else {
+      buf += ch;
+    }
+  }
+  out.push(buf.trim());
+  return out;
+}
+
+function parseTableAlign(sepLine: string, colCount: number): TableAlign[] {
+  const parts = splitTableCells(sepLine);
+  const out: TableAlign[] = [];
+  for (let i = 0; i < colCount; i++) {
+    const p = (parts[i] ?? '').trim();
+    const left = p.startsWith(':');
+    const right = p.endsWith(':');
+    if (left && right) out.push('center');
+    else if (right) out.push('right');
+    else if (left) out.push('left');
+    else out.push(null);
+  }
+  return out;
+}
+
+function normalizeRow(cells: string[], colCount: number): Run[][] {
+  const out: Run[][] = [];
+  for (let i = 0; i < colCount; i++) out.push(parseInline(cells[i] ?? ''));
+  return out;
+}
+
+/** Lightweight Markdown → DocBlock parser (headings, lists, rules, paragraphs, GFM tables, inline bold/italic). */
 export function markdownToBlocks(md: string): DocBlock[] {
   const out: DocBlock[] = [];
   const lines = (md ?? '').replace(/\r\n/g, '\n').split('\n');
   let orderedIdx = 0;
-  for (const raw of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li];
     const line = raw.replace(/\s+$/, '');
     if (!line.trim()) {
       orderedIdx = 0;
@@ -207,6 +260,27 @@ export function markdownToBlocks(md: string): DocBlock[] {
     }
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
       out.push({ type: 'rule' });
+      continue;
+    }
+    // GFM pipe table: current line has a pipe AND the next line is a separator row.
+    const nextLine = lines[li + 1] ?? '';
+    if (TABLE_ROW_RE.test(line) && TABLE_SEP_RE.test(nextLine)) {
+      const headerCells = splitTableCells(line);
+      const colCount = headerCells.length;
+      const align = parseTableAlign(nextLine, colCount);
+      const header = normalizeRow(headerCells, colCount);
+      const rows: Run[][][] = [];
+      let j = li + 2;
+      while (j < lines.length) {
+        const rl = lines[j].replace(/\s+$/, '');
+        if (!rl.trim() || !TABLE_ROW_RE.test(rl)) break;
+        if (TABLE_SEP_RE.test(rl)) break;
+        rows.push(normalizeRow(splitTableCells(rl), colCount));
+        j++;
+      }
+      out.push({ type: 'table', header, rows, align });
+      li = j - 1;
+      orderedIdx = 0;
       continue;
     }
     const h = /^(#{1,3})\s+(.*)$/.exec(line);
