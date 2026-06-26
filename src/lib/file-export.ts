@@ -473,7 +473,21 @@ export function blocksToHtml(blocks: DocBlock[]): string {
     if (b.type === 'heading') out.push(`<h${b.level}>${b.runs.map(runHtml).join('')}</h${b.level}>`);
     else if (b.type === 'rule') out.push('<hr/>');
     else if (b.type === 'spacer') out.push('');
-    else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
+    else if (b.type === 'table') {
+      const styleFor = (a: TableAlign) => (a ? ` style="text-align:${a}"` : '');
+      const thead = `<thead><tr>${b.header
+        .map((cell, i) => `<th${styleFor(b.align[i] ?? null)}>${cell.map(runHtml).join('')}</th>`)
+        .join('')}</tr></thead>`;
+      const tbody = `<tbody>${b.rows
+        .map(
+          (row) =>
+            `<tr>${b.header
+              .map((_h, i) => `<td${styleFor(b.align[i] ?? null)}>${(row[i] ?? []).map(runHtml).join('')}</td>`)
+              .join('')}</tr>`,
+        )
+        .join('')}</tbody>`;
+      out.push(`<table class="doc-table">${thead}${tbody}</table>`);
+    } else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
   }
   flush();
   return out.join('\n');
