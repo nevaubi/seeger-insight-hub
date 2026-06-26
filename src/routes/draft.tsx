@@ -121,8 +121,6 @@ function DraftPage() {
   const [preview, setPreview] = useState(false);
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [transforming, setTransforming] = useState(false);
-  const [citeResult, setCiteResult] = useState<CiteCheckSummary | null>(null);
-  const [citeRunning, setCiteRunning] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [railOpen, setRailOpen] = useState(true);
