@@ -31,6 +31,10 @@ import {
   Search,
   PanelLeftClose,
   PanelLeftOpen,
+  FileSignature,
+  FileSearch,
+  ClipboardList,
+  Quote,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -135,6 +139,8 @@ function DraftPage() {
   const [railQuery, setRailQuery] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const cursorRef = useRef<number>(0);
+  const footnoteCounterRef = useRef<number>(0);
+  const lastCiteKeyRef = useRef<string | null>(null);
 
   const matterScope = useMemo(
     () => ({
@@ -359,6 +365,62 @@ function DraftPage() {
     toast.success('Appended to document');
   };
 
+  // Insert a citation in one of three Bluebook forms; auto-substitute *Id.* on repeats.
+  const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
+    const key = citeSourceKey(c);
+    if (variant === 'footnote') {
+      const n = ++footnoteCounterRef.current;
+      const { marker, definition } = formatFootnoteCite(c, n);
+      // marker at cursor, definition appended to doc end
+      const pos = Math.min(cursorRef.current, content.length);
+      const withMarker = content.slice(0, pos) + marker + content.slice(pos);
+      const withDef = withMarker.trimEnd() + `\n\n${definition}\n`;
+      setContent(withDef);
+      setDirty(true);
+      lastCiteKeyRef.current = key;
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          const newPos = pos + marker.length;
+          el.focus();
+          el.setSelectionRange(newPos, newPos);
+          cursorRef.current = newPos;
+        }
+      });
+      toast.success(`Inserted footnote [^${n}]`);
+      return;
+    }
+    // Inline (short or full). Substitute *Id.* when the immediately preceding cite is the same source.
+    let text: string;
+    if (lastCiteKeyRef.current === key) {
+      // Look at the last ~6 chars before cursor: if a recent ")" suggests an immediately preceding cite, emit Id.
+      const pos = Math.min(cursorRef.current, content.length);
+      const tail = content.slice(Math.max(0, pos - 4), pos);
+      if (/[).”"]\s*$/.test(tail) || /\)\s*\.?\s*$/.test(tail)) {
+        // need a previous chip to diff page; without prior chip object we just emit *Id.* at <page>
+        text = c.page ? ` (*Id.* at ${formatPagePin(c.page)})` : ' (*Id.*)';
+      } else {
+        text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
+      }
+    } else {
+      text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
+    }
+    lastCiteKeyRef.current = key;
+    const pos = Math.min(cursorRef.current, content.length);
+    const next = content.slice(0, pos) + text + content.slice(pos);
+    setContent(next);
+    setDirty(true);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(pos + text.length, pos + text.length);
+        cursorRef.current = pos + text.length;
+      }
+    });
+    toast.success('Citation inserted');
+  };
+
   const jumpToCite = (r: CiteCheckResult) => {
     if (preview) setPreview(false);
     const el = textareaRef.current;
@@ -541,6 +603,7 @@ function DraftPage() {
           documentText={content}
           onInsert={insertAtCursor}
           onAppend={appendToDoc}
+          onInsertCite={insertCitation}
         />
       </div>
     </AppShell>
@@ -745,37 +808,266 @@ function CustomTransform({ disabled, onRun }: { disabled: boolean; onRun: (instr
   );
 }
 
-const DRAFT_TEMPLATES: { icon: typeof Mail; title: string; prompt: string }[] = [
+type DraftTemplate = {
+  category: 'Correspondence' | 'Motions & Briefs' | 'Discovery' | 'Case Management' | 'Hearing Prep' | 'Leadership / PSC';
+  icon: typeof Mail;
+  title: string;
+  docType: string;
+  summary: string;
+  prompt: string;
+};
+
+const DRAFT_TEMPLATES: DraftTemplate[] = [
+  // ---------- Correspondence ----------
   {
-    icon: Mail,
-    title: 'Meet-and-confer letter',
-    prompt: 'Draft a meet-and-confer letter to opposing counsel addressing outstanding discovery deficiencies, citing the controlling discovery order.',
+    category: 'Correspondence', icon: Mail, title: 'Meet-and-confer letter', docType: 'Letter',
+    summary: 'Discovery deficiencies, numbered, tied to the controlling order.',
+    prompt: 'Draft a meet-and-confer letter from Seeger Weiss LLP to defense liaison counsel addressing outstanding discovery deficiencies. Use full letter form: date line, addressee block, "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — Outstanding Discovery Deficiencies" line, salutation, body organized as numbered deficiency items each citing the controlling discovery order and the specific request at issue, a proposal of meet-and-confer times within the next seven days, and a closing signature block for [ATTORNEY NAME], Seeger Weiss LLP. Reserve all rights. Insert [BRACKETED ALL-CAPS] placeholders for any fact not in the record.',
   },
   {
-    icon: ListChecks,
-    title: 'Status-conference agenda',
-    prompt: 'Outline an agenda for the next status conference, organized by open issues, pending motions, and upcoming deadlines.',
+    category: 'Correspondence', icon: Mail, title: 'Rule 26(f) follow-up letter', docType: 'Letter',
+    summary: 'Memorialize 26(f) topics and open items for joint report.',
+    prompt: 'Draft a Rule 26(f) follow-up letter from Seeger Weiss LLP to defense liaison counsel memorializing the parties\' discussion of the Fed. R. Civ. P. 26(f) topics. Letter form with caption "Re:" line referencing MDL No. 3140. Numbered sections: initial disclosures, ESI protocol status, protective order, discovery sequencing, anticipated motion practice, and proposed deadlines for the joint Rule 26(f) report. Flag points of disagreement neutrally. Signature block with [ATTORNEY NAME].',
   },
   {
-    icon: CalendarClock,
-    title: 'Deadline & obligations summary',
-    prompt: "Summarize the upcoming deadlines and each party's obligations under the operative case management order.",
+    category: 'Correspondence', icon: Mail, title: 'Letter to Magistrate Cannon', docType: 'Letter',
+    summary: 'Pre-motion discovery dispute letter per the operative procedure.',
+    prompt: 'Draft a pre-motion discovery dispute letter to Magistrate Judge Hope T. Cannon following the procedure set out in the operative discovery management order. Brief letter form: date, "The Honorable Hope T. Cannon, United States Magistrate Judge, United States District Court, Northern District of Florida, Pensacola Division", "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — [SUBJECT]", salutation, three to four short numbered paragraphs stating (1) the dispute, (2) what plaintiffs sought and when, (3) defendants\' position and the parties\' meet-and-confer efforts, and (4) the limited relief requested. Cite the controlling order. Sign-off "Respectfully submitted," with [ATTORNEY NAME], Seeger Weiss LLP, on behalf of Plaintiffs\' co-lead counsel.',
   },
   {
-    icon: Gavel,
-    title: 'Motion-to-compel outline',
-    prompt: 'Draft an outline for a motion to compel discovery, with argument headings and the governing legal standard.',
+    category: 'Correspondence', icon: Mail, title: 'Litigation-hold reminder', docType: 'Notice',
+    summary: 'Refresher hold to client group, scoped to known custodians.',
+    prompt: 'Draft a litigation-hold reminder memorandum from Seeger Weiss LLP to participating plaintiffs\' counsel and named-plaintiff clients. Memorandum form (TO / FROM / DATE / RE), referencing In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Sections: scope of duty to preserve, categories of materials to preserve (medical records, prescription history, communications with prescribers, social media, device data), preservation steps, prohibition on auto-deletion, and contact for questions. Place [BRACKETED ALL-CAPS] placeholders where facts vary by client.',
+  },
+
+  // ---------- Motions & Briefs ----------
+  {
+    category: 'Motions & Briefs', icon: Gavel, title: 'Motion to compel — outline', docType: 'Motion',
+    summary: 'Argument headings, governing standard, and proposed relief.',
+    prompt: 'Draft a detailed outline for Plaintiffs\' Motion to Compel Discovery. Begin with the full court caption (UNITED STATES DISTRICT COURT, NORTHERN DISTRICT OF FLORIDA, PENSACOLA DIVISION; In re Depo-Provera caption; MDL No. 3140; Judge Rodgers; Magistrate Judge Cannon). Title: "PLAINTIFFS\' MOTION TO COMPEL DISCOVERY". Sections: Introduction; Background (meet-and-confer history, pin-cited to letters); Legal Standard (Fed. R. Civ. P. 26(b)(1), 37(a), Eleventh Circuit authority); Argument with numbered headings (I., II., A., B.) addressing each disputed request; Conclusion / Proposed Relief; signature block for Plaintiffs\' Co-Lead Counsel; Certificate of Service. Use [BRACKETED ALL-CAPS] placeholders for case-specific facts.',
+  },
+  {
+    category: 'Motions & Briefs', icon: Gavel, title: 'Daubert / Rule 702 response section', docType: 'Brief Section',
+    summary: 'General-causation expert defense, ties to the gating hearing.',
+    prompt: 'Draft a brief section responding to a Rule 702 / Daubert challenge to Plaintiffs\' general-causation expert(s) on the meningioma–medroxyprogesterone acetate association. No caption — produce the brief section only, suitable for insertion into a larger opposition. Numbered headings (I. Legal Standard; II. Dr. [EXPERT NAME]\'s Methodology Satisfies Rule 702; A. Reliability; B. Fit; III. Defendants\' Critiques Go to Weight, Not Admissibility). Cite Daubert, Kumho Tire, the 2023 amendments to Rule 702, and Eleventh Circuit authority (e.g., Chapman v. Procter & Gamble, McClain v. Metabolife). Use [BRACKETED ALL-CAPS] for expert names, study citations, and record pin cites.',
+  },
+  {
+    category: 'Motions & Briefs', icon: Gavel, title: 'Opposition to motion to quash', docType: 'Brief',
+    summary: 'Third-party subpoena defense; relevance and proportionality.',
+    prompt: 'Draft an opposition brief responding to a non-party\'s motion to quash a Rule 45 subpoena duces tecum issued by Plaintiffs. Full caption (MDL No. 3140, Judge Rodgers, Magistrate Cannon). Title: "PLAINTIFFS\' OPPOSITION TO [NON-PARTY]\'S MOTION TO QUASH". Sections: Introduction; Factual Background (the subpoena and meet-and-confer); Legal Standard (Fed. R. Civ. P. 45(d), 26(b)(1)); Argument (relevance to general causation, proportionality, narrow tailoring, no undue burden, willingness to negotiate protective terms); Conclusion; signature block; Certificate of Service. Insert [BRACKETED ALL-CAPS] placeholders for the non-party identity and document categories.',
+  },
+  {
+    category: 'Motions & Briefs', icon: Gavel, title: 'Motion to seal under PO', docType: 'Motion',
+    summary: 'Narrow sealing request tied to the operative confidentiality order.',
+    prompt: 'Draft an unopposed motion to file under seal pursuant to the operative Confidentiality / Protective Order in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "UNOPPOSED MOTION TO FILE UNDER SEAL". Sections: Introduction (one paragraph identifying the document and the protective-order designation), Legal Standard (Eleventh Circuit common-law right of access; *Chicago Tribune Co. v. Bridgestone/Firestone, Inc.* test), Argument (narrow tailoring, redactions considered, defendants\' designation), Conclusion / Proposed Order. Signature block; proposed order paragraphs in a separate section labeled "[PROPOSED] ORDER". Insert [BRACKETED ALL-CAPS] placeholders.',
+  },
+
+  // ---------- Discovery ----------
+  {
+    category: 'Discovery', icon: FileSignature, title: "Plaintiffs' First RFPs", docType: 'Discovery Request',
+    summary: 'Numbered RFPs with definitions and instructions block.',
+    prompt: 'Draft Plaintiffs\' First Set of Requests for Production to Defendants in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "PLAINTIFFS\' FIRST SET OF REQUESTS FOR PRODUCTION TO DEFENDANTS". Sections: I. Definitions (Plaintiffs, Defendants, Depo-Provera, Document, Communication, Concerning, Relevant Time Period, etc.); II. Instructions (incorporate Fed. R. Civ. P. 26 and 34 and the operative ESI protocol); III. Requests (numbered RFP No. 1–[N] on topics including general-causation research, pharmacovigilance signals on meningioma, label change history, FDA correspondence, internal risk assessments). Signature block. Each request on one substantive item.',
+  },
+  {
+    category: 'Discovery', icon: FileSignature, title: 'Subpoena duces tecum (non-party)', docType: 'Subpoena',
+    summary: 'Rule 45 schedule of documents to produce.',
+    prompt: 'Draft Schedule A to a Fed. R. Civ. P. 45 subpoena duces tecum to a non-party in connection with In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Sections: I. Definitions; II. Instructions; III. Documents to be Produced (numbered categories, each scoped narrowly to a defined relevant time period and subject). Note that the subpoena form itself is the AO 88B and need not be reproduced; produce Schedule A only. Use [BRACKETED ALL-CAPS] placeholders for the non-party name and subject matter.',
+  },
+  {
+    category: 'Discovery', icon: FileSignature, title: 'ESI protocol stipulation', docType: 'Stipulation',
+    summary: 'Skeleton ESI protocol tracking the operative CMO.',
+    prompt: 'Draft a stipulated ESI protocol for In re Depo-Provera Prods. Liab. Litig., MDL No. 3140, tracking the operative case management order. Full caption. Title: "STIPULATED ORDER GOVERNING THE PRODUCTION OF ELECTRONICALLY STORED INFORMATION". Numbered sections: 1. Cooperation; 2. Scope; 3. Custodians and Sources; 4. Search Methodology (TAR / search terms / negotiation); 5. Production Format (TIFF + load file, native for spreadsheets/presentations, color-as-kept); 6. Metadata Fields (table); 7. De-Duplication and Email Threading; 8. Privilege (logging, FRE 502(d)); 9. Hyperlinked / Modern Attachments; 10. Disputes (meet-and-confer, then to Magistrate Judge Cannon); 11. Modification. Signature lines for both sides and "SO ORDERED" line for Magistrate Judge Cannon.',
+  },
+
+  // ---------- Case Management ----------
+  {
+    category: 'Case Management', icon: ListChecks, title: 'Joint status report', docType: 'Status Report',
+    summary: 'Pre-CMC report to Judge Rodgers on open items.',
+    prompt: 'Draft a Joint Status Report to The Honorable M. Casey Rodgers in advance of the next status conference in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "JOINT STATUS REPORT". Numbered sections: I. Case Inventory (transfers, direct filings, anticipated tag-alongs); II. Plaintiff Fact Sheets / Threshold Proof Compliance; III. Defendant Fact Sheets; IV. Document Discovery (status by custodian, hit-report progress); V. Deposition Schedule; VI. Expert Discovery / Daubert; VII. Bellwether Process; VIII. Pending Motions; IX. Proposed Agenda Items. Use a neutral joint voice; insert "Plaintiffs\' Position:" / "Defendants\' Position:" subheadings where the parties disagree. Dual signature block.',
+  },
+  {
+    category: 'Case Management', icon: ListChecks, title: 'Proposed PTO/CMO', docType: 'Proposed Order',
+    summary: 'Caption + IT IS ORDERED numbered paragraphs.',
+    prompt: 'Draft a proposed Pretrial / Case Management Order for In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "PRETRIAL ORDER NO. [XX]: [SHORT SUBJECT]". One-paragraph recital noting the Court\'s consideration of the parties\' submissions and conference, then "Accordingly, IT IS ORDERED that:" followed by numbered operative paragraphs (1., 2., 3.) each stating a single obligation, deadline, or procedure. Close with "DONE AND ORDERED in Chambers in Pensacola, Florida, this [DATE]." and a signature line for "M. CASEY RODGERS, UNITED STATES DISTRICT JUDGE". Insert [BRACKETED ALL-CAPS] placeholders for fact-specific terms.',
+  },
+  {
+    category: 'Case Management', icon: CalendarClock, title: 'Status-conference agenda', docType: 'Agenda',
+    summary: 'PSC-facing internal agenda for the next status conference.',
+    prompt: 'Draft an internal status-conference agenda for the Plaintiffs\' Steering Committee in advance of the next conference before Judge Rodgers in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum-style header (TO: PSC; FROM: Co-Lead Counsel; DATE: [INSERT DATE]; RE: Status Conference Agenda). Numbered agenda items grouped under headings: I. Case Inventory; II. Discovery; III. Expert / Daubert; IV. Bellwether Process; V. Pending Motions; VI. Scheduling; VII. Common-Benefit Administration. Under each item, brief bullets for talking points and the proposed speaker. Insert [BRACKETED ALL-CAPS] placeholders.',
+  },
+  {
+    category: 'Case Management', icon: CalendarClock, title: 'Deadline & obligations summary', docType: 'Memo',
+    summary: 'Tabular summary of upcoming dates from the operative CMO.',
+    prompt: 'Draft a memorandum summarizing upcoming deadlines and each party\'s obligations under the operative case management order in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum header (TO / FROM / DATE / RE). Section 1: a Markdown table with columns "Date | Event | Source (PTO/CMO ¶) | Plaintiffs\' Obligation | Defendants\' Obligation". Section 2: narrative discussion of the three most operationally significant deadlines and any conflicts. Cite each row to the controlling order using short forms ("CMO-3 § II.B"). Use [BRACKETED ALL-CAPS] for any obligation not supported by the record.',
+  },
+
+  // ---------- Hearing Prep ----------
+  {
+    category: 'Hearing Prep', icon: FileSearch, title: 'Bench memo', docType: 'Bench Memo',
+    summary: 'Internal bench memo for an upcoming hearing.',
+    prompt: 'Draft an internal bench memo for Plaintiffs\' co-lead counsel preparing for an upcoming hearing in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Header: "MEMORANDUM" with TO / FROM / DATE / RE block. Sections: I. Question Presented; II. Short Answer; III. Background; IV. Discussion (numbered argument with subheadings A., B.); V. Anticipated Questions from the Court; VI. Recommended Talking Points; VII. Open Issues / Follow-up. Bluebook citations throughout. Use [BRACKETED ALL-CAPS] placeholders for record pin cites and witness/expert names.',
+  },
+  {
+    category: 'Hearing Prep', icon: FileSearch, title: 'Cross-examination outline', docType: 'Outline',
+    summary: 'Topic-driven cross outline for an expert witness.',
+    prompt: 'Draft a cross-examination outline for [EXPERT WITNESS NAME], a defense general-causation expert in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Header with witness name, role, and date of testimony [INSERT DATE]. Sections by topic (I., II., III.), each topic broken into lettered subtopics (A., B.), each subtopic broken into numbered questions (1., 2.) with the anticipated answer in parentheses or italics, and an exhibit reference where applicable (e.g., "[Ex. 4 — 2019 deposition at 112:14–18]"). End with "Loose Ends" and "Impeachment Reserves" sections. Place [BRACKETED ALL-CAPS] for facts not in the record.',
+  },
+
+  // ---------- Leadership / PSC ----------
+  {
+    category: 'Leadership / PSC', icon: ClipboardList, title: 'Common-benefit time memo', docType: 'PSC Memo',
+    summary: 'Submission instructions to participating firms.',
+    prompt: 'Draft a memorandum from Plaintiffs\' Co-Lead Counsel to all participating plaintiffs\' firms in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140, setting out the procedures for submitting common-benefit time and expenses under the operative Common Benefit Order. Memorandum header (TO / FROM / DATE / RE). Sections: I. Authority (cite the controlling CBO); II. What Qualifies as Common-Benefit Work; III. Time Submission Procedure (format, monthly deadline, contemporaneous-records requirement, billable categories); IV. Expense Submission Procedure; V. Audit and Approval; VI. Contact. Use [BRACKETED ALL-CAPS] for the time-keeper contact, monthly cut-off, and CBO paragraph numbers if not in the record.',
+  },
+  {
+    category: 'Leadership / PSC', icon: ClipboardList, title: 'Lone Pine compliance analysis', docType: 'Analysis Memo',
+    summary: 'Threshold-proof / Lone Pine compliance read.',
+    prompt: 'Draft an internal analysis memorandum for the Plaintiffs\' Steering Committee evaluating Lone Pine / threshold-proof compliance issues in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum header (TO: PSC; FROM: Co-Lead Counsel; DATE: [INSERT DATE]; RE: Threshold-Proof Compliance — Analysis and Recommendations). Sections: I. The Operative Order (summarize the threshold-proof requirements with pin cites); II. Categories of Non-Compliance Observed; III. Legal Standard for Dismissal / Show-Cause; IV. Recommended Compliance Push (deadlines, communications, escalation); V. Risk Assessment. Use [BRACKETED ALL-CAPS] for case-counts and dates not in the record.',
   },
 ];
 
+const TEMPLATE_CATEGORIES: DraftTemplate['category'][] = [
+  'Correspondence', 'Motions & Briefs', 'Discovery', 'Case Management', 'Hearing Prep', 'Leadership / PSC',
+];
+
+function TemplateLauncher({
+  onPick, disabled,
+}: { onPick: (t: DraftTemplate) => void; disabled: boolean }) {
+  const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
+  const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
+  return (
+    <div className="py-3 px-1">
+      <div className="text-center mb-4 px-2">
+        <Sparkles className="h-5 w-5 mx-auto mb-2.5 text-accent/70" />
+        <p className="font-serif text-[15px] text-foreground/85 mb-1">Draft from a litigation template.</p>
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+          Pick a starting form below, or describe what you need. With grounding on, factual claims are
+          cited to the controlling orders in Bluebook short form.
+        </p>
+      </div>
+
+      <div className="-mx-1 mb-3 overflow-x-auto">
+        <div className="flex gap-1 px-1 min-w-min">
+          {TEMPLATE_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCat(c)}
+              className={cn(
+                'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
+                cat === c
+                  ? 'bg-accent/10 border-accent/40 text-accent'
+                  : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
+              )}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        {items.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.title}
+              type="button"
+              onClick={() => onPick(t)}
+              disabled={disabled}
+              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">{t.title}</span>
+                  <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">{t.docType}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{t.summary}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bluebook citation formatting ----------
+
+/** Short-form record cite: "(PTO-12, at 4)" */
+function formatShortCite(c: CiteChip): string {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? formatPagePin(c.page) : '';
+  return page ? ` (${label}, at ${page})` : ` (${label})`;
+}
+
+/** Full-form record cite: "(Pretrial Order No. 12, *Case Management Order*, at 4)" */
+function formatFullCite(c: CiteChip): string {
+  const label = c.order_label || 'Order';
+  const title = c.title && c.title !== c.order_label ? `, *${stripLabelEcho(c.title, label)}*` : '';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  return ` (${expandLabel(label)}${title}${page})`;
+}
+
+/** Markdown footnote pieces. Caller inserts inline marker and appends definition. */
+function formatFootnoteCite(c: CiteChip, n: number): { marker: string; definition: string } {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
+  return {
+    marker: `[^${n}]`,
+    definition: `[^${n}]: ${expandLabel(label)}${page}.${url}`,
+  };
+}
+
+/** "*Id.* at 5" / "*Id.*" for an immediately repeated source. */
+function formatIdCite(prev: CiteChip, c: CiteChip): string | null {
+  const sameSource = (prev.order_label || prev.title) === (c.order_label || c.title);
+  if (!sameSource) return null;
+  if (c.page && c.page !== prev.page) return ` (*Id.* at ${formatPagePin(c.page)})`;
+  return ' (*Id.*)';
+}
+
+function expandLabel(label: string): string {
+  // "PTO-12" → "Pretrial Order No. 12"; "CMO-3" → "Case Management Order No. 3"; "CBO-2" → "Common Benefit Order No. 2"
+  const m = label.match(/^(PTO|CMO|CBO|JPML)[-\s]?(\d+)$/i);
+  if (!m) return label;
+  const kind = m[1].toUpperCase();
+  const num = m[2];
+  const expanded: Record<string, string> = {
+    PTO: 'Pretrial Order No.',
+    CMO: 'Case Management Order No.',
+    CBO: 'Common Benefit Order No.',
+    JPML: 'JPML Transfer Order No.',
+  };
+  return `${expanded[kind] ?? label} ${num}`;
+}
+
+function formatPagePin(page: string): string {
+  // "p.4" → "4"; "p.4–5" → "4–5"; "4-5" → "4–5"
+  return page.replace(/^p\.?\s*/i, '').replace(/-/g, '–');
+}
+
+function stripLabelEcho(title: string, label: string): string {
+  return title.replace(new RegExp(`^${label}[\\s:·—-]+`, 'i'), '').trim() || title;
+}
+
+function citeSourceKey(c: CiteChip): string {
+  return `${c.order_label ?? ''}|${c.title ?? ''}`;
+}
+
+
+
 function AssistantPane({
-  caseId, matter, documentText, onInsert, onAppend,
+  caseId, matter, documentText, onInsert, onAppend, onInsertCite,
 }: {
   caseId: string;
   matter: { name: string; short_name: string; mdl_number: string; court: string; judge: string };
   documentText: string;
   onInsert: (text: string) => void;
   onAppend: (text: string) => void;
+  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -830,37 +1122,13 @@ function AssistantPane({
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[40vh]">
           {messages.length === 0 && (
-            <div className="py-8 px-2">
-              <div className="text-center text-sm text-muted-foreground mb-5">
-                <Sparkles className="h-5 w-5 mx-auto mb-3 text-accent/70" />
-                <p className="font-serif text-[15px] text-foreground/80 mb-2">Ask the assistant to draft for you.</p>
-                <p className="text-xs leading-relaxed">
-                  Start from a template below, or describe what you need. With grounding on, factual
-                  claims are cited to the controlling orders.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {DRAFT_TEMPLATES.map((t) => {
-                  const Icon = t.icon;
-                  return (
-                    <button
-                      key={t.title}
-                      type="button"
-                      onClick={() => send(t.prompt)}
-                      disabled={running}
-                      title={t.prompt}
-                      className="group flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                    >
-                      <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
-                      <span className="text-[12px] font-sans font-medium text-foreground/90 leading-snug">{t.title}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            <TemplateLauncher
+              disabled={running}
+              onPick={(t) => send(t.prompt)}
+            />
           )}
           {messages.map((m) => (
-            <ChatBubble key={m.id} msg={m} onInsert={onInsert} onAppend={onAppend} />
+            <ChatBubble key={m.id} msg={m} onInsert={onInsert} onAppend={onAppend} onInsertCite={onInsertCite} />
           ))}
         </div>
 
@@ -889,7 +1157,14 @@ function AssistantPane({
   );
 }
 
-function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: string) => void; onAppend: (t: string) => void }) {
+function ChatBubble({
+  msg, onInsert, onAppend, onInsertCite,
+}: {
+  msg: ChatMsg;
+  onInsert: (t: string) => void;
+  onAppend: (t: string) => void;
+  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(msg.content).then(() => {
@@ -909,6 +1184,16 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
   }
 
   const citeChips = dedupeCitations(msg.citations, msg.chunks);
+  const copyAppendix = () => {
+    const lines = citeChips.map((c) => {
+      const label = expandLabel(c.order_label || c.title || 'Order');
+      const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+      const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
+      return `${c.num}. ${label}${page}.${url}`;
+    });
+    const md = `**Sources**\n\n${lines.join('\n')}\n`;
+    navigator.clipboard?.writeText(md).then(() => toast.success('Sources appendix copied'));
+  };
   return (
     <div className="space-y-2">
       <div className="rounded-2xl rounded-bl-sm bg-secondary/50 border border-border px-3.5 py-2.5">
@@ -923,43 +1208,23 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
 
         {citeChips.length > 0 && (
           <div className="mt-2.5 pt-2 border-t border-border/60">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5">
-              Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+                Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={copyAppendix}
+                className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/80 hover:text-accent font-sans inline-flex items-center gap-1"
+                title="Copy a Markdown Sources appendix for the bottom of a brief"
+              >
+                <Copy className="h-2.5 w-2.5" /> Sources appendix
+              </button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {citeChips.map((c, i) => {
-                const insertText = ` (${[c.order_label, c.page].filter(Boolean).join(', ')})`;
-                return (
-                  <span
-                    key={i}
-                    className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
-                    title={c.cited_text ? `"${c.cited_text}"` : undefined}
-                  >
-                    {c.pdf_url ? (
-                      <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
-                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
-                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
-                        <ExternalLink className="h-2.5 w-2.5 opacity-60" />
-                      </a>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
-                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
-                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onInsert(insertText)}
-                      title="Insert this citation at the cursor"
-                      className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
-                    >
-                      <Plus className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                );
-              })}
+              {citeChips.map((c, i) => (
+                <CitationChip key={i} c={c} onInsertCite={onInsertCite} />
+              ))}
             </div>
           </div>
         )}
@@ -979,6 +1244,82 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
         </div>
       )}
     </div>
+  );
+}
+
+function CitationChip({
+  c, onInsertCite,
+}: { c: CiteChip; onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void }) {
+  const label = c.order_label ?? c.title ?? 'Source';
+  const copyBluebook = () => {
+    const text = formatShortCite(c).trim();
+    navigator.clipboard?.writeText(text).then(() => toast.success('Bluebook cite copied'));
+  };
+  return (
+    <span
+      className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
+      title={c.cited_text ? `"${c.cited_text}"` : undefined}
+    >
+      {c.pdf_url ? (
+        <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
+          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+          <span>{label}</span>
+          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
+          <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
+          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+          <span>{label}</span>
+          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
+        </span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title="Insert this citation"
+            className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
+          >
+            <Plus className="h-2.5 w-2.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60 text-[12px]">
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+            Insert at cursor
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'short')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Short form</span>
+            <span className="font-serif italic text-muted-foreground text-[11px]">{formatShortCite(c).trim()}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'full')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Full citation</span>
+            <span className="font-serif italic text-muted-foreground text-[11px] line-clamp-2">{formatFullCite(c).trim()}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'footnote')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Footnote</span>
+            <span className="font-serif italic text-muted-foreground text-[11px]">Inline [^n] + definition at doc end</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={copyBluebook}>
+            <Copy className="h-3 w-3 mr-2" /> Copy Bluebook cite
+          </DropdownMenuItem>
+          {c.cited_text && (
+            <>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 max-w-[14rem]">
+                <div className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1 inline-flex items-center gap-1">
+                  <Quote className="h-2.5 w-2.5" /> Cited text
+                </div>
+                <p className="font-serif italic text-[11px] leading-snug text-foreground/80 line-clamp-4">
+                  "{c.cited_text}"
+                </p>
+              </div>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
   );
 }
 

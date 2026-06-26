@@ -1,47 +1,61 @@
-## What's there today
+## Goal
 
-A two-pane workspace: a Markdown editor (title + plain `<textarea>` + preview toggle) on the left, and a "Drafting assistant" chat (with a "Ground in record" toggle and 4 starter templates) on the right. Bonus features: a selection-transform toolbar (Improve / Formalize / Shorten / Expand / Custom) that streams a rewrite back into the editor, a cite-check panel that verifies citations against CourtListener, and Word/PDF/Markdown export. Documents are listed in a dropdown.
+Make the drafting assistant feel like a tool built by litigators: a real catalog of MDL document types with form-correct starter prompts, and citations that obey Bluebook conventions (parentheticals, pin cites, short forms, *id.*) with flexible insert options.
 
-The bones are solid. The polish gaps are mostly: a flat `<textarea>` editor, a hidden document list, weak grounding affordances in chat, and citations that don't visibly tie back to the prose.
+## 1. Expanded, MDL-aware template catalog (`src/routes/draft.tsx`)
 
-## Improvements, tiered
+Replace the four-card `DRAFT_TEMPLATES` with a categorized catalog rendered as a small tabbed launcher (Correspondence · Motions & Briefs · Discovery · Case Management · Hearing Prep · Leadership / PSC). Each template carries: `category`, `icon`, `title`, `docType` (e.g. "Letter", "Motion", "Stipulation", "Bench Memo"), `summary`, and a structured `prompt` that tells the assistant the form to produce — caption block, headings, signature block, certificate of service where applicable.
 
-### Tier 1 — high impact, contained scope
+Catalog (≈18 templates, all MDL 3140 / N.D. Fla. flavored):
 
-1. **Real document list as a left rail** (collapsible, like the sidebar). Replace the "Documents ▾" dropdown with a slim third column showing all drafts grouped by recency, with search, pin, rename-in-place, and a per-row updated-at. Keeps the dropdown as a fallback on narrow screens. Wins discoverability dramatically.
+- **Correspondence** — Meet-and-confer letter (discovery deficiencies); Rule 26(f) follow-up letter; Deposition-scheduling letter; Litigation-hold reminder to client group; Letter to Magistrate Judge Cannon re: discovery dispute (per the controlling discovery order's pre-motion procedure).
+- **Motions & Briefs** — Motion to compel (outline w/ argument headings + governing standard in the Eleventh Circuit); Opposition to motion to quash subpoena; Daubert / Rule 702 response section (general causation, ties to the gating hearing); Motion for leave to exceed page limit; Motion to seal under the operative confidentiality order.
+- **Discovery** — Plaintiffs' First RFPs to Defendants (numbered, with definitions/instructions block); Subpoena duces tecum to non-party; ESI protocol stipulation (skeleton, tracks the CMO); Protective-order stipulation amendment.
+- **Case Management** — Joint status report to Judge Rodgers; Proposed PTO/CMO draft (caption + ordered paragraphs); Status-conference agenda; Deadline & obligations summary keyed to current CMO.
+- **Hearing Prep** — Bench memo for upcoming hearing; Cross-examination outline (expert witness); Oral-argument outline w/ anticipated questions.
+- **Leadership / PSC** — Common-benefit time-submission memo to participating firms; PSC update memo to co-leads; Lone Pine / threshold-proof compliance analysis memo.
 
-2. **Cited drafts that actually show citations.** When `ground` is on, render `[1]`, `[2]` superscripts inline in assistant replies that hover/click to a footnote panel listing the order, page, and a "Insert citation" button. Today `citations` and `chunks` come back but aren't surfaced beyond the chat bubble.
+Each `prompt` is a few sentences telling the assistant: the document type, who it's from/to (PSC / Seeger Weiss / Judge Rodgers / Magistrate Cannon as appropriate), the form to follow (caption header for court filings, letterhead block for letters, numbered ordered paragraphs for proposed orders), required sections, and an instruction to insert `[BRACKETED]` placeholders for facts not in the record. Example for the meet-and-confer letter prompt:
 
-3. **"Insert as section" / "Replace selection" actions on every assistant reply.** Right now we only have copy / insert-at-cursor / append. Add: replace-current-selection, insert-as-new-section (`## Heading`), and a diff preview before applying.
+> "Draft a meet-and-confer letter from Seeger Weiss LLP to defense liaison counsel addressing outstanding discovery deficiencies. Use full letter form: date line, addressee block, `Re:` line referencing *In re Depo-Provera*, MDL No. 3140, salutation, body organized as numbered deficiency items each citing the controlling discovery order and the specific request at issue, a proposal of meet-and-confer times within the next seven days, and a closing signature block for [ATTORNEY NAME], Seeger Weiss LLP. Reserve all rights. Insert `[BRACKETED]` placeholders for any fact not in the record."
 
-4. **Floating selection menu.** The transform bar is at the top of the editor — easy to miss. Add a small popover that appears next to a selection (like Notion / Linear) with the same 4 actions + Custom + "Ask about this." This is also where `ai-assist`'s `insight` mode (already built into the edge function but unused on this page) plugs in.
+The empty-state grid becomes a compact two-row tab strip + scrollable card list (still no DB changes; pure UI).
 
-5. **Autosave + version history.** A 1.5s-debounced save kills the "Save •" cognitive load. Persist a lightweight `workspace_document_versions` row on each save (or every N edits) so attorneys can roll back. Show "Saved 12s ago" in the toolbar.
+## 2. Stronger system prompts (`supabase/functions/ai-assist/index.ts`)
 
-### Tier 2 — meaningful UX upgrades
+Rewrite `draftSystem(matter, grounded)` to enforce document-form discipline. Additions:
 
-6. **Outline / mini-map.** Auto-extract `#`/`##` headings into a right-side outline (or a slide-out) for jump-to-section in long memos. Show word count per section.
+- Identify the document type from the user instruction and produce the correct form: court filings get a proper caption block (court, division, *In re:* line, MDL No. 3140, Case No., Judge Rodgers, Mag. Judge Cannon) followed by document title, body with numbered headings (I., II., A., B.), signature block, and a Certificate of Service stub when filed. Letters get date / addressee / `Re:` / salutation / numbered body / sign-off. Proposed orders get caption + "IT IS ORDERED that…" numbered paragraphs + signature line for the Court.
+- Use defined terms once introduced; tabular-friendly numbered lists for deficiencies, requests, deadlines.
+- Citation style is Bluebook: parenthetical *signal*, full case name italics on first cite, pin cite, court & year (`Daubert v. Merrell Dow Pharms., Inc., 509 U.S. 579, 592–93 (1993)`); record cites use short forms (`PTO-12 ¶ 4`, `CMO-3 § II.B`, `Order at 5`). Use `*id.*` for an immediately repeated source and `*supra*` for an earlier-cited record document.
+- When grounded passages exist, cite them inline using Anthropic's native citations (already wired) and *also* render the human Bluebook short-form in the prose so the exported document reads correctly without a UI layer; flag unsupported claims with `[CONFIRM: cite controlling order]` rather than fabricating.
+- Never invent case names, docket numbers, or dates. Placeholders use `[BRACKETED ALL-CAPS]`.
 
-7. **Slash-command menu in the editor** (`/`): insert heading, bulleted list, blockquote, citation placeholder `[CITE ORDER]`, hr, today's date, matter short-name, judge name. Faster than reaching for Markdown.
+`transformSystem` gains a one-liner: if the selection appears to be a citation, normalize it to Bluebook short form.
 
-8. **Grounding chips in chat.** Above the composer, show small chips for the passages the assistant actually used in its last answer (order + page), with click-to-open the PDF. Makes record-grounding visible instead of implicit.
+## 3. Citation UI upgrades (`src/routes/draft.tsx`)
 
-9. **Templates expansion + custom user templates.** The 4 starters are good; add ~6 more (Daubert section outline, deposition prep, exhibit list, privilege log cover, response to RFP, joint status report) and let users save their own prompts as templates per matter.
+The `[n]` chips stay, but each chip's `+` button becomes a small menu (popover or dropdown) offering three insertion variants:
 
-10. **Cite-check inline highlighting.** Today flagged citations live in a bottom panel. Also underline them in the preview (red for not-found, amber for ambiguous, green for verified) and put a status dot in the editor gutter so authors see issues where they wrote them.
+- **Inline parenthetical** — ` (PTO-12, at 4)` (current behavior, refined formatting)
+- **Full citation** — ` (Pretrial Order No. 12, *Case Management Order*, at 4 (N.D. Fla. [DATE]))` built from `order_label` + `title` + `page`
+- **Footnote-style** — appends `[^n]` at cursor and a `[^n]: …` definition at the document end (one round-trip via the existing `onAppend`)
 
-### Tier 3 — bigger lifts, optional
+Citation-chip hover shows the cited quote (already there) plus a "Copy Bluebook" action that copies the formatted short form.
 
-11. **Switch from `<textarea>` to a true rich-text editor (Tiptap/ProseMirror).** Unlocks proper headings, bold/italic toolbar, footnote/citation nodes, comments, and inline diffing for AI edits. This is the only structural change in the list; everything else builds on the current textarea.
+Repeated-source handling: when the user inserts the same source twice in a row, the second insertion suggests `*id.* at [page]` (and `*id.*` with no pin if the page matches). Detection is a simple scan of the text immediately preceding the cursor.
 
-12. **Suggest-mode AI edits.** Instead of streaming directly into the document, stream into a tracked-changes overlay the attorney accepts or rejects per paragraph. Requires #11.
+The Sources strip under each assistant message gains a "Copy as Sources appendix" button that emits a Markdown list ready to paste at the end of a brief, matching the `synthesis-export.ts` style.
 
-13. **"Compare against the record" pass.** A one-click run that takes the current draft, extracts factual assertions, and flags any sentence that the matter's record doesn't support — using the same retrieval the assistant uses. Like cite-check but for record facts, not citations.
+## 4. Out of scope (call out)
 
-14. **Per-document chat thread persistence.** Right now assistant chat history dies on reload. Persist it next to the document so attorneys can pick up where they left off.
+- No schema or RPC changes.
+- The cite-check (CourtListener) flow is unchanged; this PR only changes how the assistant produces and inserts citations, not how they're verified.
+- No new dependencies.
 
-## My recommendation for a first build
+## Technical notes
 
-Tier 1 items 1, 2, 4, and 5 — left rail, visible citations, floating selection menu, autosave + "Saved Xs ago." That set lands the biggest perceived-quality jump without rewriting the editor.
-
-Tell me which subset you want and I'll implement.
+- Template catalog lives next to `DRAFT_TEMPLATES` as a typed array; tab state is local to `AssistantPane`.
+- The Bluebook short-form formatter is a small pure helper (`formatShortCite(chip)`) reused by chip insertion and the "Copy Bluebook" action.
+- `*id.*` detection: regex over the last ~200 chars of `content` before `selectionStart`.
+- All edits are confined to `src/routes/draft.tsx` and `supabase/functions/ai-assist/index.ts`.
