@@ -307,17 +307,6 @@ function DraftPage() {
   };
 
   // ---- insertion from chat ----
-  const insertAtCursor = (text: string) => {
-    const pos = Math.min(cursorRef.current, content.length);
-    const next = content.slice(0, pos) + text + content.slice(pos);
-    setContent(next);
-    setDirty(true);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) { el.focus(); el.setSelectionRange(pos + text.length, pos + text.length); cursorRef.current = pos + text.length; }
-    });
-    toast.success('Inserted into document');
-  };
   const appendToDoc = (text: string) => {
     const next = content ? `${content}\n\n${text}` : text;
     setContent(next);
