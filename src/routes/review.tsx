@@ -492,13 +492,20 @@ function ReviewPage() {
           )}
         </div>
 
+        {/* Ask across documents */}
+        {setId && readyFiles.length > 0 && (
+          <div className="mt-6">
+            <AskReview reviewSetId={setId} files={files} />
+          </div>
+        )}
+
         {/* Empty state */}
         {files.length === 0 ? (
           <div className="mt-10 text-center text-sm text-muted-foreground">
             Upload documents to begin, then add columns for the fields you want extracted.
           </div>
         ) : (
-          <div className="mt-6 overflow-x-auto rounded-md border border-border">
+          <div className="mt-2 overflow-x-auto rounded-md border border-border">
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="bg-secondary/50">
@@ -539,15 +546,26 @@ function ReviewPage() {
                     <td className="sticky left-0 z-10 bg-card px-3 py-2.5 border-b border-r border-border align-top min-w-[15rem]">
                       <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
-                    {columns.map((col) => (
-                      <td key={col.id} className="px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]">
-                        {f.status !== 'ready' ? (
-                          <span className="text-muted-foreground/50">—</span>
-                        ) : (
-                          <CellView cell={cellMap.get(`${f.id}:${col.id}`)} running={runningCols.has(col.id)} />
-                        )}
-                      </td>
-                    ))}
+                    {columns.map((col) => {
+                      const cell = cellMap.get(`${f.id}:${col.id}`);
+                      const hasSource = !!cell && (cell.review_cell_citations?.length ?? 0) > 0;
+                      return (
+                        <td
+                          key={col.id}
+                          className={cn(
+                            'px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]',
+                            hasSource && 'cursor-pointer hover:bg-accent/5',
+                          )}
+                          onClick={() => hasSource && openSource(f, cell)}
+                        >
+                          {f.status !== 'ready' ? (
+                            <span className="text-muted-foreground/50">—</span>
+                          ) : (
+                            <CellView cell={cell} running={runningCols.has(col.id)} />
+                          )}
+                        </td>
+                      );
+                    })}
                     <td className="border-b border-border" />
                   </tr>
                 ))}
@@ -556,8 +574,19 @@ function ReviewPage() {
           </div>
         )}
       </div>
+
+      <SourcePreviewDrawer
+        open={drawer.open}
+        onOpenChange={(o) => setDrawer((d) => ({ ...d, open: o }))}
+        file={drawer.file}
+        cellId={drawer.cellId}
+        citations={drawer.citations}
+        initialPage={drawer.page}
+        initialQuote={drawer.quote}
+      />
     </AppShell>
   );
+
 }
 
 function DocCell({ file, onRemove, onRetry }: { file: ReviewFile; onRemove: () => void; onRetry: () => void }) {
