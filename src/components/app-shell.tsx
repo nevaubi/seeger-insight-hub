@@ -42,11 +42,9 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Case',
-    items: [
-      { to: '/deadlines', label: 'Deadlines', icon: CalendarDays },
-      { to: '/roster', label: 'Roster', icon: Users },
-    ],
+    items: [] as { to: string; label: string; icon: any }[],
   },
+
   {
     label: 'Work Product',
     items: [
@@ -127,14 +125,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <img
               src={logoUrl}
               alt="Seeger Weiss"
-              className="h-6 w-auto brightness-0 invert opacity-95"
+              className="h-10 w-auto brightness-0 invert opacity-95"
             />
           ) : (
             <>
               <img
                 src={logoUrl}
                 alt="Seeger Weiss LLP"
-                className="h-8 w-auto brightness-0 invert opacity-95"
+                className="h-16 w-auto brightness-0 invert opacity-95"
               />
               <div className="mt-2 text-[9px] uppercase tracking-[0.16em] text-sidebar-foreground/55 font-sans font-medium">
                 {overline}
@@ -146,7 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Nav */}
         <nav className={cn('flex-1 min-h-0 overflow-y-auto py-2', collapsed ? 'px-1' : 'px-1.5')}>
-          {NAV_SECTIONS.map((section, sIdx) => (
+          {NAV_SECTIONS.filter((s) => s.items.length > 0).map((section, sIdx) => (
             <div key={section.label} className={sIdx === 0 ? '' : 'mt-3'}>
               {!collapsed && (
                 <div className="px-2.5 pt-1 pb-1 text-[9px] uppercase tracking-[0.18em] text-sidebar-foreground/40 font-sans font-medium">
