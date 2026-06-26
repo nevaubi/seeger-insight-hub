@@ -61,12 +61,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   supabase,
-  CITE_CHECK_ENDPOINT,
-  SUPABASE_ANON_KEY,
   type WorkspaceDocument,
-  type CiteCheckSummary,
-  type CiteCheckResult,
-  type CiteState,
 } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
 import { useAiAssist, type AiAssistCitation, type AiAssistChunk } from '@/lib/useAiAssist';
