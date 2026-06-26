@@ -406,12 +406,39 @@ function ReviewPage() {
         description="Upload up to 5 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
       >
         <div className="flex items-center gap-2">
+          {readyFiles.length > 0 && columns.length === 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={addMetadataColumns} disabled={addColumn.isPending}>
+              <Sparkles className="h-4 w-4" /> Auto-add metadata
+            </Button>
+          )}
           {columns.length > 0 && (
             <Button size="sm" className="gap-2" onClick={runAll} disabled={!canRun || anyRunning}>
               {anyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Run all
             </Button>
           )}
+          {hasExportable && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => doExport('xlsx')} className="gap-2">
+                  <FileSpreadsheet className="h-3.5 w-3.5" /> Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => doExport('csv')} className="gap-2">
+                  <FileText className="h-3.5 w-3.5" /> CSV + citations
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => doExport('md')} className="gap-2">
+                  <ClipboardCopy className="h-3.5 w-3.5" /> Copy as Markdown table
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2 max-w-[16rem]">
