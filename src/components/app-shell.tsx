@@ -111,33 +111,34 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside
         className={cn(
           'shrink-0 bg-sidebar text-sidebar-foreground flex flex-col border-r border-sidebar-border',
+          'sticky top-0 h-screen overflow-hidden',
           'motion-safe:transition-[width] motion-safe:duration-300',
-          collapsed ? 'w-14' : 'w-56',
+          collapsed ? 'w-11' : 'w-44',
         )}
         style={{ transitionTimingFunction: 'var(--ease-out-soft, cubic-bezier(0.22, 1, 0.36, 1))' }}
       >
         {/* Brand block */}
         <div
           className={cn(
-            'border-b border-sidebar-border',
-            collapsed ? 'px-2 py-4 flex justify-center' : 'px-4 py-4',
+            'border-b border-sidebar-border shrink-0',
+            collapsed ? 'px-1.5 py-4 flex justify-center' : 'px-3 py-4',
           )}
         >
           {collapsed ? (
             <img
-              src={logoAsset.url}
+              src={logoUrl}
               alt="Seeger Weiss"
               className="h-5 w-auto brightness-0 invert opacity-95"
-              style={{ maxWidth: '32px', objectFit: 'contain' }}
+              style={{ maxWidth: '28px', objectFit: 'contain' }}
             />
           ) : (
             <>
               <img
-                src={logoAsset.url}
+                src={logoUrl}
                 alt="Seeger Weiss LLP"
-                className="h-6 w-auto brightness-0 invert opacity-95"
+                className="h-5 w-auto brightness-0 invert opacity-95"
               />
-              <div className="mt-2 text-[9.5px] uppercase tracking-[0.16em] text-sidebar-foreground/55 font-sans font-medium">
+              <div className="mt-2 text-[9px] uppercase tracking-[0.16em] text-sidebar-foreground/55 font-sans font-medium">
                 {overline}
               </div>
               <MatterSwitcher collapsed={collapsed} />
@@ -146,7 +147,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
 
         {/* Nav */}
-        <nav className={cn('flex-1 py-2', collapsed ? 'px-1.5' : 'px-2')}>
+        <nav className={cn('flex-1 min-h-0 overflow-y-auto py-2', collapsed ? 'px-1' : 'px-1.5')}>
           {NAV_SECTIONS.map((section, sIdx) => (
             <div key={section.label} className={sIdx === 0 ? '' : 'mt-3'}>
               {!collapsed && (
