@@ -166,13 +166,15 @@ export function downloadXlsx(base: string, sheets: Sheet[]): void {
 // ---------- document model (shared by DOCX + print) ----------
 
 export type Run = { text: string; bold?: boolean; italic?: boolean };
+export type TableAlign = 'left' | 'center' | 'right' | null;
 export type DocBlock =
   | { type: 'heading'; level: 1 | 2 | 3; runs: Run[] }
   | { type: 'paragraph'; runs: Run[] }
   | { type: 'bullet'; runs: Run[] }
   | { type: 'ordered'; index: number; runs: Run[] }
   | { type: 'rule' }
-  | { type: 'spacer' };
+  | { type: 'spacer' }
+  | { type: 'table'; header: Run[][]; rows: Run[][][]; align: TableAlign[] };
 
 // Inline tokenizer: **bold**, *italic* / _italic_, `code` (rendered as plain).
 function parseInline(text: string): Run[] {
