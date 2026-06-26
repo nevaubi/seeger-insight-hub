@@ -19,8 +19,15 @@ import {
   Quote,
   XCircle,
   HelpCircle,
+  Download,
+  FileSpreadsheet,
+  ClipboardCopy,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { SourcePreviewDrawer } from '@/components/review/source-preview-drawer';
+import { AskReview } from '@/components/review/ask-review';
+import { toCsvDownloads, toXlsxBlob, toMarkdownTable, downloadBlob } from '@/lib/review-export';
 import { AppShell, PageHeader } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -90,6 +97,22 @@ const COLUMN_PRESETS: { name: string; data_type: ReviewColumnType; prompt: strin
   { name: 'Governing law', data_type: 'text', prompt: 'The governing law / choice-of-law jurisdiction.' },
   { name: 'Arbitration clause?', data_type: 'boolean', prompt: 'Does the document contain a binding arbitration clause?' },
 ];
+
+// Auto-extractable document metadata — one click creates all six.
+const METADATA_COLUMNS: { name: string; data_type: ReviewColumnType; prompt: string; enum_options?: string[] }[] = [
+  {
+    name: 'Document type',
+    data_type: 'enum',
+    prompt: 'Classify this document into exactly one of the listed categories based on its form and content.',
+    enum_options: ['Order', 'Motion', 'Brief', 'Letter', 'Agreement', 'Expert Report', 'Deposition', 'Email', 'Pleading', 'Other'],
+  },
+  { name: 'Title / caption', data_type: 'text', prompt: 'The full title or caption of this document, exactly as it appears.' },
+  { name: 'Date', data_type: 'date', prompt: 'The principal date of the document (date filed, signed, or issued).' },
+  { name: 'Parties', data_type: 'list', prompt: 'All named parties to this document (plaintiffs, defendants, signatories).' },
+  { name: 'Court / forum', data_type: 'text', prompt: 'The court, tribunal, or forum named in the document. Leave blank if none.' },
+  { name: 'Author / signer', data_type: 'text', prompt: 'The author or signing party (judge, attorney, executive, etc.).' },
+];
+
 
 type CellWithCites = ReviewCell & { review_cell_citations: ReviewCellCitation[] };
 
@@ -311,9 +334,70 @@ function ReviewPage() {
     columns.forEach((c) => runColumn(c.id));
   }, [columns, runColumn]);
 
+  const addMetadataColumns = useCallback(async () => {
+    const existing = new Set(columns.map((c) => c.name.toLowerCase()));
+    const todo = METADATA_COLUMNS.filter((c) => !existing.has(c.name.toLowerCase()));
+    if (todo.length === 0) {
+      toast.info('Metadata columns already added');
+      return;
+    }
+    for (const c of todo) {
+      await addColumn.mutateAsync({
+        name: c.name,
+        data_type: c.data_type,
+        prompt: c.prompt,
+        enum_options: c.enum_options ?? null,
+      });
+    }
+    toast.success(`Added ${todo.length} metadata column${todo.length === 1 ? '' : 's'}`);
+  }, [columns, addColumn]);
+
+  // Source preview drawer state
+  const [drawer, setDrawer] = useState<{
+    open: boolean;
+    file: ReviewFile | null;
+    cellId: string | null;
+    citations: ReviewCellCitation[];
+    page: number | null;
+    quote: string | null;
+  }>({ open: false, file: null, cellId: null, citations: [], page: null, quote: null });
+
+  const openSource = useCallback((file: ReviewFile, cell: CellWithCites | undefined) => {
+    const cites = cell?.review_cell_citations ?? [];
+    const first = cites.slice().sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0))[0];
+    setDrawer({
+      open: true,
+      file,
+      cellId: cell?.id ?? null,
+      citations: cites,
+      page: first?.page_number ?? 1,
+      quote: first?.quote ?? null,
+    });
+  }, []);
+
+  const setName = activeSet?.name ?? 'review';
+  const doExport = useCallback(
+    (kind: 'csv' | 'xlsx' | 'md') => {
+      if (kind === 'csv') {
+        for (const f of toCsvDownloads(setName, files, columns, cellMap)) downloadBlob(f.blob, f.name);
+        toast.success('CSV downloaded');
+      } else if (kind === 'xlsx') {
+        downloadBlob(toXlsxBlob(setName, files, columns, cellMap), `${setName.replace(/[^\w]+/g, '_').toLowerCase()}.xlsx`);
+        toast.success('Excel file downloaded');
+      } else {
+        navigator.clipboard.writeText(toMarkdownTable(files, columns, cellMap));
+        toast.success('Markdown table copied to clipboard');
+      }
+    },
+    [setName, files, columns, cellMap],
+  );
+
   const anyRunning = runningCols.size > 0 || cells.some((c) => c.state === 'running');
   const atLimit = files.length >= MAX_REVIEW_FILES;
   const canRun = readyFiles.length > 0 && columns.length > 0;
+  const hasExportable = files.length > 0 && columns.length > 0;
+
+
 
   return (
     <AppShell>
@@ -322,12 +406,39 @@ function ReviewPage() {
         description="Upload up to 5 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
       >
         <div className="flex items-center gap-2">
+          {readyFiles.length > 0 && columns.length === 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={addMetadataColumns} disabled={addColumn.isPending}>
+              <Sparkles className="h-4 w-4" /> Auto-add metadata
+            </Button>
+          )}
           {columns.length > 0 && (
             <Button size="sm" className="gap-2" onClick={runAll} disabled={!canRun || anyRunning}>
               {anyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Run all
             </Button>
           )}
+          {hasExportable && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => doExport('xlsx')} className="gap-2">
+                  <FileSpreadsheet className="h-3.5 w-3.5" /> Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => doExport('csv')} className="gap-2">
+                  <FileText className="h-3.5 w-3.5" /> CSV + citations
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => doExport('md')} className="gap-2">
+                  <ClipboardCopy className="h-3.5 w-3.5" /> Copy as Markdown table
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2 max-w-[16rem]">
@@ -381,13 +492,20 @@ function ReviewPage() {
           )}
         </div>
 
+        {/* Ask across documents */}
+        {setId && readyFiles.length > 0 && (
+          <div className="mt-6">
+            <AskReview reviewSetId={setId} files={files} />
+          </div>
+        )}
+
         {/* Empty state */}
         {files.length === 0 ? (
           <div className="mt-10 text-center text-sm text-muted-foreground">
             Upload documents to begin, then add columns for the fields you want extracted.
           </div>
         ) : (
-          <div className="mt-6 overflow-x-auto rounded-md border border-border">
+          <div className="mt-2 overflow-x-auto rounded-md border border-border">
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="bg-secondary/50">
@@ -428,15 +546,26 @@ function ReviewPage() {
                     <td className="sticky left-0 z-10 bg-card px-3 py-2.5 border-b border-r border-border align-top min-w-[15rem]">
                       <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
-                    {columns.map((col) => (
-                      <td key={col.id} className="px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]">
-                        {f.status !== 'ready' ? (
-                          <span className="text-muted-foreground/50">—</span>
-                        ) : (
-                          <CellView cell={cellMap.get(`${f.id}:${col.id}`)} running={runningCols.has(col.id)} />
-                        )}
-                      </td>
-                    ))}
+                    {columns.map((col) => {
+                      const cell = cellMap.get(`${f.id}:${col.id}`);
+                      const hasSource = !!cell && (cell.review_cell_citations?.length ?? 0) > 0;
+                      return (
+                        <td
+                          key={col.id}
+                          className={cn(
+                            'px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]',
+                            hasSource && 'cursor-pointer hover:bg-accent/5',
+                          )}
+                          onClick={() => hasSource && openSource(f, cell)}
+                        >
+                          {f.status !== 'ready' ? (
+                            <span className="text-muted-foreground/50">—</span>
+                          ) : (
+                            <CellView cell={cell} running={runningCols.has(col.id)} />
+                          )}
+                        </td>
+                      );
+                    })}
                     <td className="border-b border-border" />
                   </tr>
                 ))}
@@ -445,8 +574,19 @@ function ReviewPage() {
           </div>
         )}
       </div>
+
+      <SourcePreviewDrawer
+        open={drawer.open}
+        onOpenChange={(o) => setDrawer((d) => ({ ...d, open: o }))}
+        file={drawer.file}
+        cellId={drawer.cellId}
+        citations={drawer.citations}
+        initialPage={drawer.page}
+        initialQuote={drawer.quote}
+      />
     </AppShell>
   );
+
 }
 
 function DocCell({ file, onRemove, onRetry }: { file: ReviewFile; onRemove: () => void; onRetry: () => void }) {
