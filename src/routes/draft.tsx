@@ -129,6 +129,10 @@ function DraftPage() {
   const [transforming, setTransforming] = useState(false);
   const [citeResult, setCiteResult] = useState<CiteCheckSummary | null>(null);
   const [citeRunning, setCiteRunning] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  const [railOpen, setRailOpen] = useState(true);
+  const [railQuery, setRailQuery] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const cursorRef = useRef<number>(0);
 
