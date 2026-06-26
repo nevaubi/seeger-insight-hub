@@ -229,6 +229,21 @@ function DraftPage() {
   // ---- editor change tracking ----
   const onContentChange = (v: string) => { setContent(v); setDirty(true); };
 
+  // ---- autosave (debounced) ----
+  useEffect(() => {
+    if (!dirty || !activeId || saveDoc.isPending) return;
+    const t = setTimeout(() => { saveDoc.mutate(); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, activeId, title, content]);
+
+  // re-render every 15s so "Saved Xs ago" updates
+  useEffect(() => {
+    const id = setInterval(() => setSavedTick((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
+  void savedTick;
+
   const syncSelection = () => {
     const el = textareaRef.current;
     if (!el) return;
