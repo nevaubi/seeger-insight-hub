@@ -28,7 +28,6 @@ import {
 const NAV: { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/orders', label: 'Orders Intelligence', icon: FileText },
-  { to: '/docket', label: 'Live Docket', icon: ScrollText },
   { to: '/search', label: 'Ask the Record', icon: Search },
   { to: '/deadlines', label: 'Deadlines & Calendar', icon: CalendarDays },
   { to: '/roster', label: 'Roster & Key Players', icon: Users },

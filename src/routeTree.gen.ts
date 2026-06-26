@@ -23,16 +23,6 @@ const SearchRoute = SearchRouteImport.update({
   path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DraftRoute = DraftRouteImport.update({
-  id: '/draft',
-  path: '/draft',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DocketRoute = DocketRouteImport.update({
-  id: '/docket',
-  path: '/docket',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const RosterRoute = RosterRouteImport.update({
   id: '/roster',
   path: '/roster',
@@ -46,6 +36,16 @@ const ReviewRoute = ReviewRouteImport.update({
 const OrdersRoute = OrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DraftRoute = DraftRouteImport.update({
+  id: '/draft',
+  path: '/draft',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocketRoute = DocketRouteImport.update({
+  id: '/docket',
+  path: '/docket',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeadlinesRoute = DeadlinesRouteImport.update({
@@ -92,10 +92,35 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/review' | '/roster' | '/search'
+  fullPaths:
+    | '/'
+    | '/deadlines'
+    | '/docket'
+    | '/draft'
+    | '/orders'
+    | '/review'
+    | '/roster'
+    | '/search'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/review' | '/roster' | '/search'
-  id: '__root__' | '/' | '/deadlines' | '/docket' | '/draft' | '/orders' | '/review' | '/roster' | '/search'
+  to:
+    | '/'
+    | '/deadlines'
+    | '/docket'
+    | '/draft'
+    | '/orders'
+    | '/review'
+    | '/roster'
+    | '/search'
+  id:
+    | '__root__'
+    | '/'
+    | '/deadlines'
+    | '/docket'
+    | '/draft'
+    | '/orders'
+    | '/review'
+    | '/roster'
+    | '/search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
