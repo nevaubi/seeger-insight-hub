@@ -28,6 +28,9 @@ import {
   ListChecks,
   CalendarClock,
   Gavel,
+  Search,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -126,6 +129,10 @@ function DraftPage() {
   const [transforming, setTransforming] = useState(false);
   const [citeResult, setCiteResult] = useState<CiteCheckSummary | null>(null);
   const [citeRunning, setCiteRunning] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  const [railOpen, setRailOpen] = useState(true);
+  const [railQuery, setRailQuery] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const cursorRef = useRef<number>(0);
 
@@ -197,8 +204,8 @@ function DraftPage() {
     onSuccess: (d) => {
       setActiveId(d.id);
       setDirty(false);
+      setLastSavedAt(Date.now());
       qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
-      toast.success('Document saved');
     },
     onError: (e: any) => toast.error(`Save failed: ${e.message}`),
   });
@@ -221,6 +228,21 @@ function DraftPage() {
 
   // ---- editor change tracking ----
   const onContentChange = (v: string) => { setContent(v); setDirty(true); };
+
+  // ---- autosave (debounced) ----
+  useEffect(() => {
+    if (!dirty || !activeId || saveDoc.isPending) return;
+    const t = setTimeout(() => { saveDoc.mutate(); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, activeId, title, content]);
+
+  // re-render every 15s so "Saved Xs ago" updates
+  useEffect(() => {
+    const id = setInterval(() => setSavedTick((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, []);
+  void savedTick;
 
   const syncSelection = () => {
     const el = textareaRef.current;
@@ -357,11 +379,26 @@ function DraftPage() {
         description="Draft litigation documents with an AI assistant grounded in the matter's record — highlight any passage to refine it, or generate new sections by chat."
       >
         <div className="flex items-center gap-2">
-          <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
-          <Button variant="default" size="sm" onClick={() => saveDoc.mutate()} disabled={saveDoc.isPending || (!dirty && !!activeId)} className="gap-2">
-            {saveDoc.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save{dirty ? ' •' : ''}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setRailOpen((v) => !v)}
+            className="gap-1.5 hidden lg:inline-flex"
+            title={railOpen ? 'Hide document list' : 'Show document list'}
+          >
+            {railOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
           </Button>
+          <div className="lg:hidden">
+            <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
+          </div>
+          <SaveStatus
+            dirty={dirty}
+            saving={saveDoc.isPending}
+            lastSavedAt={lastSavedAt}
+            hasActive={!!activeId}
+            onSave={() => saveDoc.mutate()}
+          />
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
@@ -395,8 +432,21 @@ function DraftPage() {
       </PageHeader>
 
       <div className="px-6 lg:px-8 py-5 lg:h-[calc(100vh-9.5rem)] lg:flex lg:gap-5 lg:overflow-hidden">
+        {/* DOCUMENT RAIL */}
+        {railOpen && (
+          <DocumentRail
+            docs={docs}
+            activeId={activeId}
+            isLoading={isLoading}
+            query={railQuery}
+            setQuery={setRailQuery}
+            onPick={loadDoc}
+            onNew={newDocument}
+          />
+        )}
         {/* EDITOR */}
         <div className="lg:flex-[3] min-w-0 flex flex-col mb-5 lg:mb-0">
+
           <Card className="p-0 flex flex-col flex-1 overflow-hidden">
             {/* editor toolbar */}
             <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card/60">
@@ -858,7 +908,7 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
     );
   }
 
-  const sources = dedupeSources(msg.chunks, msg.citations);
+  const citeChips = dedupeCitations(msg.citations, msg.chunks);
   return (
     <div className="space-y-2">
       <div className="rounded-2xl rounded-bl-sm bg-secondary/50 border border-border px-3.5 py-2.5">
@@ -871,19 +921,45 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
           {msg.streaming && msg.content && <span className="motion-stream-caret" aria-hidden />}
         </div>
 
-        {sources.length > 0 && (
+        {citeChips.length > 0 && (
           <div className="mt-2.5 pt-2 border-t border-border/60">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1">Sources</div>
+            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5">
+              Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+            </div>
             <div className="flex flex-wrap gap-1.5">
-              {sources.map((s, i) => (
-                s.pdf_url ? (
-                  <a key={i} href={s.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-border bg-card hover:border-accent/50 text-foreground/80">
-                    {s.label}<ExternalLink className="h-2.5 w-2.5" />
-                  </a>
-                ) : (
-                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded border border-border bg-card text-foreground/80">{s.label}</span>
-                )
-              ))}
+              {citeChips.map((c, i) => {
+                const insertText = ` (${[c.order_label, c.page].filter(Boolean).join(', ')})`;
+                return (
+                  <span
+                    key={i}
+                    className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
+                    title={c.cited_text ? `"${c.cited_text}"` : undefined}
+                  >
+                    {c.pdf_url ? (
+                      <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
+                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
+                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
+                        <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
+                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
+                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onInsert(insertText)}
+                      title="Insert this citation at the cursor"
+                      className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
+                    >
+                      <Plus className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}
@@ -906,18 +982,183 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
   );
 }
 
-function dedupeSources(chunks?: AiAssistChunk[], citations?: AiAssistCitation[]): { label: string; pdf_url: string | null }[] {
-  const out: { label: string; pdf_url: string | null }[] = [];
-  const seen = new Set<string>();
-  // Prefer the actually-cited passages; fall back to grounding chunks.
-  const fromCites = (citations ?? []).map((c) => ({ label: [c.order_label, c.page].filter(Boolean).join(' · ') || c.title || 'Source', pdf_url: null as string | null, ref: c.ref }));
+type CiteChip = {
+  num: number;
+  order_label: string | null;
+  page: string | null;
+  title?: string;
+  cited_text?: string;
+  pdf_url: string | null;
+};
+
+function dedupeCitations(citations?: AiAssistCitation[], chunks?: AiAssistChunk[]): CiteChip[] {
+  if (!citations?.length) return [];
   const byRef = new Map((chunks ?? []).map((c) => [c.ref, c]));
-  for (const c of fromCites) {
+  const seen = new Map<string, CiteChip>();
+  for (const c of citations) {
+    const key = `${c.order_label ?? c.title ?? ''}|${c.page ?? ''}`;
+    if (seen.has(key)) continue;
     const chunk = c.ref ? byRef.get(c.ref) : undefined;
-    const label = c.label;
-    if (seen.has(label)) continue;
-    seen.add(label);
-    out.push({ label, pdf_url: chunk?.pdf_url ?? null });
+    seen.set(key, {
+      num: c.num,
+      order_label: c.order_label,
+      page: c.page,
+      title: c.title,
+      cited_text: c.cited_text,
+      pdf_url: chunk?.pdf_url ?? null,
+    });
   }
-  return out.slice(0, 8);
+  return Array.from(seen.values());
 }
+
+function SaveStatus({
+  dirty, saving, lastSavedAt, hasActive, onSave,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  lastSavedAt: number | null;
+  hasActive: boolean;
+  onSave: () => void;
+}) {
+  const ago = useRelativeTime(lastSavedAt);
+  let status: { label: string; cls: string };
+  if (saving) status = { label: 'Saving…', cls: 'text-muted-foreground' };
+  else if (!hasActive) status = { label: 'Not saved', cls: 'text-muted-foreground' };
+  else if (dirty) status = { label: 'Unsaved changes', cls: 'text-amber-600' };
+  else if (lastSavedAt) status = { label: `Saved ${ago}`, cls: 'text-muted-foreground' };
+  else status = { label: 'Saved', cls: 'text-muted-foreground' };
+
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={saving || (!dirty && hasActive)}
+      title={dirty ? 'Save now' : 'Up to date'}
+      className={cn(
+        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-card text-[11.5px] font-sans tabular-nums transition',
+        'hover:border-accent/40 disabled:opacity-70 disabled:cursor-default',
+        status.cls,
+      )}
+    >
+      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+      {status.label}
+    </button>
+  );
+}
+
+function useRelativeTime(ts: number | null): string {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!ts) return;
+    const id = setInterval(() => force((n) => n + 1), 15000);
+    return () => clearInterval(id);
+  }, [ts]);
+  if (!ts) return '';
+  const secs = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function DocumentRail({
+  docs, activeId, isLoading, query, setQuery, onPick, onNew,
+}: {
+  docs: WorkspaceDocument[];
+  activeId: string | null;
+  isLoading: boolean;
+  query: string;
+  setQuery: (s: string) => void;
+  onPick: (d: WorkspaceDocument) => void;
+  onNew: () => void;
+}) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return docs;
+    return docs.filter((d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q));
+  }, [docs, query]);
+
+  const groups = useMemo(() => {
+    const now = Date.now();
+    const today: WorkspaceDocument[] = [];
+    const week: WorkspaceDocument[] = [];
+    const older: WorkspaceDocument[] = [];
+    for (const d of filtered) {
+      const age = now - new Date(d.updated_at).getTime();
+      if (age < 86400000) today.push(d);
+      else if (age < 7 * 86400000) week.push(d);
+      else older.push(d);
+    }
+    return [
+      { label: 'Today', items: today },
+      { label: 'Past week', items: week },
+      { label: 'Older', items: older },
+    ].filter((g) => g.items.length);
+  }, [filtered]);
+
+  return (
+    <aside className="hidden lg:flex lg:w-60 shrink-0 flex-col">
+      <Card className="p-0 flex flex-col flex-1 overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-border bg-card/60 flex items-center gap-2">
+          <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+            {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
+          </span>
+          <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-[11.5px]" onClick={onNew}>
+            <Plus className="h-3.5 w-3.5" /> New
+          </Button>
+        </div>
+        <div className="px-3 py-2 border-b border-border">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search documents…"
+              className="h-8 pl-7 text-[12.5px]"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {groups.length === 0 && !isLoading && (
+            <div className="p-4 text-[12px] text-muted-foreground">
+              {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
+            </div>
+          )}
+          {groups.map((g) => (
+            <div key={g.label} className="py-1.5">
+              <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
+                {g.label}
+              </div>
+              {g.items.map((d) => {
+                const active = d.id === activeId;
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => onPick(d)}
+                    className={cn(
+                      'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                      active
+                        ? 'bg-secondary/70 border-accent'
+                        : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                    )}
+                  >
+                    <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                      {d.title || 'Untitled document'}
+                    </span>
+                    <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
+                      {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </Card>
+    </aside>
+  );
+}
+
