@@ -101,7 +101,6 @@ function MatterSwitcher({ collapsed }: { collapsed: boolean }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [collapsed, setCollapsed] = useState(false);
   const { currentMatter } = useMatter();
   const overline = `MDL ${currentMatter.mdl_number} · Command Center`;
@@ -128,15 +127,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <img
               src={logoUrl}
               alt="Seeger Weiss"
-              className="h-5 w-auto brightness-0 invert opacity-95"
-              style={{ maxWidth: '28px', objectFit: 'contain' }}
+              className="h-6 w-auto brightness-0 invert opacity-95"
             />
           ) : (
             <>
               <img
                 src={logoUrl}
                 alt="Seeger Weiss LLP"
-                className="h-5 w-auto brightness-0 invert opacity-95"
+                className="h-8 w-auto brightness-0 invert opacity-95"
               />
               <div className="mt-2 text-[9px] uppercase tracking-[0.16em] text-sidebar-foreground/55 font-sans font-medium">
                 {overline}
@@ -157,23 +155,22 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
               <div className="space-y-px">
                 {section.items.map((item) => {
-                  const active = item.exact
-                    ? pathname === item.to
-                    : pathname.startsWith(item.to);
                   const Icon = item.icon;
                   return (
                     <Link
                       key={item.to}
                       to={item.to}
+                      preload="intent"
+                      activeOptions={{ exact: !!item.exact }}
                       title={collapsed ? item.label : undefined}
                       aria-label={item.label}
                       className={cn(
-                        'group relative flex items-center rounded-sm h-8 font-sans text-[11.5px] font-medium transition-colors',
+                        'group flex items-center rounded-sm h-8 font-sans text-[11.5px] font-medium transition-colors',
+                        'border-l-2 border-transparent',
+                        'text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-white',
+                        'data-[status=active]:bg-sidebar-accent data-[status=active]:text-white data-[status=active]:border-sidebar-primary',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-primary/60',
-                        collapsed ? 'justify-center px-0' : 'gap-2.5 pl-3 pr-2',
-                        active
-                          ? 'bg-sidebar-accent text-white before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[2px] before:bg-sidebar-primary before:rounded-r'
-                          : 'text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-white',
+                        collapsed ? 'justify-center px-0' : 'gap-2.5 pl-[10px] pr-2',
                       )}
                     >
                       <Icon className="h-[14px] w-[14px] shrink-0" strokeWidth={1.75} />
@@ -185,6 +182,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
+
 
         {/* Footer: toggle */}
         <div className="border-t border-sidebar-border shrink-0">
