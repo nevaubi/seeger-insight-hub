@@ -343,7 +343,54 @@ function blockToDocxXml(b: DocBlock): string {
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: `${b.index}. ` })}${b.runs.map(runXml).join('')}</w:p>`;
     case 'paragraph':
       return `<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>${b.runs.map(runXml).join('')}</w:p>`;
+    case 'table':
+      return tableXml(b);
   }
+}
+
+function alignToJc(a: TableAlign): string {
+  if (a === 'center') return '<w:jc w:val="center"/>';
+  if (a === 'right') return '<w:jc w:val="right"/>';
+  return '';
+}
+
+function tableCellXml(runs: Run[], width: number, align: TableAlign, isHeader: boolean): string {
+  const shd = isHeader ? `<w:shd w:val="clear" w:color="auto" w:fill="F4EFE3"/>` : '';
+  const tcPr = `<w:tcPr><w:tcW w:type="dxa" w:w="${width}"/>${shd}</w:tcPr>`;
+  const pPr = `<w:pPr><w:spacing w:before="0" w:after="0"/>${alignToJc(align)}</w:pPr>`;
+  const cellRuns = (runs.length ? runs : [{ text: '' }])
+    .map((r) => (isHeader ? { ...r, bold: true } : r))
+    .map(runXml)
+    .join('');
+  return `<w:tc>${tcPr}<w:p>${pPr}${cellRuns}</w:p></w:tc>`;
+}
+
+function tableXml(b: { header: Run[][]; rows: Run[][][]; align: TableAlign[] }): string {
+  const colCount = Math.max(1, b.header.length);
+  const total = 9360; // content width in DXA (US Letter, 1" margins)
+  const base = Math.floor(total / colCount);
+  const widths: number[] = [];
+  for (let i = 0; i < colCount; i++) widths.push(i === colCount - 1 ? total - base * (colCount - 1) : base);
+  const bd = (side: string) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="C9C2B4"/>`;
+  const tblPr =
+    `<w:tblPr>` +
+    `<w:tblW w:type="dxa" w:w="${total}"/>` +
+    `<w:tblLayout w:type="fixed"/>` +
+    `<w:tblBorders>${bd('top')}${bd('left')}${bd('bottom')}${bd('right')}${bd('insideH')}${bd('insideV')}</w:tblBorders>` +
+    `<w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar>` +
+    `</w:tblPr>`;
+  const grid = `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+  const headerCells = b.header.map((cell, i) => tableCellXml(cell, widths[i], b.align[i] ?? null, true)).join('');
+  const headerRow = `<w:tr><w:trPr><w:tblHeader/></w:trPr>${headerCells}</w:tr>`;
+  const bodyRows = b.rows
+    .map((row) => {
+      const cells: string[] = [];
+      for (let i = 0; i < colCount; i++) cells.push(tableCellXml(row[i] ?? [], widths[i], b.align[i] ?? null, false));
+      return `<w:tr>${cells.join('')}</w:tr>`;
+    })
+    .join('');
+  // Trailing empty paragraph keeps following blocks from being absorbed into the table.
+  return `<w:tbl>${tblPr}${grid}${headerRow}${bodyRows}</w:tbl><w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>`;
 }
 
 const DOCX_STYLES =
