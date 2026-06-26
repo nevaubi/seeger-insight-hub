@@ -139,6 +139,8 @@ function DraftPage() {
   const [railQuery, setRailQuery] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const cursorRef = useRef<number>(0);
+  const footnoteCounterRef = useRef<number>(0);
+  const lastCiteKeyRef = useRef<string | null>(null);
 
   const matterScope = useMemo(
     () => ({
