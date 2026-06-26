@@ -1,29 +1,21 @@
-## Goal
-Replace the "MDL 3140 Command Center" wordmark with the Seeger Weiss LLP logo, and tighten the sidebar so it feels lean and well-organized instead of bulky.
+## Fixes
 
-## 1. Brand the sidebar with the Seeger Weiss logo
-- Upload `ChatGPT_Image_Jun_25_2026_08_31_37_PM.png` via `lovable-assets` and import it as `src/assets/seeger-weiss-logo.png.asset.json` (CDN pointer, no binary in repo).
-- Logo is navy-on-white. Sidebar is dark navy, so render it white using Tailwind `brightness-0 invert` on the `<img>`. Sized ~`h-7` expanded, `h-6` collapsed (icon rail).
-- Replace the entire brand block:
-  - Expanded: white Seeger Weiss logo, then a small `MDL {number} · Command Center` overline beneath it, then the MatterSwitcher. Drop the large serif title, the Scale icon, and the italic subtitle paragraph.
-  - Collapsed: just the centered logo mark (no Scale icon).
+### 1. Sidebar — fixed viewport height
+Today the sidebar stretches with page content because it lives inside a `min-h-screen flex` row. Change the `<aside>` to `h-screen sticky top-0` with `overflow-hidden`, and make the `<nav>` `flex-1 overflow-y-auto` so long nav lists scroll internally instead of stretching the page. Brand block and footer toggle stay pinned top/bottom.
 
-## 2. Compact + organize the nav
-- Reduce row height from `h-10` to `h-8`, icon `14px`, tracking `0.06em`, font-size `[10.5px]`. Group spacing `space-y-px`.
-- Group items under tiny section overlines (hidden when collapsed):
-  ```text
-  WORKSPACE        Dashboard
-  INTELLIGENCE     Orders Intelligence · Ask the Record
-  CASE             Deadlines & Calendar · Roster & Key Players
-  WORK PRODUCT     Drafting Workspace · Tabular Review
-  ```
-- Section label style: `px-4 pt-4 pb-1 text-[9.5px] uppercase tracking-[0.16em] text-sidebar-foreground/40`.
-- Tighten brand block padding (`py-7` → `py-5`) and footer (`pt-5 pb-3` → `pt-3 pb-2`).
-- Court-info footer block: collapse to a single muted line (`N.D. Fla. · Pensacola · Judge Rodgers`) to reduce visual weight.
+### 2. Logo — currently renders as a white box
+Root cause: the uploaded PNG has a solid white background. `brightness-0 invert` turns every opaque pixel white, so the whole rectangle becomes white.
 
-## 3. Files touched
-- `src/components/app-shell.tsx` — brand block + grouped/compact nav.
-- `src/assets/seeger-weiss-logo.png.asset.json` — new CDN pointer (no binary added).
+Fix: generate a transparent-background variant of the logo via `imagegen--edit_image` (`transparent_background: true`), save as `src/assets/seeger-weiss-logo-white.png`, and use it in the sidebar with `brightness-0 invert` so only the navy wordmark pixels become white on the navy sidebar. Drop the old asset reference. (Keep the old `.asset.json` in case it's wanted elsewhere later; if not we can delete it, but it's harmless.)
+
+### 3. Sidebar width — reduce 22%
+- Expanded: `w-56` (224px) → `w-44` (176px) — exactly 21.4% narrower.
+- Collapsed: `w-14` (56px) → `w-11` (44px).
+- Tighten brand padding to fit (`px-4` → `px-3`) and nav padding (`px-2` → `px-1.5`).
+
+## Files
+- `src/components/app-shell.tsx` — height/sticky behavior, width tokens, swap logo import.
+- `src/assets/seeger-weiss-logo-white.png` (new, transparent) — generated from the existing logo.
 
 ## Out of scope
-No route changes, no theme/color token edits, no page-content changes.
+No nav grouping changes, no color tokens, no page content edits.
