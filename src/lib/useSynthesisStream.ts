@@ -416,6 +416,8 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
       initialFilter: Record<string, unknown>,
       scope?: {
         case_id?: string;
+        document_ids?: string[];
+        review_set_id?: string;
         matter?: {
           name: string;
           short_name: string;
@@ -445,6 +447,9 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
         };
         if (scope?.case_id) body.case_id = scope.case_id;
         if (scope?.matter) body.matter = scope.matter;
+        if (scope?.document_ids?.length) body.document_ids = scope.document_ids;
+        if (scope?.review_set_id) body.review_set_id = scope.review_set_id;
+
 
         const res = await fetch(endpoint, {
           method: 'POST',
