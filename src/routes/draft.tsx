@@ -524,13 +524,6 @@ function DraftPage() {
               )}
             </div>
 
-            {citeResult && (
-              <CiteCheckPanel
-                summary={citeResult}
-                onClose={() => setCiteResult(null)}
-                onJump={jumpToCite}
-              />
-            )}
           </Card>
         </div>
 
@@ -539,7 +532,6 @@ function DraftPage() {
           caseId={caseId}
           matter={matterScope}
           documentText={content}
-          onInsert={insertAtCursor}
           onAppend={appendToDoc}
           onInsertCite={insertCitation}
         />
