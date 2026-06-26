@@ -1,21 +1,19 @@
-## Fixes
+## 1. Bigger sidebar logo
+- Expanded: bump from `h-5` to `h-8`, drop the width cap, let it fill the `px-3` brand block.
+- Collapsed: bump from `h-5 / max-w-28px` to `h-6` centered in the icon rail.
+- Slightly tighten the overline so the brand block stays compact.
 
-### 1. Sidebar — fixed viewport height
-Today the sidebar stretches with page content because it lives inside a `min-h-screen flex` row. Change the `<aside>` to `h-screen sticky top-0` with `overflow-hidden`, and make the `<nav>` `flex-1 overflow-y-auto` so long nav lists scroll internally instead of stretching the page. Brand block and footer toggle stay pinned top/bottom.
+## 2. Why nav clicks sometimes need a second tap
 
-### 2. Logo — currently renders as a white box
-Root cause: the uploaded PNG has a solid white background. `brightness-0 invert` turns every opaque pixel white, so the whole rectangle becomes white.
+Root cause: the shell subscribes to `useRouterState({ select: s => s.location.pathname })` and then recomputes `active` for every `<Link>` on every render. Because that selector also fires for non-pathname router ticks (pending matches, loader state, history transitions), the entire sidebar re-renders mid-click. Combined with the `motion-safe:transition-[width]` on the `<aside>`, React occasionally commits a re-render between `pointerdown` and `click`, so the first click lands on an element instance that's been replaced and the synthetic click is dropped — you click again and it works.
 
-Fix: generate a transparent-background variant of the logo via `imagegen--edit_image` (`transparent_background: true`), save as `src/assets/seeger-weiss-logo-white.png`, and use it in the sidebar with `brightness-0 invert` so only the navy wordmark pixels become white on the navy sidebar. Drop the old asset reference. (Keep the old `.asset.json` in case it's wanted elsewhere later; if not we can delete it, but it's harmless.)
+Fix:
+- Stop reading `pathname` in `AppShell`. Let each `<Link>` own its own active state via TanStack's built-in `activeProps` / `inactiveProps` and `activeOptions={{ exact }}`. Each Link re-renders independently, so the rest of the sidebar stays mounted and clicks are never replaced under the pointer.
+- Make the active-state styling deterministic (no pseudo-element re-layout): use `data-[status=active]` Tailwind variants on the Link itself, with the left accent bar drawn via `border-l-2 border-transparent data-[status=active]:border-sidebar-primary`. Removes the `before:` pseudo-element that was added/removed on every active change.
+- Add `preload="intent"` on each Link so hover warms the route — first click then resolves instantly.
 
-### 3. Sidebar width — reduce 22%
-- Expanded: `w-56` (224px) → `w-44` (176px) — exactly 21.4% narrower.
-- Collapsed: `w-14` (56px) → `w-11` (44px).
-- Tighten brand padding to fit (`px-4` → `px-3`) and nav padding (`px-2` → `px-1.5`).
-
-## Files
-- `src/components/app-shell.tsx` — height/sticky behavior, width tokens, swap logo import.
-- `src/assets/seeger-weiss-logo-white.png` (new, transparent) — generated from the existing logo.
+## 3. Files
+- `src/components/app-shell.tsx` — remove `useRouterState`, rewrite NAV `<Link>` to use `activeProps`/`inactiveProps`/`data-status`, drop the `before:` indicator, bump logo sizes.
 
 ## Out of scope
-No nav grouping changes, no color tokens, no page content edits.
+No router config changes, no route additions, no page-content changes.
