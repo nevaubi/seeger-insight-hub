@@ -1060,13 +1060,14 @@ function citeSourceKey(c: CiteChip): string {
 
 
 function AssistantPane({
-  caseId, matter, documentText, onInsert, onAppend,
+  caseId, matter, documentText, onInsert, onAppend, onInsertCite,
 }: {
   caseId: string;
   matter: { name: string; short_name: string; mdl_number: string; court: string; judge: string };
   documentText: string;
   onInsert: (text: string) => void;
   onAppend: (text: string) => void;
+  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
