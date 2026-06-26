@@ -1157,7 +1157,14 @@ function AssistantPane({
   );
 }
 
-function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: string) => void; onAppend: (t: string) => void }) {
+function ChatBubble({
+  msg, onInsert, onAppend, onInsertCite,
+}: {
+  msg: ChatMsg;
+  onInsert: (t: string) => void;
+  onAppend: (t: string) => void;
+  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     navigator.clipboard?.writeText(msg.content).then(() => {
@@ -1177,6 +1184,16 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
   }
 
   const citeChips = dedupeCitations(msg.citations, msg.chunks);
+  const copyAppendix = () => {
+    const lines = citeChips.map((c) => {
+      const label = expandLabel(c.order_label || c.title || 'Order');
+      const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+      const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
+      return `${c.num}. ${label}${page}.${url}`;
+    });
+    const md = `**Sources**\n\n${lines.join('\n')}\n`;
+    navigator.clipboard?.writeText(md).then(() => toast.success('Sources appendix copied'));
+  };
   return (
     <div className="space-y-2">
       <div className="rounded-2xl rounded-bl-sm bg-secondary/50 border border-border px-3.5 py-2.5">
@@ -1191,43 +1208,23 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
 
         {citeChips.length > 0 && (
           <div className="mt-2.5 pt-2 border-t border-border/60">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5">
-              Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+                Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={copyAppendix}
+                className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/80 hover:text-accent font-sans inline-flex items-center gap-1"
+                title="Copy a Markdown Sources appendix for the bottom of a brief"
+              >
+                <Copy className="h-2.5 w-2.5" /> Sources appendix
+              </button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {citeChips.map((c, i) => {
-                const insertText = ` (${[c.order_label, c.page].filter(Boolean).join(', ')})`;
-                return (
-                  <span
-                    key={i}
-                    className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
-                    title={c.cited_text ? `"${c.cited_text}"` : undefined}
-                  >
-                    {c.pdf_url ? (
-                      <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
-                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
-                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
-                        <ExternalLink className="h-2.5 w-2.5 opacity-60" />
-                      </a>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
-                        <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-                        <span>{c.order_label ?? c.title ?? 'Source'}</span>
-                        {c.page && <span className="text-muted-foreground tabular-nums">· {c.page}</span>}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onInsert(insertText)}
-                      title="Insert this citation at the cursor"
-                      className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
-                    >
-                      <Plus className="h-2.5 w-2.5" />
-                    </button>
-                  </span>
-                );
-              })}
+              {citeChips.map((c, i) => (
+                <CitationChip key={i} c={c} onInsertCite={onInsertCite} />
+              ))}
             </div>
           </div>
         )}
@@ -1247,6 +1244,82 @@ function ChatBubble({ msg, onInsert, onAppend }: { msg: ChatMsg; onInsert: (t: s
         </div>
       )}
     </div>
+  );
+}
+
+function CitationChip({
+  c, onInsertCite,
+}: { c: CiteChip; onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void }) {
+  const label = c.order_label ?? c.title ?? 'Source';
+  const copyBluebook = () => {
+    const text = formatShortCite(c).trim();
+    navigator.clipboard?.writeText(text).then(() => toast.success('Bluebook cite copied'));
+  };
+  return (
+    <span
+      className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
+      title={c.cited_text ? `"${c.cited_text}"` : undefined}
+    >
+      {c.pdf_url ? (
+        <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
+          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+          <span>{label}</span>
+          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
+          <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
+          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
+          <span>{label}</span>
+          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
+        </span>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title="Insert this citation"
+            className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
+          >
+            <Plus className="h-2.5 w-2.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60 text-[12px]">
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+            Insert at cursor
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'short')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Short form</span>
+            <span className="font-serif italic text-muted-foreground text-[11px]">{formatShortCite(c).trim()}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'full')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Full citation</span>
+            <span className="font-serif italic text-muted-foreground text-[11px] line-clamp-2">{formatFullCite(c).trim()}</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onInsertCite(c, 'footnote')} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">Footnote</span>
+            <span className="font-serif italic text-muted-foreground text-[11px]">Inline [^n] + definition at doc end</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={copyBluebook}>
+            <Copy className="h-3 w-3 mr-2" /> Copy Bluebook cite
+          </DropdownMenuItem>
+          {c.cited_text && (
+            <>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 max-w-[14rem]">
+                <div className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1 inline-flex items-center gap-1">
+                  <Quote className="h-2.5 w-2.5" /> Cited text
+                </div>
+                <p className="font-serif italic text-[11px] leading-snug text-foreground/80 line-clamp-4">
+                  "{c.cited_text}"
+                </p>
+              </div>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
   );
 }
 
