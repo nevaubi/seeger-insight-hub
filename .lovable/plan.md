@@ -1,77 +1,113 @@
-# Table-aware export (DOCX + PDF)
 
-Right now `src/lib/file-export.ts` has no table handling at all. `markdownToBlocks` only knows headings, lists, rules, paragraphs — every GFM pipe table the editor preview renders gets flattened to plain paragraphs of `| col | col |` text on export. Goal of this pass: pipe tables in the editor export cleanly to both Word and the print-to-PDF path, without touching the editor surface, the AI prompts, or any other behavior.
+# Tabular Review — Phase 2 Build Plan
 
-## Scope (only this)
+Four features, scoped to ship together. All frontend-first; minimal backend additions where strictly needed.
 
-- Parse GFM pipe tables in `markdownToBlocks`.
-- Render them as real Word tables in `buildDocx`.
-- Render them as styled `<table>` in `blocksToHtml` + `PRINT_CSS` so print-to-PDF matches the on-screen look.
-- Touch nothing else: no editor changes, no AI changes, no schema changes, no new deps.
+---
 
-## Changes (all in `src/lib/file-export.ts`)
+## 1. Source preview pane (verification drawer)
 
-### 1. Extend the doc model
-Add one new block type alongside the existing ones:
+**Goal:** Click any cell → side drawer opens with the cited page and the quote highlighted in context. Lawyers verify in one click instead of opening the PDF.
 
-```ts
-type TableAlign = 'left' | 'center' | 'right' | null;
-| { type: 'table';
-    header: Run[][];           // one cell = Run[]
-    rows: Run[][][];           // rows × cells × runs
-    align: TableAlign[];       // per column
-  }
-```
+**Behavior**
+- Click a cell value (or the existing `Quote` chip) → right-side `Sheet` drawer (60% width) opens.
+- Header: filename · page X of N · prev/next page arrows · "Open original PDF" link (signed URL from `REVIEW_FILES_BUCKET`).
+- Body: rendered page transcript from `document_pages.extracted_text` for that `review_file_id` + `page_number`, with the cited `quote` wrapped in `<mark>` (case- and whitespace-insensitive match).
+- Sidebar inside drawer: list of all citations for that cell; clicking one jumps to its page + highlight.
+- "Mark verified" / "Mark wrong" buttons → write to `review_cells.human_verdict` (`verified` | `wrong` | null) and flip row tint accordingly.
 
-Existing `DocBlock` consumers (`blockToDocxXml`, `blocksToHtml`) get one extra case each. No existing case changes.
+**Files**
+- `src/components/review/source-preview-drawer.tsx` (new)
+- `src/routes/review.tsx` — wire `onClick` from `CellView` + `DocCell` to open the drawer with `{ fileId, page, quote }`.
 
-### 2. Parse pipe tables in `markdownToBlocks`
-GFM table = header line `| a | b |`, separator line `| --- | :--: |`, then ≥0 body lines. Implementation:
-- Convert the line walker to an index loop so we can lookahead one line.
-- When the current line matches a pipe row AND the next line matches the separator pattern `^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$`, consume header + separator, then keep consuming body rows while they still look like pipe rows.
-- Split cells on unescaped `|`, trim, strip leading/trailing pipe; reuse `parseInline` for cell contents so bold/italic still work.
-- Derive `align[]` from the separator (`:---` left, `:---:` center, `---:` right, `---` null).
-- Pad short rows / truncate long rows to header length so column counts stay consistent.
-- Malformed table (no separator, ragged) → fall through to existing paragraph handling. Safe fallback.
+**Backend**
+- Migration: `ALTER TABLE review_cells ADD COLUMN human_verdict text CHECK (human_verdict IN ('verified','wrong'))`.
+- No new tables. Reads from existing `document_pages`.
 
-### 3. DOCX rendering (`blockToDocxXml` table case)
-Produce a standard WordprocessingML `<w:tbl>`:
-- `<w:tblPr>` with `<w:tblW w:type="pct" w:w="5000"/>` (full content width), `<w:tblLayout w:type="fixed"/>`, and a complete `<w:tblBorders>` block (single, sz=4, color="C9C2B4" — matches existing rule color) so all four sides + insideH/insideV render in Word and Google Docs.
-- `<w:tblGrid>` with N equal `<w:gridCol w:w="…"/>` summing to 9360 DXA (content width inside 1" margins on US Letter — matches the existing `sectPr`).
-- Header row: `<w:trPr><w:tblHeader/></w:trPr>` so it repeats on page break; cells get a light fill (`<w:shd w:val="clear" w:color="auto" w:fill="F4EFE3"/>`) and bold runs.
-- Body rows: cell `<w:p>` uses `<w:jc>` derived from column alignment.
-- Each cell `<w:tc>` gets `<w:tcW w:type="dxa" w:w="…"/>` matching grid, plus a single paragraph wrapping `runXml(...)` output.
+---
 
-Spec sanity-checks (per docx skill notes): every `<w:tc>` carries its own width; table width and grid widths agree; shading uses `clear`, not `solid`; border color is hex without `#`.
+## 2. CSV / XLSX export
 
-### 4. HTML/PDF rendering (`blocksToHtml` + `PRINT_CSS`)
-- New table case emits:
-  ```html
-  <table class="doc-table">
-    <thead><tr><th style="text-align:left">…</th>…</tr></thead>
-    <tbody><tr><td style="text-align:…">…</td>…</tr>…</tbody>
-  </table>
-  ```
-  Cell text uses the same `runHtml` helper (so bold/italic survive). Alignment style only emitted when non-null.
-- `PRINT_CSS` gains a small block:
-  ```css
-  table.doc-table { width: 100%; border-collapse: collapse; margin: 0 0 14px; font-size: 10.5pt; page-break-inside: avoid; }
-  .doc-table th, .doc-table td { border: 1px solid #c9c2b4; padding: 6px 9px; vertical-align: top; text-align: left; }
-  .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; }
-  .doc-table tr { page-break-inside: avoid; }
-  ```
-  Matches the existing parchment palette and Inter/Source Serif type system already in the print CSS.
+**Goal:** One-click download of the current review set as a spreadsheet — values for analysis, citations preserved for audit.
 
-### 5. Same flow, no API changes
-Public exports stay identical (`markdownToBlocks`, `buildDocx`, `downloadDocx`, `blocksToHtml`, `printDocument`). Callers in `src/routes/draft.tsx` and `src/components/export-menu.tsx` need no edits.
+**Behavior**
+- "Export" dropdown in `PageHeader` next to "Run all": **CSV**, **Excel (.xlsx)**, **Copy as Markdown table**.
+- CSV: one row per file; columns = Document, then each review column. Values are normalized (dates → ISO, numbers → numeric, lists → `;`-joined). Second file `…-citations.csv` emitted alongside with `(document, column, page, quote, verified)`.
+- XLSX (built with `xlsx` / SheetJS in the browser — no server round-trip): two sheets — `Values` and `Citations`. Header row bold, freeze top row, autosize columns, `needs_review` cells tinted amber.
+- Markdown: copy GFM pipe table to clipboard so it pastes straight into the Drafting page (which already renders tables via the recent file-export work).
 
-## Safety
+**Files**
+- `src/lib/review-export.ts` (new) — pure functions: `toCsv(set)`, `toXlsxBlob(set)`, `toMarkdown(set)`.
+- `src/routes/review.tsx` — add `ExportMenu` to the header.
 
-- Pure additive code path: only the new `table` block triggers new branches; every other block flows through the existing code unchanged.
-- Pipe-table detection requires the separator line, so accidental matches on prose with `|` are extremely rare; on any malformed table the parser falls through to the existing paragraph branch.
-- No new dependencies, no schema/migration, no edge-function changes, no editor changes.
-- Will smoke-test by exporting a draft containing: a heading, a paragraph, a 3×4 GFM table with mixed alignment and bold/italic cells, a bullet list, and a rule — verifying DOCX opens in Word/Google Docs with borders + header shading, and Print preview shows the matching styled table.
+**Backend:** none.
 
-## Out of scope (deferred per your instruction)
+---
 
-Slash-command table inserter, table-aware AI actions, Table of Authorities, inline diff accept/reject, ProseMirror migration, comment threads. None of those are touched here.
+## 3. Cross-document questions ("Ask this review")
+
+**Goal:** A scoped synthesis bar above the table that answers questions grounded *only* in the files in the active review set — leveraging the existing streaming infra.
+
+**Behavior**
+- Slim composer pinned above the table: "Ask across these N documents…" with a Send button.
+- Submitting opens a collapsible answer panel below the composer (not a full route change). Streams using the existing `useSynthesisStream` hook.
+- Scope: pass the set's `review_file_id` list and (server-side) resolve to the corresponding `document_id`s so retrieval is constrained to those documents only.
+- Answer renders with inline citation chips `[file • p.X]` that click through to the source preview drawer (reuses #1).
+- "Recent questions" list (last 5) persisted to a new `review_questions` table per set.
+
+**Files**
+- `src/components/review/ask-review.tsx` (new)
+- `src/routes/review.tsx` — mount above the table when files exist.
+- `src/lib/useSynthesisStream.ts` — accept optional `scope: { review_set_id, document_ids }` and forward to the synthesis endpoint body.
+
+**Backend**
+- Migration: `review_questions(id, review_set_id, question, answer_jsonb, created_at)` + grants + RLS.
+- The existing synthesis edge function needs a `document_ids` filter in its retrieval step. (If it doesn't already support that, this is the only meaningful server change in the whole plan.)
+
+---
+
+## 4. Document-level metadata columns
+
+**Goal:** Auto-extract a small set of universal fields on ingest so every row has useful context before the user adds any columns.
+
+**Behavior**
+- On a file transitioning `transcribing → ready`, queue a one-shot metadata extraction that fills system columns:
+  - `Document type` (enum: Order, Motion, Brief, Letter, Agreement, Expert Report, Deposition, Email, Other)
+  - `Title / caption`
+  - `Date` (date)
+  - `Parties` (list)
+  - `Court / forum` (text, nullable)
+  - `Page count` (number; already known from ingest — just surface it)
+- Rendered as the first columns in the table, marked with a small "auto" badge and a slightly muted header. User can hide them via the column kebab → "Hide system columns".
+- Stored alongside other cells so existing citations/verification UI works unchanged.
+
+**Files**
+- `src/routes/review.tsx` — recognise `column.kind = 'system'`, render badge, add hide toggle (persisted in `localStorage` per matter).
+- `src/lib/supabase.ts` — extend `ReviewColumn` type with optional `kind: 'system' | 'user'`.
+
+**Backend**
+- Migration: `ALTER TABLE review_columns ADD COLUMN kind text NOT NULL DEFAULT 'user'`.
+- Edge function `tabular-ingest` (existing): after transcription completes, upsert the 6 system columns for the set (idempotent on `(review_set_id, name, kind='system')`) and enqueue extraction for the new file. Re-uses the existing `tabular-extract` flow — no new extraction code path.
+
+---
+
+## Build order
+
+1. **#4 metadata columns** first — it's the smallest backend change and the system columns benefit everything else (export gets useful headers; cross-doc Q&A gets better retrieval hints).
+2. **#1 source preview drawer** — biggest UX win, frontend-only except a one-column migration.
+3. **#2 export** — purely frontend once #4 has populated useful columns.
+4. **#3 cross-doc questions** — last, since it needs the synthesis endpoint to accept a `document_ids` scope.
+
+---
+
+## Out of scope (defer)
+
+- Realtime subscription replacement, self-consistency sampling, per-cell retries, drag-to-reorder columns, saved column templates, bulk selection. We'll return to those if you want a reliability pass next.
+
+---
+
+## Open questions before I start
+
+1. **Synthesis endpoint scoping (item #3):** does the current synthesis edge function already accept a `document_ids` filter? If not, I'll need to update it — confirm that's OK.
+2. **Metadata column visibility:** show system columns by default, or hidden behind a toggle?
+3. **XLSX library:** OK to add `xlsx` (SheetJS community build, ~600KB) as a dep, or prefer a smaller alternative like `exceljs`?
