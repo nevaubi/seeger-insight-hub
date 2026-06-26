@@ -144,7 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Nav */}
         <nav className={cn('flex-1 min-h-0 overflow-y-auto py-2', collapsed ? 'px-1' : 'px-1.5')}>
-          {NAV_SECTIONS.map((section, sIdx) => (
+          {NAV_SECTIONS.filter((s) => s.items.length > 0).map((section, sIdx) => (
             <div key={section.label} className={sIdx === 0 ? '' : 'mt-3'}>
               {!collapsed && (
                 <div className="px-2.5 pt-1 pb-1 text-[9px] uppercase tracking-[0.18em] text-sidebar-foreground/40 font-sans font-medium">
