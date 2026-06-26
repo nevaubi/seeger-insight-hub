@@ -6,7 +6,6 @@ import {
   CalendarDays,
   Users,
   PenLine,
-  ScrollText,
   Table2,
   Scale,
   PanelLeftClose,
