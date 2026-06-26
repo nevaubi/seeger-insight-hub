@@ -287,34 +287,6 @@ function DraftPage() {
     if (result) toast.success('Selection updated');
   };
 
-  // ---- cite-check (verify citations against CourtListener) ----
-  const runCiteCheck = async () => {
-    if (!content.trim() || citeRunning) return;
-    setCiteRunning(true);
-    try {
-      const res = await fetch(CITE_CHECK_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ text: content }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Cite-check failed (${res.status})`);
-      const s = body as CiteCheckSummary;
-      setCiteResult(s);
-      const flagged = s.not_found + s.invalid;
-      if (s.count === 0) toast.info('No case citations found in this draft');
-      else if (flagged === 0 && s.ambiguous === 0) toast.success(`All ${s.count} citation${s.count === 1 ? '' : 's'} verified against CourtListener`);
-      else toast.warning(`${flagged + s.ambiguous} of ${s.count} citation${s.count === 1 ? '' : 's'} need review`);
-    } catch (e) {
-      toast.error('Cite-check failed', { description: (e as Error).message });
-    } finally {
-      setCiteRunning(false);
-    }
-  };
 
   // ---- export ----
   const exportDocx = () => {
