@@ -166,13 +166,15 @@ export function downloadXlsx(base: string, sheets: Sheet[]): void {
 // ---------- document model (shared by DOCX + print) ----------
 
 export type Run = { text: string; bold?: boolean; italic?: boolean };
+export type TableAlign = 'left' | 'center' | 'right' | null;
 export type DocBlock =
   | { type: 'heading'; level: 1 | 2 | 3; runs: Run[] }
   | { type: 'paragraph'; runs: Run[] }
   | { type: 'bullet'; runs: Run[] }
   | { type: 'ordered'; index: number; runs: Run[] }
   | { type: 'rule' }
-  | { type: 'spacer' };
+  | { type: 'spacer' }
+  | { type: 'table'; header: Run[][]; rows: Run[][][]; align: TableAlign[] };
 
 // Inline tokenizer: **bold**, *italic* / _italic_, `code` (rendered as plain).
 function parseInline(text: string): Run[] {
@@ -191,12 +193,65 @@ function parseInline(text: string): Run[] {
   return runs.length ? runs : [{ text }];
 }
 
-/** Lightweight Markdown → DocBlock parser (headings, lists, rules, paragraphs, inline bold/italic). */
+// ---------- GFM pipe-table helpers ----------
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+const TABLE_ROW_RE = /\|/;
+
+function splitTableCells(line: string): string[] {
+  // Strip a single leading/trailing pipe (with optional whitespace), then split on
+  // unescaped `|`. Backslash-escaped pipes (`\|`) are unescaped into literal pipes.
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const out: string[] = [];
+  let buf = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && s[i + 1] === '|') {
+      buf += '|';
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      out.push(buf.trim());
+      buf = '';
+    } else {
+      buf += ch;
+    }
+  }
+  out.push(buf.trim());
+  return out;
+}
+
+function parseTableAlign(sepLine: string, colCount: number): TableAlign[] {
+  const parts = splitTableCells(sepLine);
+  const out: TableAlign[] = [];
+  for (let i = 0; i < colCount; i++) {
+    const p = (parts[i] ?? '').trim();
+    const left = p.startsWith(':');
+    const right = p.endsWith(':');
+    if (left && right) out.push('center');
+    else if (right) out.push('right');
+    else if (left) out.push('left');
+    else out.push(null);
+  }
+  return out;
+}
+
+function normalizeRow(cells: string[], colCount: number): Run[][] {
+  const out: Run[][] = [];
+  for (let i = 0; i < colCount; i++) out.push(parseInline(cells[i] ?? ''));
+  return out;
+}
+
+/** Lightweight Markdown → DocBlock parser (headings, lists, rules, paragraphs, GFM tables, inline bold/italic). */
 export function markdownToBlocks(md: string): DocBlock[] {
   const out: DocBlock[] = [];
   const lines = (md ?? '').replace(/\r\n/g, '\n').split('\n');
   let orderedIdx = 0;
-  for (const raw of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li];
     const line = raw.replace(/\s+$/, '');
     if (!line.trim()) {
       orderedIdx = 0;
@@ -205,6 +260,27 @@ export function markdownToBlocks(md: string): DocBlock[] {
     }
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
       out.push({ type: 'rule' });
+      continue;
+    }
+    // GFM pipe table: current line has a pipe AND the next line is a separator row.
+    const nextLine = lines[li + 1] ?? '';
+    if (TABLE_ROW_RE.test(line) && TABLE_SEP_RE.test(nextLine)) {
+      const headerCells = splitTableCells(line);
+      const colCount = headerCells.length;
+      const align = parseTableAlign(nextLine, colCount);
+      const header = normalizeRow(headerCells, colCount);
+      const rows: Run[][][] = [];
+      let j = li + 2;
+      while (j < lines.length) {
+        const rl = lines[j].replace(/\s+$/, '');
+        if (!rl.trim() || !TABLE_ROW_RE.test(rl)) break;
+        if (TABLE_SEP_RE.test(rl)) break;
+        rows.push(normalizeRow(splitTableCells(rl), colCount));
+        j++;
+      }
+      out.push({ type: 'table', header, rows, align });
+      li = j - 1;
+      orderedIdx = 0;
       continue;
     }
     const h = /^(#{1,3})\s+(.*)$/.exec(line);
@@ -267,7 +343,54 @@ function blockToDocxXml(b: DocBlock): string {
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: `${b.index}. ` })}${b.runs.map(runXml).join('')}</w:p>`;
     case 'paragraph':
       return `<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>${b.runs.map(runXml).join('')}</w:p>`;
+    case 'table':
+      return tableXml(b);
   }
+}
+
+function alignToJc(a: TableAlign): string {
+  if (a === 'center') return '<w:jc w:val="center"/>';
+  if (a === 'right') return '<w:jc w:val="right"/>';
+  return '';
+}
+
+function tableCellXml(runs: Run[], width: number, align: TableAlign, isHeader: boolean): string {
+  const shd = isHeader ? `<w:shd w:val="clear" w:color="auto" w:fill="F4EFE3"/>` : '';
+  const tcPr = `<w:tcPr><w:tcW w:type="dxa" w:w="${width}"/>${shd}</w:tcPr>`;
+  const pPr = `<w:pPr><w:spacing w:before="0" w:after="0"/>${alignToJc(align)}</w:pPr>`;
+  const cellRuns = (runs.length ? runs : [{ text: '' }])
+    .map((r) => (isHeader ? { ...r, bold: true } : r))
+    .map(runXml)
+    .join('');
+  return `<w:tc>${tcPr}<w:p>${pPr}${cellRuns}</w:p></w:tc>`;
+}
+
+function tableXml(b: { header: Run[][]; rows: Run[][][]; align: TableAlign[] }): string {
+  const colCount = Math.max(1, b.header.length);
+  const total = 9360; // content width in DXA (US Letter, 1" margins)
+  const base = Math.floor(total / colCount);
+  const widths: number[] = [];
+  for (let i = 0; i < colCount; i++) widths.push(i === colCount - 1 ? total - base * (colCount - 1) : base);
+  const bd = (side: string) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="C9C2B4"/>`;
+  const tblPr =
+    `<w:tblPr>` +
+    `<w:tblW w:type="dxa" w:w="${total}"/>` +
+    `<w:tblLayout w:type="fixed"/>` +
+    `<w:tblBorders>${bd('top')}${bd('left')}${bd('bottom')}${bd('right')}${bd('insideH')}${bd('insideV')}</w:tblBorders>` +
+    `<w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar>` +
+    `</w:tblPr>`;
+  const grid = `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`;
+  const headerCells = b.header.map((cell, i) => tableCellXml(cell, widths[i], b.align[i] ?? null, true)).join('');
+  const headerRow = `<w:tr><w:trPr><w:tblHeader/></w:trPr>${headerCells}</w:tr>`;
+  const bodyRows = b.rows
+    .map((row) => {
+      const cells: string[] = [];
+      for (let i = 0; i < colCount; i++) cells.push(tableCellXml(row[i] ?? [], widths[i], b.align[i] ?? null, false));
+      return `<w:tr>${cells.join('')}</w:tr>`;
+    })
+    .join('');
+  // Trailing empty paragraph keeps following blocks from being absorbed into the table.
+  return `<w:tbl>${tblPr}${grid}${headerRow}${bodyRows}</w:tbl><w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>`;
 }
 
 const DOCX_STYLES =
@@ -350,7 +473,21 @@ export function blocksToHtml(blocks: DocBlock[]): string {
     if (b.type === 'heading') out.push(`<h${b.level}>${b.runs.map(runHtml).join('')}</h${b.level}>`);
     else if (b.type === 'rule') out.push('<hr/>');
     else if (b.type === 'spacer') out.push('');
-    else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
+    else if (b.type === 'table') {
+      const styleFor = (a: TableAlign) => (a ? ` style="text-align:${a}"` : '');
+      const thead = `<thead><tr>${b.header
+        .map((cell, i) => `<th${styleFor(b.align[i] ?? null)}>${cell.map(runHtml).join('')}</th>`)
+        .join('')}</tr></thead>`;
+      const tbody = `<tbody>${b.rows
+        .map(
+          (row) =>
+            `<tr>${b.header
+              .map((_h, i) => `<td${styleFor(b.align[i] ?? null)}>${(row[i] ?? []).map(runHtml).join('')}</td>`)
+              .join('')}</tr>`,
+        )
+        .join('')}</tbody>`;
+      out.push(`<table class="doc-table">${thead}${tbody}</table>`);
+    } else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
   }
   flush();
   return out.join('\n');
@@ -369,6 +506,11 @@ const PRINT_CSS = `
   ul, ol { margin: 0 0 10px; padding-left: 22px; }
   li { margin: 0 0 4px; }
   hr { border: none; border-top: 1px solid #c9c2b4; margin: 16px 0; }
+  table.doc-table { width: 100%; border-collapse: collapse; margin: 4px 0 14px; font-size: 10.5pt; page-break-inside: auto; }
+  .doc-table th, .doc-table td { border: 1px solid #c9c2b4; padding: 6px 9px; vertical-align: top; text-align: left; }
+  .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2a44; }
+  .doc-table tr { page-break-inside: avoid; }
+  .doc-table thead { display: table-header-group; }
   .sources { margin-top: 28px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5pt; }
   .sources h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: 0.08em; font-family: Inter, sans-serif; }
   .cite { font-family: Inter, sans-serif; font-size: 8pt; vertical-align: super; color: #1f2a44; font-weight: 600; }
