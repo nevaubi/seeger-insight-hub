@@ -42,11 +42,9 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Case',
-    items: [
-      { to: '/deadlines', label: 'Deadlines', icon: CalendarDays },
-      { to: '/roster', label: 'Roster', icon: Users },
-    ],
+    items: [] as { to: string; label: string; icon: any }[],
   },
+
   {
     label: 'Work Product',
     items: [
