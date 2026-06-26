@@ -1128,7 +1128,7 @@ function AssistantPane({
             />
           )}
           {messages.map((m) => (
-            <ChatBubble key={m.id} msg={m} onInsert={onInsert} onAppend={onAppend} />
+            <ChatBubble key={m.id} msg={m} onInsert={onInsert} onAppend={onAppend} onInsertCite={onInsertCite} />
           ))}
         </div>
 
