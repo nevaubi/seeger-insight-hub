@@ -960,10 +960,9 @@ function AssistantPane({
 }
 
 function ChatBubble({
-  msg, onInsert, onAppend, onInsertCite,
+  msg, onAppend, onInsertCite,
 }: {
   msg: ChatMsg;
-  onInsert: (t: string) => void;
   onAppend: (t: string) => void;
   onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
 }) {
