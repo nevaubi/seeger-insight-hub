@@ -15,8 +15,10 @@ import { Route as ReviewRouteImport } from './routes/review'
 import { Route as OrdersRouteImport } from './routes/orders'
 import { Route as DraftRouteImport } from './routes/draft'
 import { Route as DocketRouteImport } from './routes/docket'
+import { Route as DepositionsRouteImport } from './routes/depositions'
 import { Route as DeadlinesRouteImport } from './routes/deadlines'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DepositionsIdRouteImport } from './routes/depositions.$id'
 
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
@@ -48,6 +50,11 @@ const DocketRoute = DocketRouteImport.update({
   path: '/docket',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DepositionsRoute = DepositionsRouteImport.update({
+  id: '/depositions',
+  path: '/depositions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeadlinesRoute = DeadlinesRouteImport.update({
   id: '/deadlines',
   path: '/deadlines',
@@ -58,74 +65,92 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DepositionsIdRoute = DepositionsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => DepositionsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/depositions': typeof DepositionsRouteWithChildren
   '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/review': typeof ReviewRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
+  '/depositions/$id': typeof DepositionsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/depositions': typeof DepositionsRouteWithChildren
   '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/review': typeof ReviewRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
+  '/depositions/$id': typeof DepositionsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
+  '/depositions': typeof DepositionsRouteWithChildren
   '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
   '/review': typeof ReviewRoute
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
+  '/depositions/$id': typeof DepositionsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/deadlines'
+    | '/depositions'
     | '/docket'
     | '/draft'
     | '/orders'
     | '/review'
     | '/roster'
     | '/search'
+    | '/depositions/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/deadlines'
+    | '/depositions'
     | '/docket'
     | '/draft'
     | '/orders'
     | '/review'
     | '/roster'
     | '/search'
+    | '/depositions/$id'
   id:
     | '__root__'
     | '/'
     | '/deadlines'
+    | '/depositions'
     | '/docket'
     | '/draft'
     | '/orders'
     | '/review'
     | '/roster'
     | '/search'
+    | '/depositions/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DeadlinesRoute: typeof DeadlinesRoute
+  DepositionsRoute: typeof DepositionsRouteWithChildren
   DocketRoute: typeof DocketRoute
   DraftRoute: typeof DraftRoute
   OrdersRoute: typeof OrdersRoute
@@ -178,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocketRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/depositions': {
+      id: '/depositions'
+      path: '/depositions'
+      fullPath: '/depositions'
+      preLoaderRoute: typeof DepositionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/deadlines': {
       id: '/deadlines'
       path: '/deadlines'
@@ -192,12 +224,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/depositions/$id': {
+      id: '/depositions/$id'
+      path: '/$id'
+      fullPath: '/depositions/$id'
+      preLoaderRoute: typeof DepositionsIdRouteImport
+      parentRoute: typeof DepositionsRoute
+    }
   }
 }
+
+interface DepositionsRouteChildren {
+  DepositionsIdRoute: typeof DepositionsIdRoute
+}
+
+const DepositionsRouteChildren: DepositionsRouteChildren = {
+  DepositionsIdRoute: DepositionsIdRoute,
+}
+
+const DepositionsRouteWithChildren = DepositionsRoute._addFileChildren(
+  DepositionsRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DeadlinesRoute: DeadlinesRoute,
+  DepositionsRoute: DepositionsRouteWithChildren,
   DocketRoute: DocketRoute,
   DraftRoute: DraftRoute,
   OrdersRoute: OrdersRoute,

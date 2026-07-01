@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   FileText,
   Search,
+  Mic,
   CalendarDays,
   Users,
   PenLine,
@@ -50,6 +51,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/draft', label: 'Drafting', icon: PenLine },
       { to: '/review', label: 'Tabular Review', icon: Table2 },
+      { to: '/depositions', label: 'Depositions', icon: Mic },
     ],
   },
 ];
