@@ -523,6 +523,11 @@ function ReviewPage() {
               Extract all
             </Button>
           )}
+          {columns.length > 0 && incompleteCount > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => void runIncomplete()} disabled={!canRun || anyRunning}>
+              <Play className="h-4 w-4" /> Extract incomplete ({incompleteCount})
+            </Button>
+          )}
           {errorCount > 0 && (
             <Button size="sm" variant="outline" className="gap-2" onClick={() => void retryFailed()} disabled={anyRunning}>
               <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
