@@ -739,6 +739,12 @@ function DepositionWorkspace() {
               </Card>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
+                <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
+                  <ClaudeBadge variant="chip" label="Claude Legal — deposition intelligence" />
+                  <span className="text-[11px] text-muted-foreground">
+                    Citations verified against the record · Draft for attorney review
+                  </span>
+                </div>
                 <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap h-auto p-1">
                   <TabsTrigger value="summary" className="shrink-0 px-3">Summary</TabsTrigger>
                   <TabsTrigger value="admissions" className="shrink-0 px-3">Admissions</TabsTrigger>
