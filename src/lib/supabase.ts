@@ -190,6 +190,7 @@ export interface ReviewCell {
   review_file_id: string;
   review_column_id: string;
   value_text: string | null;
+  value_original: string | null;
   value_json: unknown;
   state: ReviewCellState;
   confidence: number | null;
