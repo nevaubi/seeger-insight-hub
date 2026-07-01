@@ -28,6 +28,7 @@ import {
   supabase,
   type Deposition,
   type DepositionLine,
+  type DepositionSegment,
   type DepositionFinding,
   type FindingStance,
   type DepoAskResponse,
@@ -35,6 +36,33 @@ import {
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
+
+type VerifyStatus = 'verified' | 'unverified' | 'failed' | null | undefined;
+
+function VerifyMark({ status }: { status: VerifyStatus }) {
+  if (status === 'verified') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10.5px] text-emerald-700"
+        title="Quote verified verbatim in the transcript"
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10.5px] text-amber-700"
+        title="Quote could not be verified verbatim against the transcript"
+      >
+        <AlertTriangle className="h-3.5 w-3.5" />
+        <span className="uppercase tracking-wide">unverified</span>
+      </span>
+    );
+  }
+  return null;
+}
 
 export const Route = createFileRoute('/depositions/$id')({
   validateSearch: (search: Record<string, unknown>): { analyze: boolean } => ({
