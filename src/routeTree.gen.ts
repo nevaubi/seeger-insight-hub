@@ -15,6 +15,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedSearchRouteImport } from './routes/_authenticated/search'
 import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
 import { Route as AuthenticatedReviewRouteImport } from './routes/_authenticated/review'
+import { Route as AuthenticatedPracticeProfileRouteImport } from './routes/_authenticated/practice-profile'
 import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
 import { Route as AuthenticatedDraftRouteImport } from './routes/_authenticated/draft'
 import { Route as AuthenticatedDocketRouteImport } from './routes/_authenticated/docket'
@@ -52,6 +53,12 @@ const AuthenticatedReviewRoute = AuthenticatedReviewRouteImport.update({
   path: '/review',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPracticeProfileRoute =
+  AuthenticatedPracticeProfileRouteImport.update({
+    id: '/practice-profile',
+    path: '/practice-profile',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedOrdersRoute = AuthenticatedOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
@@ -99,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/docket': typeof AuthenticatedDocketRoute
   '/draft': typeof AuthenticatedDraftRoute
   '/orders': typeof AuthenticatedOrdersRoute
+  '/practice-profile': typeof AuthenticatedPracticeProfileRoute
   '/review': typeof AuthenticatedReviewRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/search': typeof AuthenticatedSearchRoute
@@ -111,6 +119,7 @@ export interface FileRoutesByTo {
   '/docket': typeof AuthenticatedDocketRoute
   '/draft': typeof AuthenticatedDraftRoute
   '/orders': typeof AuthenticatedOrdersRoute
+  '/practice-profile': typeof AuthenticatedPracticeProfileRoute
   '/review': typeof AuthenticatedReviewRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/search': typeof AuthenticatedSearchRoute
@@ -127,6 +136,7 @@ export interface FileRoutesById {
   '/_authenticated/docket': typeof AuthenticatedDocketRoute
   '/_authenticated/draft': typeof AuthenticatedDraftRoute
   '/_authenticated/orders': typeof AuthenticatedOrdersRoute
+  '/_authenticated/practice-profile': typeof AuthenticatedPracticeProfileRoute
   '/_authenticated/review': typeof AuthenticatedReviewRoute
   '/_authenticated/roster': typeof AuthenticatedRosterRoute
   '/_authenticated/search': typeof AuthenticatedSearchRoute
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/docket'
     | '/draft'
     | '/orders'
+    | '/practice-profile'
     | '/review'
     | '/roster'
     | '/search'
@@ -156,6 +167,7 @@ export interface FileRouteTypes {
     | '/docket'
     | '/draft'
     | '/orders'
+    | '/practice-profile'
     | '/review'
     | '/roster'
     | '/search'
@@ -171,6 +183,7 @@ export interface FileRouteTypes {
     | '/_authenticated/docket'
     | '/_authenticated/draft'
     | '/_authenticated/orders'
+    | '/_authenticated/practice-profile'
     | '/_authenticated/review'
     | '/_authenticated/roster'
     | '/_authenticated/search'
@@ -226,6 +239,13 @@ declare module '@tanstack/react-router' {
       path: '/review'
       fullPath: '/review'
       preLoaderRoute: typeof AuthenticatedReviewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/practice-profile': {
+      id: '/_authenticated/practice-profile'
+      path: '/practice-profile'
+      fullPath: '/practice-profile'
+      preLoaderRoute: typeof AuthenticatedPracticeProfileRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/orders': {
@@ -302,6 +322,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDocketRoute: typeof AuthenticatedDocketRoute
   AuthenticatedDraftRoute: typeof AuthenticatedDraftRoute
   AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
+  AuthenticatedPracticeProfileRoute: typeof AuthenticatedPracticeProfileRoute
   AuthenticatedReviewRoute: typeof AuthenticatedReviewRoute
   AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
   AuthenticatedSearchRoute: typeof AuthenticatedSearchRoute
@@ -314,6 +335,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDocketRoute: AuthenticatedDocketRoute,
   AuthenticatedDraftRoute: AuthenticatedDraftRoute,
   AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
+  AuthenticatedPracticeProfileRoute: AuthenticatedPracticeProfileRoute,
   AuthenticatedReviewRoute: AuthenticatedReviewRoute,
   AuthenticatedRosterRoute: AuthenticatedRosterRoute,
   AuthenticatedSearchRoute: AuthenticatedSearchRoute,

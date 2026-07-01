@@ -14,12 +14,14 @@ import { AppShell, PageHeader } from '@/components/app-shell';
 import { fmtDate } from '@/components/case-ui';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ClaudeBadge } from '@/components/claude-badge';
 import {
   supabase,
   RECAP_SYNC_ENDPOINT,
   SUPABASE_ANON_KEY,
   type RecapDocketEntry,
   type RecapSyncState,
+  type DocketDigest,
 } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
 
