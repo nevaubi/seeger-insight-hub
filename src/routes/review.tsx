@@ -207,6 +207,24 @@ function ReviewPage() {
     return m;
   }, [cells]);
   const [runningCols, setRunningCols] = useState<Set<string>>(new Set());
+  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+  const autoSweptRef = useRef(false);
+
+  const startResize = (key: string, defaultW: number) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[key] ?? defaultW;
+    const onMove = (ev: PointerEvent) =>
+      setColWidths((w) => ({ ...w, [key]: Math.max(120, Math.min(640, startW + ev.clientX - startX)) }));
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
 
   const createSet = useMutation({
     mutationFn: async () => {
