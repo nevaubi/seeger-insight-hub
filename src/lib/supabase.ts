@@ -9,6 +9,7 @@ export const RECAP_SYNC_ENDPOINT = `${SUPABASE_URL}/functions/v1/recap-sync`;
 export const CITE_CHECK_ENDPOINT = `${SUPABASE_URL}/functions/v1/cite-check`;
 export const TABULAR_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-ingest`;
 export const TABULAR_EXTRACT_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-extract`;
+export const TABULAR_STANDARDIZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-standardize`;
 export const REVIEW_FILES_BUCKET = 'review-files';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -189,6 +190,7 @@ export interface ReviewCell {
   review_file_id: string;
   review_column_id: string;
   value_text: string | null;
+  value_original: string | null;
   value_json: unknown;
   state: ReviewCellState;
   confidence: number | null;

@@ -25,6 +25,7 @@ import {
   Sparkles,
   LayoutTemplate,
   X,
+  Wand2,
 } from 'lucide-react';
 import { REVIEW_TEMPLATES, type ReviewTemplate, type TemplateColumn } from '@/lib/review-templates';
 import { toast } from 'sonner';
@@ -67,6 +68,7 @@ import {
   supabase,
   TABULAR_INGEST_ENDPOINT,
   TABULAR_EXTRACT_ENDPOINT,
+  TABULAR_STANDARDIZE_ENDPOINT,
   REVIEW_FILES_BUCKET,
   SUPABASE_ANON_KEY,
   MAX_REVIEW_FILES,
@@ -421,6 +423,39 @@ function ReviewPage() {
     }
   }, [columns, runColumn]);
 
+  const [standardizing, setStandardizing] = useState<Set<string>>(new Set());
+  const anyStandardizing = standardizing.size > 0;
+
+  const standardizeColumn = useCallback(async (columnId: string) => {
+    if (!setId) return;
+    setStandardizing((s) => new Set(s).add(columnId));
+    try {
+      const res = await fetch(TABULAR_STANDARDIZE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ review_set_id: setId, column_id: columnId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Standardize failed (${res.status})`);
+      const changed = body?.changed ?? 0;
+      toast.success(changed > 0 ? `Standardized ${changed} cell${changed === 1 ? '' : 's'}` : 'Values already consistent');
+    } catch (e) {
+      toast.error('Standardize failed', { description: (e as Error).message });
+    } finally {
+      setStandardizing((s) => { const n = new Set(s); n.delete(columnId); return n; });
+      qc.invalidateQueries({ queryKey: ['review-cells', setId] });
+    }
+  }, [setId, qc]);
+
+  const standardizeAll = useCallback(async () => {
+    const eligible = columns.filter((c) => c.data_type === 'text' || c.data_type === 'list' || c.data_type === 'enum');
+    if (!eligible.length) { toast.info('No text-like columns to standardize'); return; }
+    const queue = [...eligible];
+    const worker = async () => { while (queue.length) { const c = queue.shift(); if (c) await standardizeColumn(c.id); } };
+    await Promise.all(Array.from({ length: Math.min(3, eligible.length) }, worker));
+  }, [columns, standardizeColumn]);
+
+
 
 
   const addColumns = useMutation({
@@ -531,6 +566,11 @@ function ReviewPage() {
           {errorCount > 0 && (
             <Button size="sm" variant="outline" className="gap-2" onClick={() => void retryFailed()} disabled={anyRunning}>
               <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
+            </Button>
+          )}
+          {columns.length > 0 && files.length > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => void standardizeAll()} disabled={anyRunning || anyStandardizing}>
+              {anyStandardizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} Standardize all
             </Button>
           )}
           {hasExportable && (
@@ -654,6 +694,9 @@ function ReviewPage() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => runColumn(col.id)} disabled={!readyFiles.length} className="gap-2">
                               <RefreshCw className="h-3.5 w-3.5" /> Re-run column
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => standardizeColumn(col.id)} disabled={anyRunning || standardizing.has(col.id)} className="gap-2">
+                              <Wand2 className="h-3.5 w-3.5" /> Standardize values
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => deleteColumn.mutate(col.id)} className="gap-2 text-destructive">
                               <Trash2 className="h-3.5 w-3.5" /> Delete column
@@ -786,6 +829,11 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
                 <Quote className="h-2.5 w-2.5" /> {cites.length === 1 && cites[0].page_number ? `p.${cites[0].page_number}` : `${cites.length} cites`}
               </span>
             )}
+            {cell.value_original && cell.value_original !== cell.value_text && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={`Normalized from: ${cell.value_original}`}>
+                <Wand2 className="h-2.5 w-2.5" /> normalized
+              </span>
+            )}
           </span>
         </button>
       </PopoverTrigger>
@@ -798,6 +846,12 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
           <div className={cn('font-serif text-sm', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="italic text-muted-foreground">—</span>}
           </div>
+          {cell.value_original && cell.value_original !== cell.value_text && (
+            <div className="border-t border-border pt-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Original (before standardization)</div>
+              <p className="text-[11px] text-muted-foreground font-serif">{cell.value_original}</p>
+            </div>
+          )}
           {cell.reasoning && (
             <div className="border-t border-border pt-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reasoning</div>
