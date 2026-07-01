@@ -32,6 +32,37 @@ export const REVIEW_TEMPLATES: ReviewTemplate[] = [
     ],
   },
   {
+    id: 'motion-practice-tracker',
+    name: 'Motion Practice Tracker',
+    description: 'For motions and their disposition — motion type, movant, relief sought, briefing deadlines, and how the court ruled.',
+    columns: [
+      { name: 'Motion type', data_type: 'enum', prompt: 'Classify the motion into exactly one category.', enum_options: ['Motion to Dismiss', 'Motion for Summary Judgment', 'Motion to Compel', 'Motion in Limine', 'Daubert Motion', 'Motion for Class Certification', 'Motion to Remand', 'Motion to Strike', 'Other'] },
+      { name: 'Filed by', data_type: 'enum', prompt: 'Which side filed the motion.', enum_options: ['Plaintiffs', 'Defendants', 'Third party', 'Joint'] },
+      { name: 'Relief sought', data_type: 'text', prompt: 'The specific relief the motion asks the court to grant.' },
+      { name: 'Date filed', data_type: 'date', prompt: 'The date the motion was filed.' },
+      { name: 'Response deadline', data_type: 'text', prompt: 'Any opposition or response deadline stated, as a date or trigger. Blank if none.' },
+      { name: 'Disposition', data_type: 'enum', prompt: 'How the court ruled, if stated in this document.', enum_options: ['Granted', 'Denied', 'Granted in part', 'Pending', 'Withdrawn', 'Deferred'] },
+      { name: 'Ruling date', data_type: 'date', prompt: 'The date of the ruling, if stated.' },
+      { name: 'Basis / standard', data_type: 'text', prompt: 'The legal standard or principal basis cited for the motion or ruling.' },
+    ],
+  },
+  {
+    id: 'pleadings-analyzer',
+    name: 'Pleadings Analyzer',
+    description: 'For complaints and answers — parties, claims, jurisdictional basis, and the relief demanded.',
+    columns: [
+      { name: 'Pleading type', data_type: 'enum', prompt: 'Classify the pleading into exactly one category.', enum_options: ['Complaint', 'Amended Complaint', 'Master Complaint', 'Short-Form Complaint', 'Answer', 'Counterclaim', 'Cross-claim', 'Other'] },
+      { name: 'Plaintiffs', data_type: 'list', prompt: 'The named plaintiff(s).' },
+      { name: 'Defendants', data_type: 'list', prompt: 'The named defendant(s).' },
+      { name: 'Causes of action', data_type: 'list', prompt: 'Each count or cause of action asserted, stated concisely.' },
+      { name: 'Jurisdictional basis', data_type: 'text', prompt: 'The asserted basis for the court\u2019s jurisdiction (diversity, federal question, etc.).' },
+      { name: 'Relief demanded', data_type: 'text', prompt: 'The relief or damages demanded.' },
+      { name: 'Jury demand', data_type: 'boolean', prompt: 'Does the pleading demand a jury trial?' },
+      { name: 'Class allegations', data_type: 'boolean', prompt: 'Does the pleading assert class-action allegations?' },
+    ],
+  },
+
+  {
     id: 'deposition-digest',
     name: 'Deposition Digest',
     description: 'For deposition transcripts — the deponent, key admissions, and exhibits, with page:line references.',
