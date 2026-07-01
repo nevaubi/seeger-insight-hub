@@ -23,7 +23,10 @@ import {
   FileSpreadsheet,
   ClipboardCopy,
   Sparkles,
+  LayoutTemplate,
+  X,
 } from 'lucide-react';
+import { REVIEW_TEMPLATES, type ReviewTemplate, type TemplateColumn } from '@/lib/review-templates';
 import { toast } from 'sonner';
 import { SourcePreviewDrawer } from '@/components/review/source-preview-drawer';
 import { AskReview } from '@/components/review/ask-review';
