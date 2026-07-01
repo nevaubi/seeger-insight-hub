@@ -775,3 +775,194 @@ function AddColumnDialog({ onAdd }: { onAdd: (c: { name: string; data_type: Revi
     </Dialog>
   );
 }
+
+function TemplatesDialog({ onApply }: { onApply: (cols: TemplateColumn[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const apply = (tpl: ReviewTemplate) => {
+    onApply(tpl.columns);
+    setOpen(false);
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <LayoutTemplate className="h-4 w-4" /> Templates
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Column templates</DialogTitle>
+          <DialogDescription>
+            Preview a litigation column-pack and apply it in one click. Columns are added as pending — run Extract all when you are ready.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="overflow-y-auto -mx-6 px-6 space-y-3" style={{ maxHeight: '70vh' }}>
+          {REVIEW_TEMPLATES.map((tpl) => (
+            <div key={tpl.id} className="rounded-md border border-border p-4 bg-card/40">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-serif text-base text-foreground">{tpl.name}</div>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">{tpl.description}</p>
+                </div>
+                <Button size="sm" onClick={() => apply(tpl)} className="gap-1.5 shrink-0">
+                  <Sparkles className="h-3.5 w-3.5" /> Apply
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {tpl.columns.map((c) => (
+                  <span key={c.name} className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-secondary/40 px-2 py-1 text-[11px]">
+                    <span className="text-foreground">{c.name}</span>
+                    <Badge variant="secondary" className="text-[9px] font-normal">{TYPE_LABELS[c.data_type]}</Badge>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface DraftRow {
+  name: string;
+  data_type: ReviewColumnType;
+  prompt: string;
+  enum_options_raw: string;
+}
+
+const emptyDraft = (): DraftRow => ({ name: '', data_type: 'text', prompt: '', enum_options_raw: '' });
+
+function AddColumnsDialog({ onAdd }: { onAdd: (cols: TemplateColumn[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<DraftRow[]>([emptyDraft()]);
+
+  const reset = () => setRows([emptyDraft()]);
+  const update = (i: number, patch: Partial<DraftRow>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const remove = (i: number) => setRows((r) => (r.length === 1 ? [emptyDraft()] : r.filter((_, idx) => idx !== i)));
+  const addRow = () => setRows((r) => (r.length >= 30 ? r : [...r, emptyDraft()]));
+  const appendPreset = (p: typeof COLUMN_PRESETS[number]) => {
+    if (rows.length >= 30) return;
+    const draft: DraftRow = {
+      name: p.name,
+      data_type: p.data_type,
+      prompt: p.prompt,
+      enum_options_raw: (p.enum ?? []).join(', '),
+    };
+    setRows((r) => {
+      // Replace the first fully-empty row with the preset; otherwise append.
+      const idx = r.findIndex((x) => !x.name.trim() && !x.prompt.trim());
+      if (idx >= 0) return r.map((x, i) => (i === idx ? draft : x));
+      return [...r, draft];
+    });
+  };
+
+  const named = rows.filter((r) => r.name.trim());
+  const canSubmit = named.length > 0;
+
+  const submit = () => {
+    const cols: TemplateColumn[] = named.map((r) => ({
+      name: r.name.trim(),
+      data_type: r.data_type,
+      prompt: r.prompt.trim(),
+      enum_options:
+        r.data_type === 'enum'
+          ? r.enum_options_raw.split(',').map((s) => s.trim()).filter(Boolean)
+          : undefined,
+    }));
+    onAdd(cols);
+    reset();
+    setOpen(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2">
+          <Plus className="h-4 w-4" /> Add columns
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Add columns</DialogTitle>
+          <DialogDescription>
+            Define up to 30 columns at once. Columns are added as pending — run Extract all when you are ready.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap gap-1.5">
+          {COLUMN_PRESETS.map((p) => (
+            <button
+              key={p.name}
+              onClick={() => appendPreset(p)}
+              disabled={rows.length >= 30}
+              className="text-[11px] px-2 py-1 rounded-sm border border-border bg-secondary/50 hover:bg-secondary transition disabled:opacity-50"
+            >
+              + {p.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto -mx-6 px-6 space-y-3" style={{ maxHeight: '55vh' }}>
+          {rows.map((row, i) => (
+            <div key={i} className="rounded-md border border-border p-3 bg-card/40 space-y-2">
+              <div className="flex items-start gap-2">
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-[1fr_10rem] gap-2">
+                  <Input
+                    value={row.name}
+                    onChange={(e) => update(i, { name: e.target.value })}
+                    placeholder={`Field name #${i + 1}`}
+                  />
+                  <Select value={row.data_type} onValueChange={(v) => update(i, { data_type: v as ReviewColumnType })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(TYPE_LABELS) as ReviewColumnType[]).map((t) => (
+                        <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <button
+                  onClick={() => remove(i)}
+                  aria-label="Remove row"
+                  className="p-1.5 text-muted-foreground hover:text-destructive shrink-0"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {row.data_type === 'enum' && (
+                <Input
+                  value={row.enum_options_raw}
+                  onChange={(e) => update(i, { enum_options_raw: e.target.value })}
+                  placeholder="Choices (comma-separated)"
+                />
+              )}
+              <Textarea
+                value={row.prompt}
+                onChange={(e) => update(i, { prompt: e.target.value })}
+                placeholder="Instruction (optional) — what exactly should be extracted?"
+                className="min-h-[52px] text-[12px]"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-border">
+          <div className="text-[11px] text-muted-foreground tabular-nums">{rows.length} / 30</div>
+          <Button variant="outline" size="sm" onClick={addRow} disabled={rows.length >= 30} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Add row
+          </Button>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={!canSubmit} className="gap-2">
+            <Plus className="h-4 w-4" /> Add {named.length || ''} column{named.length === 1 ? '' : 's'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
