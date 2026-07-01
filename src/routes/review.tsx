@@ -480,7 +480,7 @@ function ReviewPage() {
             </>
           )}
           {columns.length > 0 && (
-            <Button size="sm" className="gap-2" onClick={runAll} disabled={!canRun || anyRunning}>
+            <Button size="sm" className="gap-2" onClick={() => void runAll()} disabled={!canRun || anyRunning}>
               {anyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Extract all
             </Button>
