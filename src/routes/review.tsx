@@ -846,6 +846,12 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
           <div className={cn('font-serif text-sm', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="italic text-muted-foreground">—</span>}
           </div>
+          {cell.value_original && cell.value_original !== cell.value_text && (
+            <div className="border-t border-border pt-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Original (before standardization)</div>
+              <p className="text-[11px] text-muted-foreground font-serif">{cell.value_original}</p>
+            </div>
+          )}
           {cell.reasoning && (
             <div className="border-t border-border pt-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reasoning</div>
