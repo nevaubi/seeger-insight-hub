@@ -120,6 +120,24 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const router = useRouter();
+
+  useEffect(() => {
+    let mounted = true;
+    import('@/integrations/supabase/client').then(({ supabase }) => {
+      if (!mounted) return;
+      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+        if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && event !== 'USER_UPDATED') return;
+        router.invalidate();
+        if (event !== 'SIGNED_OUT') queryClient.invalidateQueries();
+      });
+      // Store cleanup via closure
+      (mounted as unknown as { s?: () => void }) = { s: () => sub.subscription.unsubscribe() } as never;
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [queryClient, router]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -131,3 +149,4 @@ function RootComponent() {
     </QueryClientProvider>
   );
 }
+

@@ -9,6 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedSearchRouteImport } from './routes/_authenticated/search'
 import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
@@ -21,51 +23,60 @@ import { Route as AuthenticatedDeadlinesRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDepositionsIndexRouteImport } from './routes/_authenticated/depositions.index'
 import { Route as AuthenticatedDepositionsIdRouteImport } from './routes/_authenticated/depositions.$id'
 
-const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
-  id: '/_authenticated/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedSearchRoute = AuthenticatedSearchRouteImport.update({
-  id: '/_authenticated/search',
+  id: '/search',
   path: '/search',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
-  id: '/_authenticated/roster',
+  id: '/roster',
   path: '/roster',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedReviewRoute = AuthenticatedReviewRouteImport.update({
-  id: '/_authenticated/review',
+  id: '/review',
   path: '/review',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedOrdersRoute = AuthenticatedOrdersRouteImport.update({
-  id: '/_authenticated/orders',
+  id: '/orders',
   path: '/orders',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDraftRoute = AuthenticatedDraftRouteImport.update({
-  id: '/_authenticated/draft',
+  id: '/draft',
   path: '/draft',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDocketRoute = AuthenticatedDocketRouteImport.update({
-  id: '/_authenticated/docket',
+  id: '/docket',
   path: '/docket',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDepositionsRoute =
   AuthenticatedDepositionsRouteImport.update({
-    id: '/_authenticated/depositions',
+    id: '/depositions',
     path: '/depositions',
-    getParentRoute: () => rootRouteImport,
+    getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedDeadlinesRoute = AuthenticatedDeadlinesRouteImport.update({
-  id: '/_authenticated/deadlines',
+  id: '/deadlines',
   path: '/deadlines',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedDepositionsIndexRoute =
   AuthenticatedDepositionsIndexRouteImport.update({
@@ -81,6 +92,8 @@ const AuthenticatedDepositionsIdRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof AuthenticatedIndexRoute
+  '/auth': typeof AuthRoute
   '/deadlines': typeof AuthenticatedDeadlinesRoute
   '/depositions': typeof AuthenticatedDepositionsRouteWithChildren
   '/docket': typeof AuthenticatedDocketRoute
@@ -89,11 +102,11 @@ export interface FileRoutesByFullPath {
   '/review': typeof AuthenticatedReviewRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/search': typeof AuthenticatedSearchRoute
-  '/': typeof AuthenticatedIndexRoute
   '/depositions/$id': typeof AuthenticatedDepositionsIdRoute
   '/depositions/': typeof AuthenticatedDepositionsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/auth': typeof AuthRoute
   '/deadlines': typeof AuthenticatedDeadlinesRoute
   '/docket': typeof AuthenticatedDocketRoute
   '/draft': typeof AuthenticatedDraftRoute
@@ -107,6 +120,8 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
   '/_authenticated/deadlines': typeof AuthenticatedDeadlinesRoute
   '/_authenticated/depositions': typeof AuthenticatedDepositionsRouteWithChildren
   '/_authenticated/docket': typeof AuthenticatedDocketRoute
@@ -122,6 +137,8 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
+    | '/auth'
     | '/deadlines'
     | '/depositions'
     | '/docket'
@@ -130,11 +147,11 @@ export interface FileRouteTypes {
     | '/review'
     | '/roster'
     | '/search'
-    | '/'
     | '/depositions/$id'
     | '/depositions/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/auth'
     | '/deadlines'
     | '/docket'
     | '/draft'
@@ -147,6 +164,8 @@ export interface FileRouteTypes {
     | '/depositions'
   id:
     | '__root__'
+    | '/_authenticated'
+    | '/auth'
     | '/_authenticated/deadlines'
     | '/_authenticated/depositions'
     | '/_authenticated/docket'
@@ -161,81 +180,88 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  AuthenticatedDeadlinesRoute: typeof AuthenticatedDeadlinesRoute
-  AuthenticatedDepositionsRoute: typeof AuthenticatedDepositionsRouteWithChildren
-  AuthenticatedDocketRoute: typeof AuthenticatedDocketRoute
-  AuthenticatedDraftRoute: typeof AuthenticatedDraftRoute
-  AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
-  AuthenticatedReviewRoute: typeof AuthenticatedReviewRoute
-  AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
-  AuthenticatedSearchRoute: typeof AuthenticatedSearchRoute
-  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/': {
       id: '/_authenticated/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/search': {
       id: '/_authenticated/search'
       path: '/search'
       fullPath: '/search'
       preLoaderRoute: typeof AuthenticatedSearchRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/roster': {
       id: '/_authenticated/roster'
       path: '/roster'
       fullPath: '/roster'
       preLoaderRoute: typeof AuthenticatedRosterRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/review': {
       id: '/_authenticated/review'
       path: '/review'
       fullPath: '/review'
       preLoaderRoute: typeof AuthenticatedReviewRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/orders': {
       id: '/_authenticated/orders'
       path: '/orders'
       fullPath: '/orders'
       preLoaderRoute: typeof AuthenticatedOrdersRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/draft': {
       id: '/_authenticated/draft'
       path: '/draft'
       fullPath: '/draft'
       preLoaderRoute: typeof AuthenticatedDraftRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/docket': {
       id: '/_authenticated/docket'
       path: '/docket'
       fullPath: '/docket'
       preLoaderRoute: typeof AuthenticatedDocketRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/depositions': {
       id: '/_authenticated/depositions'
       path: '/depositions'
       fullPath: '/depositions'
       preLoaderRoute: typeof AuthenticatedDepositionsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/deadlines': {
       id: '/_authenticated/deadlines'
       path: '/deadlines'
       fullPath: '/deadlines'
       preLoaderRoute: typeof AuthenticatedDeadlinesRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/depositions/': {
       id: '/_authenticated/depositions/'
@@ -270,7 +296,19 @@ const AuthenticatedDepositionsRouteWithChildren =
     AuthenticatedDepositionsRouteChildren,
   )
 
-const rootRouteChildren: RootRouteChildren = {
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDeadlinesRoute: typeof AuthenticatedDeadlinesRoute
+  AuthenticatedDepositionsRoute: typeof AuthenticatedDepositionsRouteWithChildren
+  AuthenticatedDocketRoute: typeof AuthenticatedDocketRoute
+  AuthenticatedDraftRoute: typeof AuthenticatedDraftRoute
+  AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
+  AuthenticatedReviewRoute: typeof AuthenticatedReviewRoute
+  AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
+  AuthenticatedSearchRoute: typeof AuthenticatedSearchRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDeadlinesRoute: AuthenticatedDeadlinesRoute,
   AuthenticatedDepositionsRoute: AuthenticatedDepositionsRouteWithChildren,
   AuthenticatedDocketRoute: AuthenticatedDocketRoute,
@@ -280,6 +318,14 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRosterRoute: AuthenticatedRosterRoute,
   AuthenticatedSearchRoute: AuthenticatedSearchRoute,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
+const rootRouteChildren: RootRouteChildren = {
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
