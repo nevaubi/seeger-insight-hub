@@ -25,7 +25,6 @@ import {
   Sparkles,
   LayoutTemplate,
   X,
-  Wand2,
 } from 'lucide-react';
 import { REVIEW_TEMPLATES, type ReviewTemplate, type TemplateColumn } from '@/lib/review-templates';
 import { toast } from 'sonner';
@@ -68,7 +67,6 @@ import {
   supabase,
   TABULAR_INGEST_ENDPOINT,
   TABULAR_EXTRACT_ENDPOINT,
-  TABULAR_STANDARDIZE_ENDPOINT,
   REVIEW_FILES_BUCKET,
   SUPABASE_ANON_KEY,
   MAX_REVIEW_FILES,
@@ -312,22 +310,6 @@ function ReviewPage() {
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const addColumn = useMutation({
-    mutationFn: async (col: { name: string; data_type: ReviewColumnType; prompt: string; enum_options: string[] | null }) => {
-      const sid = await ensureSet();
-      const { data, error } = await supabase
-        .from('review_columns')
-        .insert({ review_set_id: sid, name: col.name, data_type: col.data_type, prompt: col.prompt || null, enum_options: col.enum_options, ordinal: columns.length })
-        .select('*').single();
-      if (error) throw error;
-      return data as ReviewColumn;
-    },
-    onSuccess: (col) => {
-      qc.invalidateQueries({ queryKey: ['review-columns', setId] });
-      if (readyFiles.length) runColumn(col.id);
-    },
-    onError: (e: any) => toast.error(`Could not add column: ${e.message}`),
-  });
 
   const deleteColumn = useMutation({
     mutationFn: async (id: string) => { const { error } = await supabase.from('review_columns').delete().eq('id', id); if (error) throw error; },
@@ -393,67 +375,11 @@ function ReviewPage() {
   }, [columns, readyFiles, cellMap, runTasks]);
 
   const runAll = useCallback(async () => {
-    const stateMap = new Map<string, Map<string, string>>();
-    const record = (colId: string, results: ExtractResult[] | null, scope?: string[]) => {
-      let m = stateMap.get(colId); if (!m) { m = new Map(); stateMap.set(colId, m); }
-      if (results) { for (const r of results) m.set(r.file_id, r.state); }
-      else if (scope) { for (const fid of scope) m.set(fid, 'error'); }
-    };
-    {
-      const queue = columns.map((c) => c.id);
-      const worker = async () => { while (queue.length) { const id = queue.shift(); if (!id) continue; const res = await runColumn(id); record(id, res); } };
-      await Promise.all(Array.from({ length: Math.min(6, queue.length || 1) }, worker));
-    }
-    const MAX_SWEEPS = 2;
-    const countEmpty = () => { let n = 0; for (const m of stateMap.values()) for (const s of m.values()) if (s === 'error' || s === 'not_found') n++; return n; };
-    let prev = countEmpty();
-    for (let sweep = 0; sweep < MAX_SWEEPS && prev > 0; sweep++) {
-      const tasks: { columnId: string; fileIds: string[] }[] = [];
-      for (const [colId, m] of stateMap.entries()) {
-        const fids = Array.from(m.entries()).filter(([, s]) => s === 'error' || s === 'not_found').map(([f]) => f);
-        if (fids.length) tasks.push({ columnId: colId, fileIds: fids });
-      }
-      if (!tasks.length) break;
-      const queue = [...tasks];
-      const worker = async () => { while (queue.length) { const t = queue.shift(); if (!t) continue; const res = await runColumn(t.columnId, t.fileIds); record(t.columnId, res, t.fileIds); } };
-      await Promise.all(Array.from({ length: Math.min(6, tasks.length) }, worker));
-      const now = countEmpty();
-      if (now >= prev) break;
-      prev = now;
-    }
+    const queue = columns.map((c) => c.id);
+    const worker = async () => { while (queue.length) { const id = queue.shift(); if (id) await runColumn(id); } };
+    await Promise.all(Array.from({ length: Math.min(6, queue.length || 1) }, worker));
   }, [columns, runColumn]);
 
-  const [standardizing, setStandardizing] = useState<Set<string>>(new Set());
-  const anyStandardizing = standardizing.size > 0;
-
-  const standardizeColumn = useCallback(async (columnId: string) => {
-    if (!setId) return;
-    setStandardizing((s) => new Set(s).add(columnId));
-    try {
-      const res = await fetch(TABULAR_STANDARDIZE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ review_set_id: setId, column_id: columnId }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Standardize failed (${res.status})`);
-      const changed = body?.changed ?? 0;
-      toast.success(changed > 0 ? `Standardized ${changed} cell${changed === 1 ? '' : 's'}` : 'Values already consistent');
-    } catch (e) {
-      toast.error('Standardize failed', { description: (e as Error).message });
-    } finally {
-      setStandardizing((s) => { const n = new Set(s); n.delete(columnId); return n; });
-      qc.invalidateQueries({ queryKey: ['review-cells', setId] });
-    }
-  }, [setId, qc]);
-
-  const standardizeAll = useCallback(async () => {
-    const eligible = columns.filter((c) => c.data_type === 'text' || c.data_type === 'list' || c.data_type === 'enum');
-    if (!eligible.length) { toast.info('No text-like columns to standardize'); return; }
-    const queue = [...eligible];
-    const worker = async () => { while (queue.length) { const c = queue.shift(); if (c) await standardizeColumn(c.id); } };
-    await Promise.all(Array.from({ length: Math.min(3, eligible.length) }, worker));
-  }, [columns, standardizeColumn]);
 
 
 
@@ -568,11 +494,6 @@ function ReviewPage() {
               <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
             </Button>
           )}
-          {columns.length > 0 && files.length > 0 && (
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => void standardizeAll()} disabled={anyRunning || anyStandardizing}>
-              {anyStandardizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} Standardize all
-            </Button>
-          )}
           {hasExportable && (
 
             <DropdownMenu>
@@ -663,25 +584,24 @@ function ReviewPage() {
           </div>
         ) : (
           <div className="mt-2 overflow-x-auto rounded-md border border-border">
-            <table className="w-full border-collapse text-[13px] table-fixed">
+            <table className="w-full border-collapse text-[12px] table-fixed">
               <colgroup>
-                <col style={{ width: colWidths[DOC_COL_KEY] ?? 260 }} />
+                <col style={{ width: colWidths[DOC_COL_KEY] ?? 220 }} />
                 {columns.map((col) => (
-                  <col key={col.id} style={{ width: colWidths[col.id] ?? 240 }} />
+                  <col key={col.id} style={{ width: colWidths[col.id] ?? 200 }} />
                 ))}
-                <col style={{ width: 190 }} />
               </colgroup>
               <thead>
                 <tr className="bg-secondary/50">
-                  <th className="relative sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-2.5 py-2 border-b border-r border-border">
+                  <th className="relative sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-2 py-1.5 border-b border-r border-border">
                     Document
                     <div
-                      onPointerDown={startResize(DOC_COL_KEY, 260)}
+                      onPointerDown={startResize(DOC_COL_KEY, 220)}
                       className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
                     />
                   </th>
                   {columns.map((col) => (
-                    <th key={col.id} className="relative text-left px-2.5 py-2 border-b border-r border-border align-top">
+                    <th key={col.id} className="relative text-left px-2 py-1.5 border-b border-r border-border align-top">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="font-sans font-semibold text-foreground break-words">{col.name}</div>
@@ -695,9 +615,6 @@ function ReviewPage() {
                             <DropdownMenuItem onClick={() => runColumn(col.id)} disabled={!readyFiles.length} className="gap-2">
                               <RefreshCw className="h-3.5 w-3.5" /> Re-run column
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => standardizeColumn(col.id)} disabled={anyRunning || standardizing.has(col.id)} className="gap-2">
-                              <Wand2 className="h-3.5 w-3.5" /> Standardize values
-                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => deleteColumn.mutate(col.id)} className="gap-2 text-destructive">
                               <Trash2 className="h-3.5 w-3.5" /> Delete column
                             </DropdownMenuItem>
@@ -705,20 +622,17 @@ function ReviewPage() {
                         </DropdownMenu>
                       </div>
                       <div
-                        onPointerDown={startResize(col.id, 240)}
+                        onPointerDown={startResize(col.id, 200)}
                         className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
                       />
                     </th>
                   ))}
-                  <th className="px-2.5 py-2 border-b border-border align-middle">
-                    <AddColumnDialog onAdd={(c) => addColumn.mutate(c)} />
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {files.map((f) => (
                   <tr key={f.id} className="hover:bg-secondary/20">
-                    <td className="sticky left-0 z-10 bg-card px-2.5 py-2 border-b border-r border-border align-top">
+                    <td className="sticky left-0 z-10 bg-card px-2 py-1.5 border-b border-r border-border align-top">
                       <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
                     {columns.map((col) => {
@@ -728,7 +642,7 @@ function ReviewPage() {
                         <td
                           key={col.id}
                           className={cn(
-                            'px-2.5 py-2 border-b border-r border-border align-top',
+                            'px-2 py-1.5 border-b border-r border-border align-top',
                             hasSource && 'cursor-pointer hover:bg-accent/5',
                           )}
                           onClick={() => hasSource && openSource(f, cell)}
@@ -743,7 +657,6 @@ function ReviewPage() {
                         </td>
                       );
                     })}
-                    <td className="border-b border-border" />
                   </tr>
                 ))}
               </tbody>
@@ -802,7 +715,7 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
   if (!cell || cell.state === 'pending') return <span className="text-muted-foreground/40">·</span>;
   if (cell.state === 'running') return skeleton;
   if (cell.state === 'error') return <span className="inline-flex items-center gap-1 text-destructive text-[12px]" title={cell.error ?? ''}><XCircle className="h-3 w-3" /> Error</span>;
-  if (cell.state === 'not_found') return <span className="text-muted-foreground/60 text-[12px] italic">Not found</span>;
+  if (cell.state === 'not_found') return <span className="text-muted-foreground/60 text-[12px]">N/A</span>;
 
 
   const cites = (cell.review_cell_citations ?? []).slice().sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0));
@@ -829,11 +742,6 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
                 <Quote className="h-2.5 w-2.5" /> {cites.length === 1 && cites[0].page_number ? `p.${cites[0].page_number}` : `${cites.length} cites`}
               </span>
             )}
-            {cell.value_original && cell.value_original !== cell.value_text && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={`Normalized from: ${cell.value_original}`}>
-                <Wand2 className="h-2.5 w-2.5" /> normalized
-              </span>
-            )}
           </span>
         </button>
       </PopoverTrigger>
@@ -846,12 +754,6 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
           <div className={cn('font-serif text-sm', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="italic text-muted-foreground">—</span>}
           </div>
-          {cell.value_original && cell.value_original !== cell.value_text && (
-            <div className="border-t border-border pt-2">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Original (before standardization)</div>
-              <p className="text-[11px] text-muted-foreground font-serif">{cell.value_original}</p>
-            </div>
-          )}
           {cell.reasoning && (
             <div className="border-t border-border pt-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reasoning</div>
@@ -889,82 +791,7 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
   );
 }
 
-function AddColumnDialog({ onAdd }: { onAdd: (c: { name: string; data_type: ReviewColumnType; prompt: string; enum_options: string[] | null }) => void }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [type, setType] = useState<ReviewColumnType>('text');
-  const [prompt, setPrompt] = useState('');
-  const [enumRaw, setEnumRaw] = useState('');
 
-  const reset = () => { setName(''); setType('text'); setPrompt(''); setEnumRaw(''); };
-  const submit = () => {
-    if (!name.trim()) return;
-    onAdd({
-      name: name.trim(),
-      data_type: type,
-      prompt: prompt.trim(),
-      enum_options: type === 'enum' ? enumRaw.split(',').map((s) => s.trim()).filter(Boolean) : null,
-    });
-    reset();
-    setOpen(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5 w-full"><Plus className="h-3.5 w-3.5" /> Add column</Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a column</DialogTitle>
-          <DialogDescription>Name the field, pick its type, and optionally describe exactly what to extract.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="flex flex-wrap gap-1.5">
-            {COLUMN_PRESETS.map((p) => (
-              <button
-                key={p.name}
-                onClick={() => { setName(p.name); setType(p.data_type); setPrompt(p.prompt); setEnumRaw((p.enum ?? []).join(', ')); }}
-                className="text-[11px] px-2 py-1 rounded-sm border border-border bg-secondary/50 hover:bg-secondary transition"
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="col-name">Field name</Label>
-            <Input id="col-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Termination notice period" autoFocus />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Type</Label>
-            <Select value={type} onValueChange={(v) => setType(v as ReviewColumnType)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(TYPE_LABELS) as ReviewColumnType[]).map((t) => (
-                  <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {type === 'enum' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="col-enum">Choices (comma-separated)</Label>
-              <Input id="col-enum" value={enumRaw} onChange={(e) => setEnumRaw(e.target.value)} placeholder="e.g. Granted, Denied, Partial" />
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="col-prompt">Instruction <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <Textarea id="col-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What exactly should be extracted? Helps accuracy." className="min-h-[64px]" />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={!name.trim()} className="gap-2"><Plus className="h-4 w-4" /> Add &amp; extract</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function TemplatesDialog({ onApply }: { onApply: (cols: TemplateColumn[]) => void }) {
   const [open, setOpen] = useState(false);
