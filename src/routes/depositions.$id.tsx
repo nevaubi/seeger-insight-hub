@@ -237,14 +237,46 @@ function DepositionWorkspace() {
     refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
   });
 
+  const segmentsQ = useQuery({
+    queryKey: ['deposition-segments', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('deposition_segments')
+        .select('*')
+        .eq('deposition_id', id)
+        .order('ordinal', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as DepositionSegment[];
+    },
+  });
+
+  const runQ = useQuery({
+    queryKey: ['deposition-latest-run', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('deposition_runs')
+        .select('stats')
+        .eq('deposition_id', id)
+        .eq('kind', 'analyze')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { stats: Record<string, unknown> | null } | null;
+    },
+    refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
+  });
+
   // Transcript: refs + search + scroll-to-cite
   const [search, setSearch] = useState('');
+  const [mobileView, setMobileView] = useState<'transcript' | 'findings'>('transcript');
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
   const highlightTimer = useRef<number | null>(null);
 
   const scrollToCite = useCallback(
     (span: CiteSpan) => {
       if (span.page_start == null || span.line_start == null) return;
+      setMobileView('transcript');
       const anchor = document.getElementById(`line-${span.page_start}-${span.line_start}`);
       anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const keys = new Set<string>();
