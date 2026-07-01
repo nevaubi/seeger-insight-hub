@@ -213,7 +213,7 @@ function ReviewPage() {
   }, [cells]);
   const [runningCols, setRunningCols] = useState<Set<string>>(new Set());
   const [colWidths, setColWidths] = useState<Record<string, number>>({});
-  const autoSweptRef = useRef(false);
+  
 
   const startResize = (key: string, defaultW: number) => (e: React.PointerEvent) => {
     e.preventDefault();
