@@ -1,45 +1,30 @@
-## Add basic email/password auth (gate the whole app)
+## Why every tab-switch flashes blank
 
-Add Lovable Cloud email/password authentication with a minimal `/auth` login page. Every existing route becomes protected; unauthed visitors are redirected to `/auth`. No signup UI, no roles, no email confirmation. Accounts are created manually by you in the backend Users panel.
+Two things stack up on each navigation:
 
-This is additive — no existing route files, queries, or data flow change. The external Supabase project holding the litigation data (`blhcucozljrojnvqosyi`) is untouched; auth uses the separate Lovable Cloud Supabase project (`gpbaczvqtpsenghicfpm`) already wired into `@/integrations/supabase/client`.
+1. **`_authenticated/route.tsx` uses `ssr: false` + `supabase.auth.getUser()` in `beforeLoad`.** `getUser()` is a network round-trip to Supabase on *every* navigation, and `ssr: false` forces the whole authenticated subtree to suspend on the client while it resolves. With no pending UI, Suspense falls back to `null` → white page.
+2. **The router has no `defaultPendingComponent` and no `defaultPreload`.** Route chunks are code-split, so the first time you hit `/orders`, `/deadliness`, etc., the browser downloads a JS chunk with nothing on screen.
 
-### What changes
+Both are fixable without touching any feature code.
 
-1. **Configure auth** (Lovable Cloud)
-   - Enable email provider, auto-confirm on, signup disabled, HIBP on.
+## Changes (2 files)
 
-2. **New file: `src/routes/auth.tsx`** (public)
-   - Minimal email + password form styled to match the parchment/navy editorial theme (Source Serif heading, Inter inputs, oxblood submit).
-   - Calls `supabase.auth.signInWithPassword`, on success navigates to `search.redirect ?? "/"`.
-   - Shows a generic error on failure. No "Sign up" link, no "Forgot password" link (internal tool, manual account creation).
-   - Redirects to `/` if already signed in.
+### `src/routes/_authenticated/route.tsx`
+- Replace `supabase.auth.getUser()` with `supabase.auth.getSession()` — reads the session from local storage synchronously, no network hop. Only redirect when there is genuinely no session. (`onAuthStateChange` in `__root.tsx` already invalidates the router when auth state actually changes, so staleness isn't a concern.)
+- Drop `ssr: false`. The guard runs in `beforeLoad` either way; removing it stops the subtree from suspending on every client transition.
+- Add a `pendingComponent` that renders the existing `AppShell` chrome with a subtle skeleton in the content area, so sibling navigation keeps the sidebar/header on screen instead of unmounting to blank.
 
-3. **New file: `src/routes/_authenticated/route.tsx`** (integration-managed pattern)
-   - Pathless layout with `ssr: false`, `beforeLoad` calls `supabase.auth.getUser()`, redirects to `/auth` when no user.
-   - Renders `<Outlet />`.
+### `src/router.tsx`
+- `defaultPreload: 'intent'` — prefetch the route chunk + loader data on link hover/focus, so the click itself is usually instant.
+- `defaultPendingMs: 150`, `defaultPendingMinMs: 300` — don't show any pending UI for fast transitions, and if we do show it, don't flicker it away.
+- `defaultPendingComponent` — a minimal shell-shaped placeholder used as a last-resort fallback (route-level `pendingComponent` above takes precedence for authenticated pages).
 
-4. **Move every existing route under `_authenticated/`** (file renames only, no code edits)
-   - `src/routes/index.tsx` → `src/routes/_authenticated/index.tsx`
-   - `deadlines.tsx`, `orders.tsx`, `roster.tsx`, `search.tsx`, `review.tsx`, `draft.tsx`, `docket.tsx`, `depositions.tsx`, `depositions.index.tsx`, `depositions.$id.tsx` → same names under `_authenticated/`
-   - TanStack Router regenerates `routeTree.gen.ts` automatically. URLs stay identical (`/`, `/orders`, `/depositions/$id`, etc.) because `_authenticated` is pathless.
+## What stays the same
+- No changes to `/auth`, sign-out, or any feature route.
+- No changes to queries, matter scoping, or `MatterProvider`.
+- `onAuthStateChange` listener in `__root.tsx` is untouched — it still invalidates on real sign-in/out.
 
-5. **Root subscribes to auth changes** (`src/routes/__root.tsx`)
-   - Add one `supabase.auth.onAuthStateChange` listener that calls `router.invalidate()` on `SIGNED_IN` / `SIGNED_OUT` / `USER_UPDATED` so the gate re-evaluates.
-
-6. **Sign-out control** in `src/components/app-shell.tsx`
-   - Small "Sign out" button in the sidebar footer: cancels queries, clears the query cache, `supabase.auth.signOut()`, then `navigate({ to: "/auth", replace: true })`.
-
-### Safety notes
-
-- No database migrations, no schema changes, no RLS work (nothing user-scoped exists).
-- The external litigation Supabase client in `src/lib/supabase.ts` is untouched; it stays anon read-only.
-- Route moves are pure file renames — component code, queries, and the `matter` search param all keep working.
-- `MatterProvider`, `QueryClientProvider`, and `Toaster` in `__root.tsx` stay wrapping `<Outlet />`, so both `/auth` and protected routes get them.
-- Accounts: after this ships, you create the first user from the backend Users panel (I'll surface a "View Backend" button).
-
-### Technical details
-
-- Uses `@/integrations/supabase/client` (Lovable Cloud); bearer middleware in `src/start.ts` stays as-is.
-- Managed `_authenticated` layout uses `ssr: false` because Supabase stores the session in `localStorage`; server-side gating would loop on refresh.
-- No new packages.
+## Expected result
+- Hover a sidebar link → chunk + data preload.
+- Click → sidebar and header stay mounted; content area either swaps instantly or shows a brief skeleton (never a full white page).
+- Auth check is now local storage, not a network call, so it doesn't gate paint.
