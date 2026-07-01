@@ -568,6 +568,11 @@ function ReviewPage() {
               <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
             </Button>
           )}
+          {columns.length > 0 && files.length > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => void standardizeAll()} disabled={anyRunning || anyStandardizing}>
+              {anyStandardizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />} Standardize all
+            </Button>
+          )}
           {hasExportable && (
 
             <DropdownMenu>
