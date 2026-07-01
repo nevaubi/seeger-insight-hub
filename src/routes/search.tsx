@@ -26,7 +26,7 @@ import {
   Check,
   PenLine,
   SlidersHorizontal,
-  Wrench,
+  
   Command as CommandIcon,
   CornerDownLeft,
   Layers,
@@ -422,7 +422,6 @@ function SynthesisPanel({
     expansions,
   } = state;
 
-  const [reasoningOpen, setReasoningOpen] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [flashRef, setFlashRef] = useState<string | null>(null);
@@ -442,28 +441,32 @@ function SynthesisPanel({
           ? 'routing'
           : 'searching';
 
-  // collapse timeline once the writer (final round) starts streaming output
-  useEffect(() => {
-    if (currentRound != null && currentRound === finalRound) {
-      setTimelineOpen(false);
-      setReasoningOpen(false);
-    }
-  }, [currentRound, finalRound]);
+  const writerActive = running && writerRound != null && currentRound === writerRound;
+  const answerStarted = useMemo(() => {
+    if (writerRound == null) return false;
+    const wr = rounds[writerRound];
+    if (!wr) return false;
+    return wr.textOrder.some((id) => (wr.textBlocks[wr.blockIndex[id]]?.text ?? '').trim().length > 0);
+  }, [rounds, writerRound]);
+  const showWriting = writerActive && !answerStarted;
+  const showAnswer = answerStarted || finalRound != null;
+  const traceSteps = searches.length + notes.length + Object.keys(expansions).length;
 
-  // open timeline at start of a new query
+  // Collapse the timeline the moment the writer is called; keep it open while researching.
   useEffect(() => {
-    if (running) {
-      setReasoningOpen(true);
-      setTimelineOpen(true);
-    }
-  }, [submitted, running]);
+    if (writerActive) setTimelineOpen(false);
+  }, [writerActive]);
+  useEffect(() => {
+    if (running && !writerActive) setTimelineOpen(true);
+  }, [submitted, running, writerActive]);
 
 
   // auto-scroll reasoning panel as new thinking streams
   useEffect(() => {
     const el = reasoningScrollRef.current;
-    if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
-  }, [thinking, reasoningOpen]);
+    if (el && timelineOpen) el.scrollTop = el.scrollHeight;
+  }, [thinking, timelineOpen]);
+
 
   // Track whether conversation is scrolled near the bottom
   const handleConversationScroll = useCallback(() => {
@@ -725,52 +728,53 @@ function SynthesisPanel({
               </Card>
             )}
 
+            {!running && submitted && traceSteps > 0 && (
+              <TraceToggle open={timelineOpen} onToggle={() => setTimelineOpen((o) => !o)} steps={traceSteps} elapsedMs={elapsedMs} />
+            )}
+
             <RunCard
               running={running}
               searches={searches}
               notes={notes}
               currentRound={currentRound}
               finalRound={finalRound}
-              chunkOrder={chunkOrder}
               citations={citations}
               timelineOpen={timelineOpen}
-              setTimelineOpen={setTimelineOpen}
-              reasoningOpen={reasoningOpen}
-              setReasoningOpen={setReasoningOpen}
               reasoningRounds={reasoningRounds}
               reasoningScrollRef={reasoningScrollRef}
               expansions={expansions}
               writerRound={writerRound}
-              elapsedMs={elapsedMs}
-              phase={phase}
             />
 
-            <Card className="p-7 border-border shadow-none motion-fade-rise">
-              <div className="flex items-baseline justify-between mb-3">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Answer
+            {showWriting && <WritingIndicator />}
+
+            {showAnswer && (
+              <Card className="p-7 border-border shadow-none motion-fade-rise">
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
+                  {!running && finalRound != null && rounds[finalRound] && (
+                    <AnswerExportMenu
+                      question={submitted ?? 'Research memorandum'}
+                      round={rounds[finalRound]}
+                      citations={citations.filter((c) => c.round === finalRound)}
+                      matter={currentMatter}
+                    />
+                  )}
                 </div>
-                {!running && finalRound != null && rounds[finalRound] && (
-                  <AnswerExportMenu
-                    question={submitted ?? 'Research memorandum'}
-                    round={rounds[finalRound]}
-                    citations={citations.filter((c) => c.round === finalRound)}
-                    matter={currentMatter}
+                <div className="max-w-[68ch]">
+                  <AnswerStream
+                    activeRound={activeRound}
+                    isFinal={isFinalActive}
+                    running={running}
+                    submitted={!!submitted}
+                    citationsByBlock={citationsByBlock}
+                    citationByNum={citationByNum}
+                    onCitationClick={scrollToChunk}
                   />
-                )}
-              </div>
-              <div className="max-w-[68ch]">
-                <AnswerStream
-                  activeRound={activeRound}
-                  isFinal={isFinalActive}
-                  running={running}
-                  submitted={!!submitted}
-                  citationsByBlock={citationsByBlock}
-                  citationByNum={citationByNum}
-                  onCitationClick={scrollToChunk}
-                />
-              </div>
-            </Card>
+                </div>
+              </Card>
+            )}
+
           </div>
         </div>
 
@@ -945,221 +949,77 @@ function EvidenceColumn({
 
 // ----- run card with step timeline -----
 
-function RunCard({
-  running,
-  searches,
-  notes,
-  currentRound,
-  finalRound,
-  chunkOrder,
-  citations,
-  timelineOpen,
-  setTimelineOpen,
-  reasoningOpen,
-  setReasoningOpen,
-  reasoningRounds,
-  reasoningScrollRef,
-  expansions,
-  writerRound,
-  elapsedMs,
-  phase,
-}: {
-  running: boolean;
-  searches: SearchEvt[];
-  notes: { round: number; text: string }[];
-  currentRound: number | null;
-  finalRound: number | null;
-  chunkOrder: string[];
-  citations: CitationEvt[];
-  timelineOpen: boolean;
-  setTimelineOpen: (v: boolean) => void;
-  reasoningOpen: boolean;
-  setReasoningOpen: (v: boolean) => void;
-  reasoningRounds: { round: number; text: string }[];
-  reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
-  expansions: Record<number, number>;
-  writerRound: number | null;
-  elapsedMs: number;
-  phase: 'idle' | 'routing' | 'searching' | 'writing' | 'done';
-}) {
-  const done = !running && finalRound != null;
-  void done;
-  const writerActive = currentRound != null && currentRound === finalRound && running;
-  const writerDone = finalRound != null && !running;
-  void reasoningOpen;
-  void setReasoningOpen;
+// Each retrieval kind gets a color so the timeline reads at a glance.
+const FACET_STYLE: Record<string, { name: string; text: string; dot: string }> = {
+  search:  { name: 'Record search',  text: 'text-accent',            dot: 'bg-accent' },
+  read:    { name: 'Read full text',  text: 'text-gold',             dot: 'bg-gold' },
+  index:   { name: 'Record index',    text: 'text-muted-foreground', dot: 'bg-muted-foreground' },
+  caselaw: { name: 'Case law',        text: 'text-teal-700',         dot: 'bg-teal-600' },
+  error:   { name: 'Lookup failed',   text: 'text-destructive',      dot: 'bg-destructive' },
+};
 
-  // Tool notes come from `tool` SSE frames: structured lookups (list_orders / lookup_counsel /
-  // list_deadlines) and read_order are retrievals; everything else is stray interim reasoning.
-  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
-  const isToolNote = (t: string) =>
-    TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
-  const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
-  const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
+function classifyTool(text: string): { kind: keyof typeof FACET_STYLE; name: string; label: string } {
+  const num = (text.match(/\d+/) ?? [''])[0];
+  const plural = num === '1' ? '' : 's';
+  if (/ lookup error:/.test(text)) return { kind: 'error', name: 'Lookup failed', label: text.replace(/^.*lookup error:\s*/, '') };
+  if (text.startsWith('Read ')) return { kind: 'read', name: 'Read full text', label: `${num} passage${plural} of full order text` };
+  if (text.startsWith('Searched case law')) return { kind: 'caselaw', name: 'Case law', label: `${num} published opinion${plural}` };
+  if (/controlling order/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} controlling order${plural}` };
+  if (/key date/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} key date${plural}` };
+  if (/counsel/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} counsel of record` };
+  return { kind: 'index', name: 'Record index', label: text };
+}
 
-  // The trace is grouped BY ROUND: each round leads with the router's streaming reasoning,
-  // then the retrievals it drove (full-order reads, searches, neighbor expansion). The writer
-  // is appended last; research rounds exclude the writer's final round.
-  const researchRounds = useMemo(() => {
-    const set = new Set<number>();
-    searches.forEach((s) => set.add(s.round));
-    toolNotes.forEach((n) => set.add(n.round));
-    interimNotes.forEach((n) => set.add(n.round));
-    reasoningRounds.forEach(({ round }) => set.add(round));
-    Object.keys(expansions).forEach((k) => set.add(Number(k)));
-    if (currentRound != null && currentRound !== writerRound && !writerActive) set.add(currentRound);
-    // The writer's round (which carries its extended thinking) is rendered as the final step,
-    // not as a research round.
-    return [...set].filter((r) => r !== finalRound && r !== writerRound).sort((a, b) => a - b);
-  }, [searches, toolNotes, interimNotes, reasoningRounds, expansions, currentRound, writerActive, finalRound, writerRound]);
-
-  // The writer's extended-thinking text (streams before the answer, then stays available).
-  const writerReasoning = writerRound != null
-    ? (reasoningRounds.find((t) => t.round === writerRound)?.text ?? '').trim()
-    : '';
-
-  // The single live search = the last one emitted, while still retrieving.
-  const lastSearch = searches[searches.length - 1];
-  // The writer is "active" once its round is current (covers extended thinking, which streams
-  // before the answer text) — finalRound is only set once the answer finishes.
-  const writerActiveNow = running && writerRound != null && currentRound === writerRound;
-  const writerStatus: 'pending' | 'active' | 'done' = writerDone ? 'done' : (writerActive || writerActiveNow) ? 'active' : 'pending';
-
-  // Smoothly collapse/expand using a grid-rows trick (animates intrinsic height).
+function TimelineNode({ children, tone = 'primary', active = false }: { children: ReactNode; tone?: 'primary' | 'accent' | 'gold'; active?: boolean }) {
+  const bg = tone === 'accent' ? 'bg-accent' : tone === 'gold' ? 'bg-gold' : 'bg-primary';
   return (
-    <div
-      className="grid transition-[grid-template-rows,opacity] duration-500 ease-out"
-      style={{
-        gridTemplateRows: timelineOpen ? '1fr' : '0fr',
-        opacity: timelineOpen ? 1 : 0,
-      }}
-      aria-hidden={!timelineOpen}
-    >
-      <div className="overflow-hidden" ref={reasoningScrollRef}>
-        <ol className="relative pl-5 py-1">
-          <div
-            className="absolute left-[7px] top-3 bottom-3 w-px bg-gradient-to-b from-border via-border to-transparent"
-            aria-hidden
-          />
-          {researchRounds.map((r, ri) => {
-            const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
-            const rTools = toolNotes.filter((n) => n.round === r);
-            const rSearches = searches.filter((s) => s.round === r);
-            const rInterim = interimNotes.filter((n) => n.round === r);
-            const exp = expansions[r] ?? 0;
-            const reasoningStreaming = running && currentRound === r && !writerActive;
-            const roundActive = reasoningStreaming || (running && !writerActive && lastSearch?.round === r);
-            const hasSteps = rTools.length > 0 || rSearches.length > 0 || rInterim.length > 0 || exp > 0;
-            return (
-              <li
-                key={`round-${r}`}
-                className="relative py-2 motion-stream-in"
-                style={{ animationDelay: `${Math.min(ri, 8) * 35}ms` }}
-              >
-                <span
-                  className={`absolute -left-[14px] top-[12px] h-2 w-2 rounded-full ring-2 ring-background transition-colors ${
-                    roundActive ? 'bg-accent motion-pulse-soft' : 'bg-accent'
-                  }`}
-                  aria-hidden
-                />
-                <RoundReasoning round={r} text={reasoning} streaming={reasoningStreaming} />
-                {hasSteps && (
-                  <div className="mt-2 space-y-2">
-                    {rTools.map((n, i) => (
-                      <ToolStepRow key={`tool-${r}-${i}`} text={n.text} />
-                    ))}
-                    {rSearches.map((s, i) => (
-                      <SearchStepRow
-                        key={`search-${r}-${i}`}
-                        search={s}
-                        status={running && !writerActive && s === lastSearch ? 'active' : 'done'}
-                      />
-                    ))}
-                    {exp > 0 && <ExpandRow count={exp} />}
-                    {rInterim.map((n, i) => (
-                      <InterimNoteRow key={`interim-${r}-${i}`} text={n.text} />
-                    ))}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-          <li className="relative py-2">
-            <span
-              className={`absolute -left-[14px] top-[12px] h-2 w-2 rounded-full ring-2 ring-background transition-colors ${
-                writerStatus === 'active'
-                  ? 'bg-accent motion-pulse-soft'
-                  : writerStatus === 'done'
-                    ? 'bg-accent'
-                    : 'bg-muted-foreground/30'
-              }`}
-              aria-hidden
-            />
-            <WriterStepRow status={writerStatus} citations={citations.length} />
-            {writerReasoning && (
-              <WriterReasoning text={writerReasoning} streaming={writerActiveNow} />
-            )}
-          </li>
-        </ol>
+    <span className="relative z-10 flex h-[22px] w-[22px] items-center justify-center">
+      {active && <span className={`absolute inset-[-3px] rounded-full ${bg} opacity-25 motion-pulse-soft`} aria-hidden />}
+      <span className={`relative flex h-[22px] w-[22px] items-center justify-center rounded-full ${bg} text-[11px] font-semibold text-white shadow-sm`}>
+        {children}
+      </span>
+    </span>
+  );
+}
+
+function FacetRow({ kind, name, label, meta, active = false, done = false }: { kind: keyof typeof FACET_STYLE; name?: string; label: string; meta?: string; active?: boolean; done?: boolean }) {
+  const style = FACET_STYLE[kind];
+  return (
+    <div className="flex items-start gap-2.5 motion-stream-in">
+      <span className={`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${active ? `${style.dot} motion-pulse-soft` : done ? style.dot : 'bg-muted-foreground/40'}`} aria-hidden />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[13px] font-semibold tracking-[-0.005em] ${active ? 'shimmer-text' : style.text}`}>{name ?? style.name}</span>
+          {done && !active && <Check className={`h-3 w-3 ${style.text} opacity-70`} strokeWidth={2.5} />}
+          {meta && <span className="ml-auto text-[11px] text-muted-foreground tabular-nums shrink-0">{meta}</span>}
+        </div>
+        <div className="text-[12.5px] leading-snug text-foreground/70 mt-0.5 font-serif">{label}</div>
       </div>
     </div>
   );
 }
 
-
-// The router's streamed rationale for a round — shown inline and in full (it is only a
-// sentence or three now), with a live caret while it streams, so the reasoning sits directly
-// above the retrievals it drove rather than collapsed behind a toggle.
-function RoundReasoning({
-  round,
-  text,
-  streaming,
-}: {
-  round: number;
-  text: string;
-  streaming: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
-        <Brain className="h-3 w-3" />
-        <span>Reasoning · round {round}</span>
-      </div>
-      {text ? (
-        <div className="font-serif text-[13.5px] leading-[1.6] text-foreground/80">
-          {text}
-          {streaming && <span className="motion-stream-caret" aria-hidden />}
-        </div>
-      ) : streaming ? (
-        <div className="inline-flex items-center gap-2 text-[13px] text-muted-foreground/70 italic">
-          <span className="inline-block h-1 w-16 rounded motion-shimmer" />
-          planning retrieval…
-        </div>
-      ) : null}
-    </div>
+function RoundReasoning({ text, streaming }: { text: string; streaming: boolean }) {
+  if (!text && !streaming) return null;
+  return text ? (
+    <p className="font-serif text-[13.5px] leading-[1.6] text-foreground/80">
+      {text}
+      {streaming && <span className="motion-stream-caret" aria-hidden />}
+    </p>
+  ) : (
+    <span className="text-[13px] font-serif italic shimmer-text">planning retrieval…</span>
   );
 }
 
-// The Opus writer's extended-thinking stream, shown under the final "Write" step. It can be
-// long, so it's collapsible and scroll-capped; it streams live while the writer reasons,
-// then rides the trace's auto-collapse once the answer is done.
 function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="mt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
-      >
+      <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors">
         <Brain className="h-3 w-3" />
         <span>Writer reasoning</span>
         {streaming && <span className="normal-case tracking-normal text-accent/80">· thinking</span>}
-        {open ? (
-          <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-        ) : (
-          <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />
-        )}
+        {open ? <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" /> : <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />}
       </button>
       {open && (
         <div className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/65 pr-1">
@@ -1171,144 +1031,176 @@ function WriterReasoning({ text, streaming }: { text: string; streaming: boolean
   );
 }
 
-// Shared layout for a retrieval step: a small kind label + icon, the body, and an optional
-// right-aligned meta (count / progress). Keeps searches, reads, and tools visually aligned.
-function StepShell({
-  icon,
-  kind,
-  children,
-  meta,
-}: {
-  icon: ReactNode;
-  kind: string;
-  children: ReactNode;
-  meta?: ReactNode;
-}) {
+function ExpandRow({ count }: { count: number }) {
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-0.5 inline-flex items-center gap-1">
-          {icon} {kind}
-        </div>
-        {children}
-      </div>
-      {meta != null && (
-        <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
-          {meta}
-        </div>
-      )}
+    <div className="flex items-center gap-2.5 text-[11.5px] text-muted-foreground/80">
+      <GitBranch className="h-3 w-3 text-accent/70 shrink-0" />
+      <span>+{count} adjacent passage{count === 1 ? '' : 's'} pulled for surrounding context</span>
     </div>
   );
 }
 
-
-function ToolStepRow({ text }: { text: string }) {
-  // read_order IS a retrieval (it returns citable passages); structured lookups are not.
-  const isRead = text.startsWith('Read ');
-  return (
-    <StepShell
-      icon={isRead ? <Layers className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
-      kind={isRead ? 'Read full text' : 'Record index'}
-      meta={isRead ? undefined : <span className="italic text-muted-foreground/60">no vector search</span>}
-    >
-      <div className="font-serif italic text-[13.5px] text-foreground/90">{text}</div>
-    </StepShell>
-  );
+function InterimNoteRow({ text }: { text: string }) {
+  return <div className="font-serif italic text-[13px] text-foreground/70 leading-relaxed">{text}</div>;
 }
 
-
-function SearchStepRow({
-  search,
-  status,
-}: {
-  search: SearchEvt;
-  status: 'active' | 'done';
-}) {
-  const label = search.keywords ? `“${search.keywords}”` : 'Semantic search of the record';
-  const filterEntries = Object.entries(search.filter ?? {});
+// The single shimmering phrase shown the instant the writer is called, until the first answer token streams.
+function WritingIndicator() {
   return (
-    <StepShell
-      icon={<SearchIcon className="h-3 w-3" />}
-      kind="Search"
-      meta={
-        search.count === undefined ? (
-          status === 'active' ? (
-            <span className="inline-block h-1 w-12 rounded motion-shimmer" />
-          ) : (
-            `k=${search.k}`
-          )
-        ) : search.count === 0 ? (
-          <span className="italic text-muted-foreground/70">no matches</span>
-        ) : (
-          `${search.count}/${search.k} chunks`
-        )
-      }
-    >
-      <div className="font-serif italic text-[13.5px] text-foreground/90">{label}</div>
-      {filterEntries.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {filterEntries.map(([k, v]) => (
-            <span
-              key={k}
-              className="px-1.5 py-0.5 rounded border border-border bg-secondary/50 text-[10px] text-muted-foreground"
-            >
-              {k}: {String(v)}
-            </span>
-          ))}
-        </div>
-      )}
-    </StepShell>
-  );
-}
-
-// Neighbor/sibling expansion line — shows the adjacent passages auto-pulled for context.
-function ExpandRow({ count }: { count: number }) {
-  return (
-    <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80">
-      <GitBranch className="h-3 w-3 text-accent/70" />
-      <span>
-        +{count} adjacent passage{count === 1 ? '' : 's'} pulled for surrounding context
+    <div className="motion-fade-rise flex items-center justify-center py-12">
+      <span className="inline-flex items-center gap-2.5">
+        <PenLine className="h-4 w-4 text-accent" strokeWidth={1.75} />
+        <span className="font-serif text-[17px] tracking-[-0.01em] shimmer-text">Writing…</span>
       </span>
     </div>
   );
 }
 
-// Stray interim narration from a tool_use round body (rare).
-function InterimNoteRow({ text }: { text: string }) {
-  return <div className="font-serif italic text-[13px] text-foreground/70 leading-relaxed">{text}</div>;
+// Post-completion re-expander for the research trace.
+function TraceToggle({ open, onToggle, steps, elapsedMs }: { open: boolean; onToggle: () => void; steps: number; elapsedMs: number }) {
+  return (
+    <button type="button" onClick={onToggle} className="group inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+      {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+      <Brain className="h-3 w-3" />
+      <span className="uppercase tracking-wider">{open ? 'Hide research trace' : 'Show research trace'}</span>
+      {!open && <span className="text-muted-foreground/60 tabular-nums normal-case tracking-normal">· {steps} step{steps === 1 ? '' : 's'} · {fmtElapsed(elapsedMs)}</span>}
+    </button>
+  );
 }
 
-function WriterStepRow({
-  status,
+function RunCard({
+  running,
+  searches,
+  notes,
+  currentRound,
+  finalRound,
   citations,
+  timelineOpen,
+  reasoningRounds,
+  reasoningScrollRef,
+  expansions,
+  writerRound,
 }: {
-  status: 'pending' | 'active' | 'done';
-  citations: number;
+  running: boolean;
+  searches: SearchEvt[];
+  notes: { round: number; text: string }[];
+  currentRound: number | null;
+  finalRound: number | null;
+  citations: CitationEvt[];
+  timelineOpen: boolean;
+  reasoningRounds: { round: number; text: string }[];
+  reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  expansions: Record<number, number>;
+  writerRound: number | null;
 }) {
+  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
+  const isToolNote = (t: string) => TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
+  const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
+  const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
+
+  const writerActive = running && writerRound != null && currentRound === writerRound;
+
+  const researchRounds = useMemo(() => {
+    const set = new Set<number>();
+    searches.forEach((s) => set.add(s.round));
+    toolNotes.forEach((n) => set.add(n.round));
+    interimNotes.forEach((n) => set.add(n.round));
+    reasoningRounds.forEach(({ round }) => set.add(round));
+    Object.keys(expansions).forEach((k) => set.add(Number(k)));
+    if (currentRound != null && currentRound !== writerRound && !writerActive) set.add(currentRound);
+    return [...set].filter((r) => r !== finalRound && r !== writerRound).sort((a, b) => a - b);
+  }, [searches, toolNotes, interimNotes, reasoningRounds, expansions, currentRound, writerActive, finalRound, writerRound]);
+
+  const lastSearch = searches[searches.length - 1];
+  const writerReasoning = writerRound != null ? (reasoningRounds.find((t) => t.round === writerRound)?.text ?? '').trim() : '';
+  const writerDone = writerRound != null && finalRound === writerRound;
+  const showWorking = running && !writerActive;
+  const workingLabel = searches.length === 0 && toolNotes.length === 0 ? 'Routing your question…' : 'Working…';
+
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mb-0.5">
-          Final · Write
-        </div>
-        <div className="font-serif italic text-[14px] text-foreground/90 inline-flex items-center gap-1.5">
-          <PenLine className="h-3.5 w-3.5 text-muted-foreground" />
-          {status === 'done'
-            ? 'Answer complete'
-            : status === 'active'
-            ? 'Writing the answer'
-            : 'Writing the answer'}
-        </div>
-      </div>
-      <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap pt-0.5">
-        {status === 'done' && `${citations} citation${citations === 1 ? '' : 's'}`}
-        {status === 'active' && (
-          <span className="inline-block h-1 w-12 rounded motion-shimmer" />
-        )}
+    <div
+      className="grid transition-[grid-template-rows,opacity] duration-500"
+      style={{ gridTemplateRows: timelineOpen ? '1fr' : '0fr', opacity: timelineOpen ? 1 : 0, transitionTimingFunction: 'var(--ease-out-soft)' }}
+      aria-hidden={!timelineOpen}
+    >
+      <div className="overflow-hidden" ref={reasoningScrollRef}>
+        <ol className="py-1">
+          {researchRounds.map((r, ri) => {
+            const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
+            const rTools = toolNotes.filter((n) => n.round === r);
+            const rSearches = searches.filter((s) => s.round === r);
+            const rInterim = interimNotes.filter((n) => n.round === r);
+            const exp = expansions[r] ?? 0;
+            const reasoningStreaming = running && currentRound === r && !writerActive;
+            const roundActive = running && !writerActive && (currentRound === r || lastSearch?.round === r);
+            const isLast = ri === researchRounds.length - 1;
+            return (
+              <li key={`round-${r}`} className="relative flex gap-3 motion-stream-in" style={{ animationDelay: `${Math.min(ri, 8) * 35}ms` }}>
+                <div className="relative flex flex-col items-center">
+                  <TimelineNode tone="primary" active={roundActive}>{r}</TimelineNode>
+                  {(!isLast || showWorking || writerRound != null) && <div className="w-px flex-1 min-h-[12px] bg-border mt-1" aria-hidden />}
+                </div>
+                <div className="flex-1 min-w-0 pb-5">
+                  <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70 font-sans mb-1.5 leading-[22px]">Round {r}</div>
+                  <RoundReasoning text={reasoning} streaming={reasoningStreaming} />
+                  <div className="mt-2.5 space-y-2.5">
+                    {rSearches.map((s, i) => (
+                      <FacetRow
+                        key={`s-${r}-${i}`}
+                        kind="search"
+                        label={s.keywords ? `“${s.keywords}”` : 'Semantic search of the record'}
+                        active={running && !writerActive && s === lastSearch && s.count === undefined}
+                        done={s.count !== undefined}
+                        meta={s.count === undefined ? undefined : s.count === 0 ? 'no matches' : `${s.count}/${s.k}`}
+                      />
+                    ))}
+                    {rTools.map((n, i) => {
+                      const c = classifyTool(n.text);
+                      return <FacetRow key={`t-${r}-${i}`} kind={c.kind} name={c.name} label={c.label} done />;
+                    })}
+                    {exp > 0 && <ExpandRow count={exp} />}
+                    {rInterim.map((n, i) => (<InterimNoteRow key={`i-${r}-${i}`} text={n.text} />))}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+
+          {writerRound != null && (
+            <li className="relative flex gap-3 motion-stream-in">
+              <div className="relative flex flex-col items-center">
+                <TimelineNode tone="accent" active={writerActive}><PenLine className="h-3 w-3" strokeWidth={2} /></TimelineNode>
+              </div>
+              <div className="flex-1 min-w-0 pb-1">
+                <div className="flex items-center gap-1.5 leading-[22px]">
+                  <span className="text-[13px] font-semibold text-accent">Synthesis</span>
+                  {writerDone && <Check className="h-3 w-3 text-accent opacity-70" strokeWidth={2.5} />}
+                  <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{citations.length} citation{citations.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="text-[12.5px] text-foreground/70 mt-0.5 font-serif">{writerDone ? 'Answer written from the gathered record.' : 'Writing the answer…'}</div>
+                {writerReasoning && <WriterReasoning text={writerReasoning} streaming={writerActive} />}
+              </div>
+            </li>
+          )}
+
+          {showWorking && (
+            <li className="relative flex gap-3">
+              <div className="relative flex flex-col items-center">
+                <span className="relative z-10 flex h-[22px] w-[22px] items-center justify-center">
+                  <span className="h-2.5 w-2.5 rounded-full bg-gold motion-pulse-soft" aria-hidden />
+                </span>
+              </div>
+              <div className="flex-1 min-w-0 leading-[22px]">
+                <span className="text-[13px] font-serif shimmer-text">{workingLabel}</span>
+              </div>
+            </li>
+          )}
+        </ol>
       </div>
     </div>
   );
 }
+
 
 function truncate(s: string, n: number) {
   return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
