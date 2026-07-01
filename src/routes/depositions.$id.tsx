@@ -308,6 +308,31 @@ function DepositionWorkspace() {
     return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
   }, [linesQ.data]);
 
+  // Line -> segment lookup via pointer walk (segments are ordered, non-overlapping)
+  const segmentByLineKey = useMemo(() => {
+    const map = new Map<string, DepositionSegment>();
+    const segs = segmentsQ.data ?? [];
+    const lines = linesQ.data ?? [];
+    if (segs.length === 0 || lines.length === 0) return map;
+    let si = 0;
+    for (const l of lines) {
+      // Advance segment pointer until this line is not past its end
+      while (
+        si < segs.length &&
+        (l.page > segs[si].page_end ||
+          (l.page === segs[si].page_end && l.line > segs[si].line_end))
+      ) {
+        si += 1;
+      }
+      if (si >= segs.length) break;
+      const s = segs[si];
+      const afterStart =
+        l.page > s.page_start || (l.page === s.page_start && l.line >= s.line_start);
+      if (afterStart) map.set(`${l.page}-${l.line}`, s);
+    }
+    return map;
+  }, [segmentsQ.data, linesQ.data]);
+
   const searchLower = search.trim().toLowerCase();
 
   // Findings by type
