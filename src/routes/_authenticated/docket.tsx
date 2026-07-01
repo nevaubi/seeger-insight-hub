@@ -286,3 +286,89 @@ function DocketPage() {
     </AppShell>
   );
 }
+
+function DocketWatcherCard({ digest }: { digest: DocketDigest | null }) {
+  const paragraphs = (digest?.summary_md ?? '')
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return (
+    <Card className="p-5 mb-6">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="font-serif text-[18px] font-semibold text-foreground">
+              Docket Watcher
+            </h2>
+            <ClaudeBadge variant="chip" label="Claude Legal — docket watcher" />
+          </div>
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Checks the CourtListener docket daily and digests new filings.
+          </p>
+        </div>
+        {digest?.created_at && (
+          <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+            Checked {fmtDate(digest.created_at)}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-4">
+        {!digest ? (
+          <div className="text-[12.5px] text-muted-foreground">No checks recorded yet.</div>
+        ) : digest.new_entries === 0 ? (
+          <div className="text-[12.5px] text-muted-foreground">
+            No new filings since the last check.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {digest.headline && (
+              <div className="font-serif text-[15px] font-semibold text-foreground leading-snug">
+                {digest.headline}
+              </div>
+            )}
+            {paragraphs.length > 0 && (
+              <div className="space-y-2">
+                {paragraphs.map((p, i) => (
+                  <p key={i} className="text-[13px] text-foreground/85 leading-relaxed">
+                    {p}
+                  </p>
+                ))}
+              </div>
+            )}
+            {Array.isArray(digest.items) && digest.items.length > 0 && (
+              <ul className="mt-2 space-y-1.5">
+                {digest.items.map((it, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[12.5px] leading-relaxed">
+                    <span className="font-mono text-[11.5px] text-muted-foreground tabular-nums shrink-0">
+                      [ECF {it.entry_number}]
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="text-foreground/90 font-medium">{it.label}</span>
+                      {it.why_it_matters && (
+                        <>
+                          {' '}
+                          <span className="text-muted-foreground">— {it.why_it_matters}</span>
+                        </>
+                      )}
+                      {typeof it.deadline === 'string' && it.deadline.trim() && (
+                        <span className="ml-2 inline-flex items-center rounded-sm border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-800">
+                          Deadline: {it.deadline}
+                        </span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {digest?.error && (
+          <div className="mt-3 text-[11.5px] text-amber-700">Digest note: {digest.error}</div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
