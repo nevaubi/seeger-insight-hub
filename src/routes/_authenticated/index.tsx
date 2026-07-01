@@ -41,7 +41,7 @@ const dashboardQuery = (caseId: string) =>
     },
   });
 
-export const Route = createFileRoute('/')({
+export const Route = createFileRoute('/_authenticated/')({
   component: Dashboard,
   errorComponent: ({ error }) => (
     <AppShell>

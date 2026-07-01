@@ -64,7 +64,7 @@ function VerifyMark({ status }: { status: VerifyStatus }) {
   return null;
 }
 
-export const Route = createFileRoute('/depositions/$id')({
+export const Route = createFileRoute('/_authenticated/depositions/$id')({
   validateSearch: (search: Record<string, unknown>): { analyze: boolean } => ({
     analyze: search.analyze === true || search.analyze === 'true',
   }),

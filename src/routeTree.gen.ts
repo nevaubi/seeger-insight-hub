@@ -9,117 +9,136 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SearchRouteImport } from './routes/search'
-import { Route as RosterRouteImport } from './routes/roster'
-import { Route as ReviewRouteImport } from './routes/review'
-import { Route as OrdersRouteImport } from './routes/orders'
-import { Route as DraftRouteImport } from './routes/draft'
-import { Route as DocketRouteImport } from './routes/docket'
-import { Route as DepositionsRouteImport } from './routes/depositions'
-import { Route as DeadlinesRouteImport } from './routes/deadlines'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as DepositionsIndexRouteImport } from './routes/depositions.index'
-import { Route as DepositionsIdRouteImport } from './routes/depositions.$id'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedSearchRouteImport } from './routes/_authenticated/search'
+import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
+import { Route as AuthenticatedReviewRouteImport } from './routes/_authenticated/review'
+import { Route as AuthenticatedOrdersRouteImport } from './routes/_authenticated/orders'
+import { Route as AuthenticatedDraftRouteImport } from './routes/_authenticated/draft'
+import { Route as AuthenticatedDocketRouteImport } from './routes/_authenticated/docket'
+import { Route as AuthenticatedDepositionsRouteImport } from './routes/_authenticated/depositions'
+import { Route as AuthenticatedDeadlinesRouteImport } from './routes/_authenticated/deadlines'
+import { Route as AuthenticatedDepositionsIndexRouteImport } from './routes/_authenticated/depositions.index'
+import { Route as AuthenticatedDepositionsIdRouteImport } from './routes/_authenticated/depositions.$id'
 
-const SearchRoute = SearchRouteImport.update({
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSearchRoute = AuthenticatedSearchRouteImport.update({
   id: '/search',
   path: '/search',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const RosterRoute = RosterRouteImport.update({
+const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
   id: '/roster',
   path: '/roster',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ReviewRoute = ReviewRouteImport.update({
+const AuthenticatedReviewRoute = AuthenticatedReviewRouteImport.update({
   id: '/review',
   path: '/review',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const OrdersRoute = OrdersRouteImport.update({
+const AuthenticatedOrdersRoute = AuthenticatedOrdersRouteImport.update({
   id: '/orders',
   path: '/orders',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const DraftRoute = DraftRouteImport.update({
+const AuthenticatedDraftRoute = AuthenticatedDraftRouteImport.update({
   id: '/draft',
   path: '/draft',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const DocketRoute = DocketRouteImport.update({
+const AuthenticatedDocketRoute = AuthenticatedDocketRouteImport.update({
   id: '/docket',
   path: '/docket',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const DepositionsRoute = DepositionsRouteImport.update({
-  id: '/depositions',
-  path: '/depositions',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DeadlinesRoute = DeadlinesRouteImport.update({
+const AuthenticatedDepositionsRoute =
+  AuthenticatedDepositionsRouteImport.update({
+    id: '/depositions',
+    path: '/depositions',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDeadlinesRoute = AuthenticatedDeadlinesRouteImport.update({
   id: '/deadlines',
   path: '/deadlines',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DepositionsIndexRoute = DepositionsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => DepositionsRoute,
-} as any)
-const DepositionsIdRoute = DepositionsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => DepositionsRoute,
-} as any)
+const AuthenticatedDepositionsIndexRoute =
+  AuthenticatedDepositionsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedDepositionsRoute,
+  } as any)
+const AuthenticatedDepositionsIdRoute =
+  AuthenticatedDepositionsIdRouteImport.update({
+    id: '/$id',
+    path: '/$id',
+    getParentRoute: () => AuthenticatedDepositionsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/deadlines': typeof DeadlinesRoute
-  '/depositions': typeof DepositionsRouteWithChildren
-  '/docket': typeof DocketRoute
-  '/draft': typeof DraftRoute
-  '/orders': typeof OrdersRoute
-  '/review': typeof ReviewRoute
-  '/roster': typeof RosterRoute
-  '/search': typeof SearchRoute
-  '/depositions/$id': typeof DepositionsIdRoute
-  '/depositions/': typeof DepositionsIndexRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/auth': typeof AuthRoute
+  '/deadlines': typeof AuthenticatedDeadlinesRoute
+  '/depositions': typeof AuthenticatedDepositionsRouteWithChildren
+  '/docket': typeof AuthenticatedDocketRoute
+  '/draft': typeof AuthenticatedDraftRoute
+  '/orders': typeof AuthenticatedOrdersRoute
+  '/review': typeof AuthenticatedReviewRoute
+  '/roster': typeof AuthenticatedRosterRoute
+  '/search': typeof AuthenticatedSearchRoute
+  '/depositions/$id': typeof AuthenticatedDepositionsIdRoute
+  '/depositions/': typeof AuthenticatedDepositionsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/deadlines': typeof DeadlinesRoute
-  '/docket': typeof DocketRoute
-  '/draft': typeof DraftRoute
-  '/orders': typeof OrdersRoute
-  '/review': typeof ReviewRoute
-  '/roster': typeof RosterRoute
-  '/search': typeof SearchRoute
-  '/depositions/$id': typeof DepositionsIdRoute
-  '/depositions': typeof DepositionsIndexRoute
+  '/auth': typeof AuthRoute
+  '/deadlines': typeof AuthenticatedDeadlinesRoute
+  '/docket': typeof AuthenticatedDocketRoute
+  '/draft': typeof AuthenticatedDraftRoute
+  '/orders': typeof AuthenticatedOrdersRoute
+  '/review': typeof AuthenticatedReviewRoute
+  '/roster': typeof AuthenticatedRosterRoute
+  '/search': typeof AuthenticatedSearchRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/depositions/$id': typeof AuthenticatedDepositionsIdRoute
+  '/depositions': typeof AuthenticatedDepositionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/deadlines': typeof DeadlinesRoute
-  '/depositions': typeof DepositionsRouteWithChildren
-  '/docket': typeof DocketRoute
-  '/draft': typeof DraftRoute
-  '/orders': typeof OrdersRoute
-  '/review': typeof ReviewRoute
-  '/roster': typeof RosterRoute
-  '/search': typeof SearchRoute
-  '/depositions/$id': typeof DepositionsIdRoute
-  '/depositions/': typeof DepositionsIndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
+  '/_authenticated/deadlines': typeof AuthenticatedDeadlinesRoute
+  '/_authenticated/depositions': typeof AuthenticatedDepositionsRouteWithChildren
+  '/_authenticated/docket': typeof AuthenticatedDocketRoute
+  '/_authenticated/draft': typeof AuthenticatedDraftRoute
+  '/_authenticated/orders': typeof AuthenticatedOrdersRoute
+  '/_authenticated/review': typeof AuthenticatedReviewRoute
+  '/_authenticated/roster': typeof AuthenticatedRosterRoute
+  '/_authenticated/search': typeof AuthenticatedSearchRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/depositions/$id': typeof AuthenticatedDepositionsIdRoute
+  '/_authenticated/depositions/': typeof AuthenticatedDepositionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/auth'
     | '/deadlines'
     | '/depositions'
     | '/docket'
@@ -132,7 +151,7 @@ export interface FileRouteTypes {
     | '/depositions/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/auth'
     | '/deadlines'
     | '/docket'
     | '/draft'
@@ -140,152 +159,174 @@ export interface FileRouteTypes {
     | '/review'
     | '/roster'
     | '/search'
+    | '/'
     | '/depositions/$id'
     | '/depositions'
   id:
     | '__root__'
-    | '/'
-    | '/deadlines'
-    | '/depositions'
-    | '/docket'
-    | '/draft'
-    | '/orders'
-    | '/review'
-    | '/roster'
-    | '/search'
-    | '/depositions/$id'
-    | '/depositions/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/deadlines'
+    | '/_authenticated/depositions'
+    | '/_authenticated/docket'
+    | '/_authenticated/draft'
+    | '/_authenticated/orders'
+    | '/_authenticated/review'
+    | '/_authenticated/roster'
+    | '/_authenticated/search'
+    | '/_authenticated/'
+    | '/_authenticated/depositions/$id'
+    | '/_authenticated/depositions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  DeadlinesRoute: typeof DeadlinesRoute
-  DepositionsRoute: typeof DepositionsRouteWithChildren
-  DocketRoute: typeof DocketRoute
-  DraftRoute: typeof DraftRoute
-  OrdersRoute: typeof OrdersRoute
-  ReviewRoute: typeof ReviewRoute
-  RosterRoute: typeof RosterRoute
-  SearchRoute: typeof SearchRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/search': {
-      id: '/search'
-      path: '/search'
-      fullPath: '/search'
-      preLoaderRoute: typeof SearchRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/roster': {
-      id: '/roster'
-      path: '/roster'
-      fullPath: '/roster'
-      preLoaderRoute: typeof RosterRouteImport
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/review': {
-      id: '/review'
-      path: '/review'
-      fullPath: '/review'
-      preLoaderRoute: typeof ReviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/orders': {
-      id: '/orders'
-      path: '/orders'
-      fullPath: '/orders'
-      preLoaderRoute: typeof OrdersRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/draft': {
-      id: '/draft'
-      path: '/draft'
-      fullPath: '/draft'
-      preLoaderRoute: typeof DraftRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/docket': {
-      id: '/docket'
-      path: '/docket'
-      fullPath: '/docket'
-      preLoaderRoute: typeof DocketRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/depositions': {
-      id: '/depositions'
-      path: '/depositions'
-      fullPath: '/depositions'
-      preLoaderRoute: typeof DepositionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/deadlines': {
-      id: '/deadlines'
-      path: '/deadlines'
-      fullPath: '/deadlines'
-      preLoaderRoute: typeof DeadlinesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/depositions/': {
-      id: '/depositions/'
+    '/_authenticated/search': {
+      id: '/_authenticated/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof AuthenticatedSearchRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/roster': {
+      id: '/_authenticated/roster'
+      path: '/roster'
+      fullPath: '/roster'
+      preLoaderRoute: typeof AuthenticatedRosterRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/review': {
+      id: '/_authenticated/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof AuthenticatedReviewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/orders': {
+      id: '/_authenticated/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof AuthenticatedOrdersRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/draft': {
+      id: '/_authenticated/draft'
+      path: '/draft'
+      fullPath: '/draft'
+      preLoaderRoute: typeof AuthenticatedDraftRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/docket': {
+      id: '/_authenticated/docket'
+      path: '/docket'
+      fullPath: '/docket'
+      preLoaderRoute: typeof AuthenticatedDocketRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/depositions': {
+      id: '/_authenticated/depositions'
+      path: '/depositions'
+      fullPath: '/depositions'
+      preLoaderRoute: typeof AuthenticatedDepositionsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/deadlines': {
+      id: '/_authenticated/deadlines'
+      path: '/deadlines'
+      fullPath: '/deadlines'
+      preLoaderRoute: typeof AuthenticatedDeadlinesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/depositions/': {
+      id: '/_authenticated/depositions/'
       path: '/'
       fullPath: '/depositions/'
-      preLoaderRoute: typeof DepositionsIndexRouteImport
-      parentRoute: typeof DepositionsRoute
+      preLoaderRoute: typeof AuthenticatedDepositionsIndexRouteImport
+      parentRoute: typeof AuthenticatedDepositionsRoute
     }
-    '/depositions/$id': {
-      id: '/depositions/$id'
+    '/_authenticated/depositions/$id': {
+      id: '/_authenticated/depositions/$id'
       path: '/$id'
       fullPath: '/depositions/$id'
-      preLoaderRoute: typeof DepositionsIdRouteImport
-      parentRoute: typeof DepositionsRoute
+      preLoaderRoute: typeof AuthenticatedDepositionsIdRouteImport
+      parentRoute: typeof AuthenticatedDepositionsRoute
     }
   }
 }
 
-interface DepositionsRouteChildren {
-  DepositionsIdRoute: typeof DepositionsIdRoute
-  DepositionsIndexRoute: typeof DepositionsIndexRoute
+interface AuthenticatedDepositionsRouteChildren {
+  AuthenticatedDepositionsIdRoute: typeof AuthenticatedDepositionsIdRoute
+  AuthenticatedDepositionsIndexRoute: typeof AuthenticatedDepositionsIndexRoute
 }
 
-const DepositionsRouteChildren: DepositionsRouteChildren = {
-  DepositionsIdRoute: DepositionsIdRoute,
-  DepositionsIndexRoute: DepositionsIndexRoute,
+const AuthenticatedDepositionsRouteChildren: AuthenticatedDepositionsRouteChildren =
+  {
+    AuthenticatedDepositionsIdRoute: AuthenticatedDepositionsIdRoute,
+    AuthenticatedDepositionsIndexRoute: AuthenticatedDepositionsIndexRoute,
+  }
+
+const AuthenticatedDepositionsRouteWithChildren =
+  AuthenticatedDepositionsRoute._addFileChildren(
+    AuthenticatedDepositionsRouteChildren,
+  )
+
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDeadlinesRoute: typeof AuthenticatedDeadlinesRoute
+  AuthenticatedDepositionsRoute: typeof AuthenticatedDepositionsRouteWithChildren
+  AuthenticatedDocketRoute: typeof AuthenticatedDocketRoute
+  AuthenticatedDraftRoute: typeof AuthenticatedDraftRoute
+  AuthenticatedOrdersRoute: typeof AuthenticatedOrdersRoute
+  AuthenticatedReviewRoute: typeof AuthenticatedReviewRoute
+  AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
+  AuthenticatedSearchRoute: typeof AuthenticatedSearchRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
-const DepositionsRouteWithChildren = DepositionsRoute._addFileChildren(
-  DepositionsRouteChildren,
-)
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedDeadlinesRoute: AuthenticatedDeadlinesRoute,
+  AuthenticatedDepositionsRoute: AuthenticatedDepositionsRouteWithChildren,
+  AuthenticatedDocketRoute: AuthenticatedDocketRoute,
+  AuthenticatedDraftRoute: AuthenticatedDraftRoute,
+  AuthenticatedOrdersRoute: AuthenticatedOrdersRoute,
+  AuthenticatedReviewRoute: AuthenticatedReviewRoute,
+  AuthenticatedRosterRoute: AuthenticatedRosterRoute,
+  AuthenticatedSearchRoute: AuthenticatedSearchRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  DeadlinesRoute: DeadlinesRoute,
-  DepositionsRoute: DepositionsRouteWithChildren,
-  DocketRoute: DocketRoute,
-  DraftRoute: DraftRoute,
-  OrdersRoute: OrdersRoute,
-  ReviewRoute: ReviewRoute,
-  RosterRoute: RosterRoute,
-  SearchRoute: SearchRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

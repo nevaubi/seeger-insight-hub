@@ -23,7 +23,7 @@ import { ingestDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 
-export const Route = createFileRoute('/depositions/')({
+export const Route = createFileRoute('/_authenticated/depositions/')({
   component: DepositionsPage,
   errorComponent: ({ error }) => (
     <AppShell>

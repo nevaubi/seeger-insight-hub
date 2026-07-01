@@ -24,7 +24,7 @@ const datesQuery = (caseId: string) =>
     },
   });
 
-export const Route = createFileRoute('/deadlines')({
+export const Route = createFileRoute('/_authenticated/deadlines')({
   component: DeadlinesPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
