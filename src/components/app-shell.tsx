@@ -9,6 +9,7 @@ import {
   Users,
   PenLine,
   Table2,
+  BookOpen,
   PanelLeftClose,
   PanelLeftOpen,
   ChevronsUpDown,
