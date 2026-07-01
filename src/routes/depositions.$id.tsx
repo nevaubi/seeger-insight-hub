@@ -391,6 +391,8 @@ function DepositionWorkspace() {
   ].filter(Boolean) as string[];
 
   const analyzed = depo.status === 'analyzed';
+  const isAnalyzing = depo.status === 'analyzing' || analyzeM.isPending;
+  const hasError = depo.status === 'error';
   const noFindings = findings.length === 0;
 
   return (
