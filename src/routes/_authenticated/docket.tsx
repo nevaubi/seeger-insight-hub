@@ -113,6 +113,7 @@ function DocketPage() {
 
   const { data: entries = [], isLoading } = useQuery(docketQuery(caseId));
   const { data: syncState } = useQuery(syncStateQuery(caseId));
+  const { data: digest } = useQuery(digestQuery(caseId));
   const [q, setQ] = useState('');
 
   const sync = useMutation({
