@@ -423,6 +423,39 @@ function ReviewPage() {
     }
   }, [columns, runColumn]);
 
+  const [standardizing, setStandardizing] = useState<Set<string>>(new Set());
+  const anyStandardizing = standardizing.size > 0;
+
+  const standardizeColumn = useCallback(async (columnId: string) => {
+    if (!setId) return;
+    setStandardizing((s) => new Set(s).add(columnId));
+    try {
+      const res = await fetch(TABULAR_STANDARDIZE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ review_set_id: setId, column_id: columnId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Standardize failed (${res.status})`);
+      const changed = body?.changed ?? 0;
+      toast.success(changed > 0 ? `Standardized ${changed} cell${changed === 1 ? '' : 's'}` : 'Values already consistent');
+    } catch (e) {
+      toast.error('Standardize failed', { description: (e as Error).message });
+    } finally {
+      setStandardizing((s) => { const n = new Set(s); n.delete(columnId); return n; });
+      qc.invalidateQueries({ queryKey: ['review-cells', setId] });
+    }
+  }, [setId, qc]);
+
+  const standardizeAll = useCallback(async () => {
+    const eligible = columns.filter((c) => c.data_type === 'text' || c.data_type === 'list' || c.data_type === 'enum');
+    if (!eligible.length) { toast.info('No text-like columns to standardize'); return; }
+    const queue = [...eligible];
+    const worker = async () => { while (queue.length) { const c = queue.shift(); if (c) await standardizeColumn(c.id); } };
+    await Promise.all(Array.from({ length: Math.min(3, eligible.length) }, worker));
+  }, [columns, standardizeColumn]);
+
+
 
 
   const addColumns = useMutation({
