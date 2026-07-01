@@ -415,15 +415,16 @@ function ReviewPage() {
         description="Upload up to 25 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
       >
         <div className="flex items-center gap-2">
-          {readyFiles.length > 0 && columns.length === 0 && (
-            <Button size="sm" variant="outline" className="gap-2" onClick={addMetadataColumns} disabled={addColumn.isPending}>
-              <Sparkles className="h-4 w-4" /> Auto-add metadata
-            </Button>
+          {files.length > 0 && (
+            <>
+              <TemplatesDialog onApply={(cols) => addColumns.mutate(cols)} />
+              <AddColumnsDialog onAdd={(cols) => addColumns.mutate(cols)} />
+            </>
           )}
           {columns.length > 0 && (
             <Button size="sm" className="gap-2" onClick={runAll} disabled={!canRun || anyRunning}>
               {anyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Run all
+              Extract all
             </Button>
           )}
           {hasExportable && (
