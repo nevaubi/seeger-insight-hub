@@ -82,6 +82,8 @@ import { cn } from '@/lib/utils';
 
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.gif,.txt,.md';
 const MAX_BYTES = 25 * 1024 * 1024;
+const DOC_COL_KEY = '__doc__';
+
 
 const TYPE_LABELS: Record<ReviewColumnType, string> = {
   text: 'Text',
@@ -94,12 +96,20 @@ const TYPE_LABELS: Record<ReviewColumnType, string> = {
 };
 
 const COLUMN_PRESETS: { name: string; data_type: ReviewColumnType; prompt: string; enum?: string[] }[] = [
-  { name: 'Summary', data_type: 'text', prompt: 'A one-sentence summary of this document.' },
-  { name: 'Parties', data_type: 'list', prompt: 'The named parties to this document.' },
-  { name: 'Effective date', data_type: 'date', prompt: 'The effective date of the agreement or order.' },
-  { name: 'Governing law', data_type: 'text', prompt: 'The governing law / choice-of-law jurisdiction.' },
-  { name: 'Arbitration clause?', data_type: 'boolean', prompt: 'Does the document contain a binding arbitration clause?' },
+  { name: 'Document type', data_type: 'enum', prompt: 'Classify this document into exactly one category based on its caption and content.', enum: ['Order', 'Motion', 'Brief', 'Stipulation', 'Notice', 'Letter', 'Expert Report', 'Deposition', 'Pleading', 'Other'] },
+  { name: 'Filing / entry date', data_type: 'date', prompt: 'The date the document was filed, signed, or entered.' },
+  { name: 'Filing party', data_type: 'text', prompt: 'The party who filed or submitted this document.' },
+  { name: 'Judge', data_type: 'text', prompt: 'The judge or judicial officer named in the document.' },
+  { name: 'Court', data_type: 'text', prompt: 'The court or forum named in the document.' },
+  { name: 'Docket / case no.', data_type: 'text', prompt: 'The docket number, case number, or MDL number.' },
+  { name: 'Parties', data_type: 'list', prompt: 'The named parties (plaintiffs, defendants, signatories).' },
+  { name: 'Relief sought', data_type: 'text', prompt: 'The relief, ruling, or outcome requested or ordered.' },
+  { name: 'Disposition', data_type: 'enum', prompt: 'How the matter was resolved, if stated.', enum: ['Granted', 'Denied', 'Granted in part', 'Pending', 'Withdrawn', 'Deferred'] },
+  { name: 'Deadlines set', data_type: 'list', prompt: 'Any deadlines or dated obligations imposed, each as "date/trigger — what is due".' },
+  { name: 'Causes of action', data_type: 'list', prompt: 'The legal claims or causes of action asserted.' },
+  { name: 'Summary', data_type: 'text', prompt: 'A one-sentence summary of the document.' },
 ];
+
 
 
 
@@ -199,6 +209,24 @@ function ReviewPage() {
     return m;
   }, [cells]);
   const [runningCols, setRunningCols] = useState<Set<string>>(new Set());
+  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+  const autoSweptRef = useRef(false);
+
+  const startResize = (key: string, defaultW: number) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = colWidths[key] ?? defaultW;
+    const onMove = (ev: PointerEvent) =>
+      setColWidths((w) => ({ ...w, [key]: Math.max(120, Math.min(640, startW + ev.clientX - startX)) }));
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
 
   const createSet = useMutation({
     mutationFn: async () => {
@@ -302,17 +330,19 @@ function ReviewPage() {
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const runColumn = useCallback(async (columnId: string) => {
+  const runColumn = useCallback(async (columnId: string, fileIds?: string[]) => {
     if (!setId || !readyFiles.length) return;
     setRunningCols((s) => new Set(s).add(columnId));
     try {
+      const body: Record<string, unknown> = { review_set_id: setId, column_id: columnId };
+      if (fileIds && fileIds.length) body.file_ids = fileIds;
       const res = await fetch(TABULAR_EXTRACT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ review_set_id: setId, column_id: columnId }),
+        body: JSON.stringify(body),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Extraction failed (${res.status})`);
+      const respBody = await res.json().catch(() => ({}));
+      if (!res.ok || respBody?.ok === false) throw new Error(respBody?.error || `Extraction failed (${res.status})`);
     } catch (e) {
       toast.error('Extraction failed', { description: (e as Error).message });
     } finally {
@@ -333,9 +363,35 @@ function ReviewPage() {
     await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
   }, [runColumn]);
 
-  const runAll = useCallback(() => {
-    void runColumns(columns.map((c) => c.id));
-  }, [columns, runColumns]);
+  const retryFailed = useCallback(async () => {
+    const byCol = new Map<string, string[]>();
+    for (const c of cells) {
+      if (c.state !== 'error') continue;
+      const arr = byCol.get(c.review_column_id) ?? [];
+      arr.push(c.review_file_id);
+      byCol.set(c.review_column_id, arr);
+    }
+    const entries = Array.from(byCol.entries());
+    if (!entries.length) return;
+    const queue = [...entries];
+    const worker = async () => {
+      while (queue.length) {
+        const next = queue.shift();
+        if (next) await runColumn(next[0], next[1]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, entries.length) }, worker));
+  }, [cells, runColumn]);
+
+  const runAll = useCallback(async () => {
+    autoSweptRef.current = false;
+    await runColumns(columns.map((c) => c.id));
+    if (!autoSweptRef.current) {
+      autoSweptRef.current = true;
+      await retryFailed();
+    }
+  }, [columns, runColumns, retryFailed]);
+
 
   const addColumns = useMutation({
     mutationFn: async (cols: TemplateColumn[]) => {
@@ -402,8 +458,10 @@ function ReviewPage() {
   );
 
   const anyRunning = runningCols.size > 0 || cells.some((c) => c.state === 'running');
+  const errorCount = useMemo(() => cells.filter((c) => c.state === 'error').length, [cells]);
   const atLimit = files.length >= MAX_REVIEW_FILES;
   const canRun = readyFiles.length > 0 && columns.length > 0;
+
   const hasExportable = files.length > 0 && columns.length > 0;
 
 
@@ -422,12 +480,18 @@ function ReviewPage() {
             </>
           )}
           {columns.length > 0 && (
-            <Button size="sm" className="gap-2" onClick={runAll} disabled={!canRun || anyRunning}>
+            <Button size="sm" className="gap-2" onClick={() => void runAll()} disabled={!canRun || anyRunning}>
               {anyRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Extract all
             </Button>
           )}
+          {errorCount > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => void retryFailed()} disabled={anyRunning}>
+              <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
+            </Button>
+          )}
           {hasExportable && (
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
@@ -516,17 +580,28 @@ function ReviewPage() {
           </div>
         ) : (
           <div className="mt-2 overflow-x-auto rounded-md border border-border">
-            <table className="w-full border-collapse text-[13px]">
+            <table className="w-full border-collapse text-[13px] table-fixed">
+              <colgroup>
+                <col style={{ width: colWidths[DOC_COL_KEY] ?? 260 }} />
+                {columns.map((col) => (
+                  <col key={col.id} style={{ width: colWidths[col.id] ?? 240 }} />
+                ))}
+                <col style={{ width: 190 }} />
+              </colgroup>
               <thead>
                 <tr className="bg-secondary/50">
-                  <th className="sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-3 py-2.5 border-b border-r border-border min-w-[15rem]">
+                  <th className="relative sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-2.5 py-2 border-b border-r border-border">
                     Document
+                    <div
+                      onPointerDown={startResize(DOC_COL_KEY, 260)}
+                      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
+                    />
                   </th>
                   {columns.map((col) => (
-                    <th key={col.id} className="text-left px-3 py-2 border-b border-r border-border align-top min-w-[14rem] max-w-[20rem]">
+                    <th key={col.id} className="relative text-left px-2.5 py-2 border-b border-r border-border align-top">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-sans font-semibold text-foreground truncate">{col.name}</div>
+                          <div className="font-sans font-semibold text-foreground break-words">{col.name}</div>
                           <Badge variant="secondary" className="mt-1 text-[9.5px] font-normal">{TYPE_LABELS[col.data_type]}</Badge>
                         </div>
                         <DropdownMenu>
@@ -543,9 +618,13 @@ function ReviewPage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
+                      <div
+                        onPointerDown={startResize(col.id, 240)}
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
+                      />
                     </th>
                   ))}
-                  <th className="px-3 py-2 border-b border-border align-middle w-[12rem]">
+                  <th className="px-2.5 py-2 border-b border-border align-middle">
                     <AddColumnDialog onAdd={(c) => addColumn.mutate(c)} />
                   </th>
                 </tr>
@@ -553,7 +632,7 @@ function ReviewPage() {
               <tbody>
                 {files.map((f) => (
                   <tr key={f.id} className="hover:bg-secondary/20">
-                    <td className="sticky left-0 z-10 bg-card px-3 py-2.5 border-b border-r border-border align-top min-w-[15rem]">
+                    <td className="sticky left-0 z-10 bg-card px-2.5 py-2 border-b border-r border-border align-top">
                       <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
                     {columns.map((col) => {
@@ -563,16 +642,18 @@ function ReviewPage() {
                         <td
                           key={col.id}
                           className={cn(
-                            'px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]',
+                            'px-2.5 py-2 border-b border-r border-border align-top',
                             hasSource && 'cursor-pointer hover:bg-accent/5',
                           )}
                           onClick={() => hasSource && openSource(f, cell)}
                         >
-                          {f.status !== 'ready' ? (
-                            <span className="text-muted-foreground/50">—</span>
-                          ) : (
-                            <CellView cell={cell} running={runningCols.has(col.id)} />
-                          )}
+                          <div className="whitespace-normal break-words">
+                            {f.status !== 'ready' ? (
+                              <span className="text-muted-foreground/50">—</span>
+                            ) : (
+                              <CellView cell={cell} running={runningCols.has(col.id)} />
+                            )}
+                          </div>
                         </td>
                       );
                     })}
@@ -582,6 +663,7 @@ function ReviewPage() {
               </tbody>
             </table>
           </div>
+
         )}
       </div>
 
@@ -624,13 +706,18 @@ function DocCell({ file, onRemove, onRetry }: { file: ReviewFile; onRemove: () =
 }
 
 function CellView({ cell, running }: { cell?: CellWithCites; running: boolean }) {
-  if (running && (!cell || cell.state === 'pending' || cell.state === 'running')) {
-    return <span className="inline-flex items-center gap-1.5 text-muted-foreground text-[12px]"><Loader2 className="h-3 w-3 animate-spin" /> Extracting…</span>;
-  }
+  const skeleton = (
+    <div className="space-y-1.5 py-0.5" aria-label="Extracting">
+      <div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: '85%' }} />
+      <div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: '55%' }} />
+    </div>
+  );
+  if (running && (!cell || cell.state === 'pending' || cell.state === 'running')) return skeleton;
   if (!cell || cell.state === 'pending') return <span className="text-muted-foreground/40">·</span>;
-  if (cell.state === 'running') return <span className="inline-flex items-center gap-1.5 text-muted-foreground text-[12px]"><Loader2 className="h-3 w-3 animate-spin" /> Extracting…</span>;
+  if (cell.state === 'running') return skeleton;
   if (cell.state === 'error') return <span className="inline-flex items-center gap-1 text-destructive text-[12px]" title={cell.error ?? ''}><XCircle className="h-3 w-3" /> Error</span>;
   if (cell.state === 'not_found') return <span className="text-muted-foreground/60 text-[12px] italic">Not found</span>;
+
 
   const cites = (cell.review_cell_citations ?? []).slice().sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0));
   const needsReview = cell.state === 'needs_review';
@@ -638,9 +725,10 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
     <Popover>
       <PopoverTrigger asChild>
         <button className="text-left w-full group">
-          <span className={cn('font-serif leading-snug', needsReview ? 'text-amber-700' : 'text-foreground')}>
+          <span className={cn('block font-serif leading-snug break-words line-clamp-4', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="text-muted-foreground/60 italic">—</span>}
           </span>
+
           <span className="mt-1 flex items-center gap-1.5 flex-wrap">
             {needsReview && (
               <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600"><AlertTriangle className="h-2.5 w-2.5" /> review</span>
