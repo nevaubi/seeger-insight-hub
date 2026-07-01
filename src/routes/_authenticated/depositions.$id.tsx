@@ -1194,6 +1194,9 @@ function AskTab({
               {result.answer || 'Not addressed in the record.'}
             </p>
           )}
+          <div className="mt-3">
+            <ClaudeBadge label="Answered by Claude · citations verified" />
+          </div>
           {result.citations && result.citations.length > 0 && (
             <div className="mt-5 space-y-2">
               <div className="text-[10.5px] uppercase tracking-[0.14em] font-medium text-muted-foreground">
