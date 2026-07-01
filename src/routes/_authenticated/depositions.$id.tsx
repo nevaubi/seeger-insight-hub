@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
+import { ClaudeBadge } from '@/components/claude-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
