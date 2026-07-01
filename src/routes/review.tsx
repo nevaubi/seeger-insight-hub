@@ -456,8 +456,10 @@ function ReviewPage() {
   );
 
   const anyRunning = runningCols.size > 0 || cells.some((c) => c.state === 'running');
+  const errorCount = useMemo(() => cells.filter((c) => c.state === 'error').length, [cells]);
   const atLimit = files.length >= MAX_REVIEW_FILES;
   const canRun = readyFiles.length > 0 && columns.length > 0;
+
   const hasExportable = files.length > 0 && columns.length > 0;
 
 
