@@ -1084,6 +1084,7 @@ function QualityTab({
                   {data.category}
                 </Badge>
               )}
+              <VerifyMark status={f.verify_status} />
             </div>
             {f.detail && (
               <p className="mt-1.5 text-sm text-foreground/85 leading-relaxed">{f.detail}</p>
