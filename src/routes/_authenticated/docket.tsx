@@ -54,6 +54,22 @@ const syncStateQuery = (caseId: string) =>
     },
   });
 
+const digestQuery = (caseId: string) =>
+  queryOptions({
+    queryKey: ['docket-digest', caseId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('docket_digests')
+        .select('*')
+        .eq('case_id', caseId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as DocketDigest | null;
+    },
+  });
+
 export const Route = createFileRoute('/_authenticated/docket')({
   component: DocketPage,
   errorComponent: ({ error }) => (
