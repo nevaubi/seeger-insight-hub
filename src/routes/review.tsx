@@ -328,17 +328,19 @@ function ReviewPage() {
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const runColumn = useCallback(async (columnId: string) => {
+  const runColumn = useCallback(async (columnId: string, fileIds?: string[]) => {
     if (!setId || !readyFiles.length) return;
     setRunningCols((s) => new Set(s).add(columnId));
     try {
+      const body: Record<string, unknown> = { review_set_id: setId, column_id: columnId };
+      if (fileIds && fileIds.length) body.file_ids = fileIds;
       const res = await fetch(TABULAR_EXTRACT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ review_set_id: setId, column_id: columnId }),
+        body: JSON.stringify(body),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Extraction failed (${res.status})`);
+      const respBody = await res.json().catch(() => ({}));
+      if (!res.ok || respBody?.ok === false) throw new Error(respBody?.error || `Extraction failed (${res.status})`);
     } catch (e) {
       toast.error('Extraction failed', { description: (e as Error).message });
     } finally {
@@ -359,9 +361,35 @@ function ReviewPage() {
     await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
   }, [runColumn]);
 
-  const runAll = useCallback(() => {
-    void runColumns(columns.map((c) => c.id));
-  }, [columns, runColumns]);
+  const retryFailed = useCallback(async () => {
+    const byCol = new Map<string, string[]>();
+    for (const c of cells) {
+      if (c.state !== 'error') continue;
+      const arr = byCol.get(c.review_column_id) ?? [];
+      arr.push(c.review_file_id);
+      byCol.set(c.review_column_id, arr);
+    }
+    const entries = Array.from(byCol.entries());
+    if (!entries.length) return;
+    const queue = [...entries];
+    const worker = async () => {
+      while (queue.length) {
+        const next = queue.shift();
+        if (next) await runColumn(next[0], next[1]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, entries.length) }, worker));
+  }, [cells, runColumn]);
+
+  const runAll = useCallback(async () => {
+    autoSweptRef.current = false;
+    await runColumns(columns.map((c) => c.id));
+    if (!autoSweptRef.current) {
+      autoSweptRef.current = true;
+      await retryFailed();
+    }
+  }, [columns, runColumns, retryFailed]);
+
 
   const addColumns = useMutation({
     mutationFn: async (cols: TemplateColumn[]) => {
