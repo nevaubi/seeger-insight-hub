@@ -829,6 +829,11 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
                 <Quote className="h-2.5 w-2.5" /> {cites.length === 1 && cites[0].page_number ? `p.${cites[0].page_number}` : `${cites.length} cites`}
               </span>
             )}
+            {cell.value_original && cell.value_original !== cell.value_text && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground" title={`Normalized from: ${cell.value_original}`}>
+                <Wand2 className="h-2.5 w-2.5" /> normalized
+              </span>
+            )}
           </span>
         </button>
       </PopoverTrigger>
