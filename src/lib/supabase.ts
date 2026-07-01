@@ -11,6 +11,9 @@ export const TABULAR_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-ing
 export const TABULAR_EXTRACT_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-extract`;
 export const TABULAR_STANDARDIZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-standardize`;
 export const REVIEW_FILES_BUCKET = 'review-files';
+export const DEPO_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ingest`;
+export const DEPO_ANALYZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-analyze`;
+export const DEPO_ASK_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ask`;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -243,3 +246,128 @@ export const TAG_LABELS: Record<string, string> = {
 };
 
 export const tagLabel = (t: string) => TAG_LABELS[t] ?? t.replace(/_/g, ' ');
+
+// ---- Depositions ----
+export type DepositionStatus = 'ingested' | 'analyzing' | 'analyzed' | 'error';
+
+export interface DepositionExhibit {
+  number: number;
+  description: string | null;
+  index_page: number | null;
+  marked_page: number | null;
+  marked_line: number | null;
+}
+
+export interface DepositionMetadata {
+  parties?: { alignment: string; firm: string | null; counsel: string[] }[];
+  exhibits?: DepositionExhibit[];
+  start_time?: string | null;
+  deposition_date_long?: string | null;
+}
+
+export interface Deposition {
+  id: string;
+  case_id: string | null;
+  witness_name: string | null;
+  witness_role: string | null;
+  party_alignment: string | null;
+  deposition_date: string | null;
+  mdl_caption: string | null;
+  mdl_number: string | null;
+  mdl_case_no: string | null;
+  individual_case_no: string | null;
+  court: string | null;
+  judge: string | null;
+  magistrate_judge: string | null;
+  reporter: string | null;
+  job_no: string | null;
+  page_count: number | null;
+  source_format: string | null;
+  filename: string | null;
+  status: DepositionStatus;
+  metadata: DepositionMetadata | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DepositionLine {
+  id: string;
+  deposition_id: string;
+  page: number;
+  line: number;
+  text: string;
+}
+
+export interface DepositionSegment {
+  id: string;
+  deposition_id: string;
+  ordinal: number;
+  kind: string;
+  speaker: string | null;
+  speaker_role: string | null;
+  examination: string | null;
+  page_start: number;
+  line_start: number;
+  page_end: number;
+  line_end: number;
+  text: string;
+  exhibit_number: number | null;
+  event: string | null;
+}
+
+export type DepositionFindingType =
+  | 'witness_profile'
+  | 'exec_summary'
+  | 'chronology'
+  | 'admission'
+  | 'quality_note'
+  | 'exhibit';
+export type FindingStance = 'helpful' | 'harmful' | 'neutral';
+export type FindingVerify = 'verified' | 'unverified' | 'failed';
+export type FindingReview = 'unreviewed' | 'approved' | 'edited' | 'rejected';
+
+export interface DepositionFinding {
+  id: string;
+  deposition_id: string;
+  case_id: string | null;
+  finding_type: DepositionFindingType;
+  title: string | null;
+  detail: string | null;
+  quote: string | null;
+  page_start: number | null;
+  line_start: number | null;
+  page_end: number | null;
+  line_end: number | null;
+  cite: string | null;
+  segment_ids: string[];
+  issue_tags: string[];
+  stance: FindingStance | null;
+  confidence: number | null;
+  verify_status: FindingVerify;
+  review_status: FindingReview;
+  reviewer: string | null;
+  ordinal: number;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DepoAskCitation {
+  quote: string;
+  note: string;
+  cite: string | null;
+  page_start: number | null;
+  line_start: number | null;
+  page_end: number | null;
+  line_end: number | null;
+  segment_ids: string[];
+  verified: boolean;
+}
+
+export interface DepoAskResponse {
+  ok: boolean;
+  answered: boolean;
+  answer: string;
+  citations: DepoAskCitation[];
+  run_id: string | null;
+}
+
