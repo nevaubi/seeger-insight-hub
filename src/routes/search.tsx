@@ -728,52 +728,53 @@ function SynthesisPanel({
               </Card>
             )}
 
+            {!running && submitted && traceSteps > 0 && (
+              <TraceToggle open={timelineOpen} onToggle={() => setTimelineOpen((o) => !o)} steps={traceSteps} elapsedMs={elapsedMs} />
+            )}
+
             <RunCard
               running={running}
               searches={searches}
               notes={notes}
               currentRound={currentRound}
               finalRound={finalRound}
-              chunkOrder={chunkOrder}
               citations={citations}
               timelineOpen={timelineOpen}
-              setTimelineOpen={setTimelineOpen}
-              reasoningOpen={reasoningOpen}
-              setReasoningOpen={setReasoningOpen}
               reasoningRounds={reasoningRounds}
               reasoningScrollRef={reasoningScrollRef}
               expansions={expansions}
               writerRound={writerRound}
-              elapsedMs={elapsedMs}
-              phase={phase}
             />
 
-            <Card className="p-7 border-border shadow-none motion-fade-rise">
-              <div className="flex items-baseline justify-between mb-3">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Answer
+            {showWriting && <WritingIndicator />}
+
+            {showAnswer && (
+              <Card className="p-7 border-border shadow-none motion-fade-rise">
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
+                  {!running && finalRound != null && rounds[finalRound] && (
+                    <AnswerExportMenu
+                      question={submitted ?? 'Research memorandum'}
+                      round={rounds[finalRound]}
+                      citations={citations.filter((c) => c.round === finalRound)}
+                      matter={currentMatter}
+                    />
+                  )}
                 </div>
-                {!running && finalRound != null && rounds[finalRound] && (
-                  <AnswerExportMenu
-                    question={submitted ?? 'Research memorandum'}
-                    round={rounds[finalRound]}
-                    citations={citations.filter((c) => c.round === finalRound)}
-                    matter={currentMatter}
+                <div className="max-w-[68ch]">
+                  <AnswerStream
+                    activeRound={activeRound}
+                    isFinal={isFinalActive}
+                    running={running}
+                    submitted={!!submitted}
+                    citationsByBlock={citationsByBlock}
+                    citationByNum={citationByNum}
+                    onCitationClick={scrollToChunk}
                   />
-                )}
-              </div>
-              <div className="max-w-[68ch]">
-                <AnswerStream
-                  activeRound={activeRound}
-                  isFinal={isFinalActive}
-                  running={running}
-                  submitted={!!submitted}
-                  citationsByBlock={citationsByBlock}
-                  citationByNum={citationByNum}
-                  onCitationClick={scrollToChunk}
-                />
-              </div>
-            </Card>
+                </div>
+              </Card>
+            )}
+
           </div>
         </div>
 
