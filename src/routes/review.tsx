@@ -580,17 +580,28 @@ function ReviewPage() {
           </div>
         ) : (
           <div className="mt-2 overflow-x-auto rounded-md border border-border">
-            <table className="w-full border-collapse text-[13px]">
+            <table className="w-full border-collapse text-[13px] table-fixed">
+              <colgroup>
+                <col style={{ width: colWidths[DOC_COL_KEY] ?? 260 }} />
+                {columns.map((col) => (
+                  <col key={col.id} style={{ width: colWidths[col.id] ?? 240 }} />
+                ))}
+                <col style={{ width: 190 }} />
+              </colgroup>
               <thead>
                 <tr className="bg-secondary/50">
-                  <th className="sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-3 py-2.5 border-b border-r border-border min-w-[15rem]">
+                  <th className="relative sticky left-0 z-10 bg-secondary/50 text-left font-sans font-medium text-[11px] uppercase tracking-wider text-muted-foreground px-2.5 py-2 border-b border-r border-border">
                     Document
+                    <div
+                      onPointerDown={startResize(DOC_COL_KEY, 260)}
+                      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
+                    />
                   </th>
                   {columns.map((col) => (
-                    <th key={col.id} className="text-left px-3 py-2 border-b border-r border-border align-top min-w-[14rem] max-w-[20rem]">
+                    <th key={col.id} className="relative text-left px-2.5 py-2 border-b border-r border-border align-top">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-sans font-semibold text-foreground truncate">{col.name}</div>
+                          <div className="font-sans font-semibold text-foreground break-words">{col.name}</div>
                           <Badge variant="secondary" className="mt-1 text-[9.5px] font-normal">{TYPE_LABELS[col.data_type]}</Badge>
                         </div>
                         <DropdownMenu>
@@ -607,9 +618,13 @@ function ReviewPage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
+                      <div
+                        onPointerDown={startResize(col.id, 240)}
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize select-none hover:bg-primary/40"
+                      />
                     </th>
                   ))}
-                  <th className="px-3 py-2 border-b border-border align-middle w-[12rem]">
+                  <th className="px-2.5 py-2 border-b border-border align-middle">
                     <AddColumnDialog onAdd={(c) => addColumn.mutate(c)} />
                   </th>
                 </tr>
@@ -617,7 +632,7 @@ function ReviewPage() {
               <tbody>
                 {files.map((f) => (
                   <tr key={f.id} className="hover:bg-secondary/20">
-                    <td className="sticky left-0 z-10 bg-card px-3 py-2.5 border-b border-r border-border align-top min-w-[15rem]">
+                    <td className="sticky left-0 z-10 bg-card px-2.5 py-2 border-b border-r border-border align-top">
                       <DocCell file={f} onRemove={() => removeFile.mutate(f)} onRetry={() => ingest(f)} />
                     </td>
                     {columns.map((col) => {
@@ -627,16 +642,18 @@ function ReviewPage() {
                         <td
                           key={col.id}
                           className={cn(
-                            'px-3 py-2.5 border-b border-r border-border align-top max-w-[20rem]',
+                            'px-2.5 py-2 border-b border-r border-border align-top',
                             hasSource && 'cursor-pointer hover:bg-accent/5',
                           )}
                           onClick={() => hasSource && openSource(f, cell)}
                         >
-                          {f.status !== 'ready' ? (
-                            <span className="text-muted-foreground/50">—</span>
-                          ) : (
-                            <CellView cell={cell} running={runningCols.has(col.id)} />
-                          )}
+                          <div className="whitespace-normal break-words">
+                            {f.status !== 'ready' ? (
+                              <span className="text-muted-foreground/50">—</span>
+                            ) : (
+                              <CellView cell={cell} running={runningCols.has(col.id)} />
+                            )}
+                          </div>
                         </td>
                       );
                     })}
@@ -646,6 +663,7 @@ function ReviewPage() {
               </tbody>
             </table>
           </div>
+
         )}
       </div>
 
