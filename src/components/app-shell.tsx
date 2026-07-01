@@ -1,4 +1,5 @@
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard,
   FileText,
@@ -12,11 +13,14 @@ import {
   PanelLeftOpen,
   ChevronsUpDown,
   Check,
+  LogOut,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMatter } from '@/lib/matter-context';
+import { supabase } from '@/integrations/supabase/client';
 import logoUrl from '@/assets/seeger-weiss-logo-white.png';
+
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -184,8 +188,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
 
-        {/* Footer: toggle */}
+        {/* Footer: sign out + toggle */}
         <div className="border-t border-sidebar-border shrink-0">
+          <SignOutRow collapsed={collapsed} />
           <div className={cn('flex', collapsed ? 'justify-center py-2' : 'justify-end px-2 py-2')}>
             <button
               type="button"
@@ -209,6 +214,41 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+function SignOutRow({ collapsed }: { collapsed: boolean }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  async function handleSignOut() {
+    if (busy) return;
+    setBusy(true);
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await supabase.auth.signOut();
+    navigate({ to: '/auth', replace: true });
+  }
+
+  return (
+    <div className={cn('flex', collapsed ? 'justify-center py-2' : 'px-2 py-2')}>
+      <button
+        type="button"
+        onClick={handleSignOut}
+        disabled={busy}
+        title="Sign out"
+        aria-label="Sign out"
+        className={cn(
+          'inline-flex items-center rounded-sm font-sans text-[11.5px] font-medium text-sidebar-foreground/70 hover:text-white hover:bg-sidebar-accent/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-primary/60 disabled:opacity-50',
+          collapsed ? 'h-7 w-7 justify-center' : 'w-full h-8 gap-2 px-2.5',
+        )}
+      >
+        <LogOut className="h-[14px] w-[14px] shrink-0" strokeWidth={1.75} />
+        {!collapsed && <span>Sign out</span>}
+      </button>
+    </div>
+  );
+}
+
 
 export function PageHeader({
   title,
