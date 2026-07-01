@@ -160,6 +160,7 @@ function IssueTags({ tags }: { tags: string[] | null }) {
 
 function DepositionWorkspace() {
   const { id } = Route.useParams();
+  const searchParams = Route.useSearch();
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -174,6 +175,8 @@ function DepositionWorkspace() {
       if (error) throw error;
       return data as Deposition | null;
     },
+    refetchInterval: (q) =>
+      (q.state.data as Deposition | null)?.status === 'analyzing' ? 2500 : false,
   });
 
   const linesQ = useQuery({
@@ -190,6 +193,7 @@ function DepositionWorkspace() {
     },
   });
 
+  const currentStatus = depoQ.data?.status;
   const findingsQ = useQuery({
     queryKey: ['deposition-findings', id],
     queryFn: async () => {
@@ -202,6 +206,7 @@ function DepositionWorkspace() {
       if (error) throw error;
       return (data ?? []) as DepositionFinding[];
     },
+    refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
   });
 
   // Transcript: refs + search + scroll-to-cite
