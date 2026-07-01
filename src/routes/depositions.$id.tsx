@@ -260,20 +260,58 @@ function DepositionWorkspace() {
     return m;
   }, [findings]);
 
+  // Optimistically bump status → 'analyzing' so polling begins and a reload still shows the running state
+  const setStatusAnalyzing = useCallback(async () => {
+    await supabase.from('depositions').update({ status: 'analyzing' }).eq('id', id);
+    qc.invalidateQueries({ queryKey: ['deposition', id] });
+  }, [id, qc]);
+
   // Re-run analysis
   const analyzeM = useMutation({
     mutationFn: () => analyzeDeposition(id),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       if (!res.ok) {
-        toast.error(res.error || 'Analysis failed');
+        const msg = res.error || 'Analysis failed';
+        await supabase
+          .from('depositions')
+          .update({ status: 'error', error: msg })
+          .eq('id', id);
+        qc.invalidateQueries({ queryKey: ['deposition', id] });
+        toast.error(msg);
         return;
       }
       toast.success('Analysis complete');
       qc.invalidateQueries({ queryKey: ['deposition-findings', id] });
       qc.invalidateQueries({ queryKey: ['deposition', id] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Analysis failed'),
+    onError: async (e) => {
+      const msg = e instanceof Error ? e.message : 'Analysis failed';
+      await supabase
+        .from('depositions')
+        .update({ status: 'error', error: msg })
+        .eq('id', id);
+      qc.invalidateQueries({ queryKey: ['deposition', id] });
+      toast.error(msg);
+    },
   });
+
+  const runAnalyze = useCallback(async () => {
+    await setStatusAnalyzing();
+    analyzeM.mutate();
+  }, [analyzeM, setStatusAnalyzing]);
+
+  // Auto-start analysis once when we arrive with ?analyze=true on an ingested deposition
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!searchParams.analyze) return;
+    if (!depoQ.data) return;
+    if (depoQ.data.status !== 'ingested') return;
+    if (analyzeM.isPending) return;
+    autoStartedRef.current = true;
+    void runAnalyze();
+  }, [searchParams.analyze, depoQ.data, analyzeM.isPending, runAnalyze]);
+
 
   // Review controls
   const reviewM = useMutation({
