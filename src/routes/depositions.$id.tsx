@@ -926,9 +926,7 @@ function AdmissionsTab({
                   <h3 className="font-serif text-[15px] font-semibold leading-snug text-foreground">
                     {f.title || 'Admission'}
                   </h3>
-                  {f.verify_status === 'verified' && (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                  )}
+                  <VerifyMark status={f.verify_status} />
                 </div>
                 {f.issue_tags && f.issue_tags.length > 0 && (
                   <div className="mt-2">
