@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
+import { ClaudeBadge } from '@/components/claude-badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -706,6 +707,9 @@ function DepositionWorkspace() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Findings will appear here as soon as the analysis completes.
                 </p>
+                <div className="mt-3 flex justify-center">
+                  <ClaudeBadge />
+                </div>
               </Card>
             ) : hasError ? (
               <Card className="p-8 text-center border-destructive/40">
@@ -735,6 +739,12 @@ function DepositionWorkspace() {
               </Card>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
+                <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
+                  <ClaudeBadge variant="chip" label="Claude Legal — deposition intelligence" />
+                  <span className="text-[11px] text-muted-foreground">
+                    Citations verified against the record · Draft for attorney review
+                  </span>
+                </div>
                 <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap h-auto p-1">
                   <TabsTrigger value="summary" className="shrink-0 px-3">Summary</TabsTrigger>
                   <TabsTrigger value="admissions" className="shrink-0 px-3">Admissions</TabsTrigger>
@@ -1184,6 +1194,9 @@ function AskTab({
               {result.answer || 'Not addressed in the record.'}
             </p>
           )}
+          <div className="mt-3">
+            <ClaudeBadge label="Answered by Claude · citations verified" />
+          </div>
           {result.citations && result.citations.length > 0 && (
             <div className="mt-5 space-y-2">
               <div className="text-[10.5px] uppercase tracking-[0.14em] font-medium text-muted-foreground">
