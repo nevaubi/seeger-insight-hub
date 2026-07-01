@@ -725,9 +725,10 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
     <Popover>
       <PopoverTrigger asChild>
         <button className="text-left w-full group">
-          <span className={cn('font-serif leading-snug', needsReview ? 'text-amber-700' : 'text-foreground')}>
+          <span className={cn('block font-serif leading-snug break-words line-clamp-4', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="text-muted-foreground/60 italic">—</span>}
           </span>
+
           <span className="mt-1 flex items-center gap-1.5 flex-wrap">
             {needsReview && (
               <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600"><AlertTriangle className="h-2.5 w-2.5" /> review</span>
