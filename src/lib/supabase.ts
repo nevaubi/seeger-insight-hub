@@ -192,6 +192,7 @@ export interface ReviewCell {
   value_json: unknown;
   state: ReviewCellState;
   confidence: number | null;
+  reasoning: string | null;
   model: string | null;
   error: string | null;
   run_at: string | null;
@@ -205,7 +206,7 @@ export interface ReviewCellCitation {
   verified: boolean;
 }
 
-export const MAX_REVIEW_FILES = 5;
+export const MAX_REVIEW_FILES = 25;
 
 export interface WorkspaceDocument {
   id: string;
