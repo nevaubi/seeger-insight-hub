@@ -485,7 +485,13 @@ function ReviewPage() {
               Extract all
             </Button>
           )}
+          {errorCount > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => void retryFailed()} disabled={anyRunning}>
+              <RefreshCw className="h-4 w-4" /> Retry failed ({errorCount})
+            </Button>
+          )}
           {hasExportable && (
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
