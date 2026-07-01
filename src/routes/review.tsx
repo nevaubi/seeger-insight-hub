@@ -695,6 +695,9 @@ function ReviewPage() {
                             <DropdownMenuItem onClick={() => runColumn(col.id)} disabled={!readyFiles.length} className="gap-2">
                               <RefreshCw className="h-3.5 w-3.5" /> Re-run column
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => standardizeColumn(col.id)} disabled={anyRunning || standardizing.has(col.id)} className="gap-2">
+                              <Wand2 className="h-3.5 w-3.5" /> Standardize values
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => deleteColumn.mutate(col.id)} className="gap-2 text-destructive">
                               <Trash2 className="h-3.5 w-3.5" /> Delete column
                             </DropdownMenuItem>
