@@ -37,6 +37,9 @@ import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/depositions/$id')({
+  validateSearch: (search: Record<string, unknown>): { analyze: boolean } => ({
+    analyze: search.analyze === true || search.analyze === 'true',
+  }),
   component: DepositionWorkspace,
   errorComponent: ({ error }) => (
     <AppShell>
