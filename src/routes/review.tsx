@@ -94,12 +94,20 @@ const TYPE_LABELS: Record<ReviewColumnType, string> = {
 };
 
 const COLUMN_PRESETS: { name: string; data_type: ReviewColumnType; prompt: string; enum?: string[] }[] = [
-  { name: 'Summary', data_type: 'text', prompt: 'A one-sentence summary of this document.' },
-  { name: 'Parties', data_type: 'list', prompt: 'The named parties to this document.' },
-  { name: 'Effective date', data_type: 'date', prompt: 'The effective date of the agreement or order.' },
-  { name: 'Governing law', data_type: 'text', prompt: 'The governing law / choice-of-law jurisdiction.' },
-  { name: 'Arbitration clause?', data_type: 'boolean', prompt: 'Does the document contain a binding arbitration clause?' },
+  { name: 'Document type', data_type: 'enum', prompt: 'Classify this document into exactly one category based on its caption and content.', enum: ['Order', 'Motion', 'Brief', 'Stipulation', 'Notice', 'Letter', 'Expert Report', 'Deposition', 'Pleading', 'Other'] },
+  { name: 'Filing / entry date', data_type: 'date', prompt: 'The date the document was filed, signed, or entered.' },
+  { name: 'Filing party', data_type: 'text', prompt: 'The party who filed or submitted this document.' },
+  { name: 'Judge', data_type: 'text', prompt: 'The judge or judicial officer named in the document.' },
+  { name: 'Court', data_type: 'text', prompt: 'The court or forum named in the document.' },
+  { name: 'Docket / case no.', data_type: 'text', prompt: 'The docket number, case number, or MDL number.' },
+  { name: 'Parties', data_type: 'list', prompt: 'The named parties (plaintiffs, defendants, signatories).' },
+  { name: 'Relief sought', data_type: 'text', prompt: 'The relief, ruling, or outcome requested or ordered.' },
+  { name: 'Disposition', data_type: 'enum', prompt: 'How the matter was resolved, if stated.', enum: ['Granted', 'Denied', 'Granted in part', 'Pending', 'Withdrawn', 'Deferred'] },
+  { name: 'Deadlines set', data_type: 'list', prompt: 'Any deadlines or dated obligations imposed, each as "date/trigger — what is due".' },
+  { name: 'Causes of action', data_type: 'list', prompt: 'The legal claims or causes of action asserted.' },
+  { name: 'Summary', data_type: 'text', prompt: 'A one-sentence summary of the document.' },
 ];
+
 
 
 
