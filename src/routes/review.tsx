@@ -25,6 +25,7 @@ import {
   Sparkles,
   LayoutTemplate,
   X,
+  Wand2,
 } from 'lucide-react';
 import { REVIEW_TEMPLATES, type ReviewTemplate, type TemplateColumn } from '@/lib/review-templates';
 import { toast } from 'sonner';
