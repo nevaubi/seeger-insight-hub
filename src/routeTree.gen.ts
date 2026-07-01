@@ -18,6 +18,7 @@ import { Route as DocketRouteImport } from './routes/docket'
 import { Route as DepositionsRouteImport } from './routes/depositions'
 import { Route as DeadlinesRouteImport } from './routes/deadlines'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DepositionsIndexRouteImport } from './routes/depositions.index'
 import { Route as DepositionsIdRouteImport } from './routes/depositions.$id'
 
 const SearchRoute = SearchRouteImport.update({
@@ -65,6 +66,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DepositionsIndexRoute = DepositionsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DepositionsRoute,
+} as any)
 const DepositionsIdRoute = DepositionsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -82,11 +88,11 @@ export interface FileRoutesByFullPath {
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
   '/depositions/$id': typeof DepositionsIdRoute
+  '/depositions/': typeof DepositionsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/deadlines': typeof DeadlinesRoute
-  '/depositions': typeof DepositionsRouteWithChildren
   '/docket': typeof DocketRoute
   '/draft': typeof DraftRoute
   '/orders': typeof OrdersRoute
@@ -94,6 +100,7 @@ export interface FileRoutesByTo {
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
   '/depositions/$id': typeof DepositionsIdRoute
+  '/depositions': typeof DepositionsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -107,6 +114,7 @@ export interface FileRoutesById {
   '/roster': typeof RosterRoute
   '/search': typeof SearchRoute
   '/depositions/$id': typeof DepositionsIdRoute
+  '/depositions/': typeof DepositionsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -121,11 +129,11 @@ export interface FileRouteTypes {
     | '/roster'
     | '/search'
     | '/depositions/$id'
+    | '/depositions/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/deadlines'
-    | '/depositions'
     | '/docket'
     | '/draft'
     | '/orders'
@@ -133,6 +141,7 @@ export interface FileRouteTypes {
     | '/roster'
     | '/search'
     | '/depositions/$id'
+    | '/depositions'
   id:
     | '__root__'
     | '/'
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/roster'
     | '/search'
     | '/depositions/$id'
+    | '/depositions/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -224,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/depositions/': {
+      id: '/depositions/'
+      path: '/'
+      fullPath: '/depositions/'
+      preLoaderRoute: typeof DepositionsIndexRouteImport
+      parentRoute: typeof DepositionsRoute
+    }
     '/depositions/$id': {
       id: '/depositions/$id'
       path: '/$id'
@@ -236,10 +253,12 @@ declare module '@tanstack/react-router' {
 
 interface DepositionsRouteChildren {
   DepositionsIdRoute: typeof DepositionsIdRoute
+  DepositionsIndexRoute: typeof DepositionsIndexRoute
 }
 
 const DepositionsRouteChildren: DepositionsRouteChildren = {
   DepositionsIdRoute: DepositionsIdRoute,
+  DepositionsIndexRoute: DepositionsIndexRoute,
 }
 
 const DepositionsRouteWithChildren = DepositionsRoute._addFileChildren(
