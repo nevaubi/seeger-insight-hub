@@ -87,7 +87,7 @@ const FALLBACK_EXAMPLES_BROWSE = [
 const ORDER_TYPES = ['Any', 'PTO', 'CMO', 'CBO', 'JPML', 'OTHER'];
 const AFFECTS = ['Any', 'plaintiffs', 'defendants', 'leadership', 'all'];
 
-export const Route = createFileRoute('/search')({
+export const Route = createFileRoute('/_authenticated/search')({
   component: AskTheRecord,
   errorComponent: ({ error }) => (
     <AppShell>

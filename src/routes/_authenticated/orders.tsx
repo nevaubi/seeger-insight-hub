@@ -44,7 +44,7 @@ const orderPagesQuery = (documentId: string) =>
 
 const ORDER_TYPES = ['PTO', 'CMO', 'CBO', 'JPML'] as const;
 
-export const Route = createFileRoute('/orders')({
+export const Route = createFileRoute('/_authenticated/orders')({
   validateSearch: z.object({ id: z.string().optional() }),
   component: OrdersPage,
   errorComponent: ({ error }) => (

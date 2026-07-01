@@ -177,7 +177,7 @@ const cellsQuery = (setId: string | null) =>
     },
   });
 
-export const Route = createFileRoute('/review')({
+export const Route = createFileRoute('/_authenticated/review')({
   component: ReviewPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>

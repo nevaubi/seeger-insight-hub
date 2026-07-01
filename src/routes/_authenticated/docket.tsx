@@ -52,7 +52,7 @@ const syncStateQuery = (caseId: string) =>
     },
   });
 
-export const Route = createFileRoute('/docket')({
+export const Route = createFileRoute('/_authenticated/docket')({
   component: DocketPage,
   errorComponent: ({ error }) => (
     <AppShell>

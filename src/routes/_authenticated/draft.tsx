@@ -82,7 +82,7 @@ const docsQuery = (caseId: string) =>
     },
   });
 
-export const Route = createFileRoute('/draft')({
+export const Route = createFileRoute('/_authenticated/draft')({
   component: DraftPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>

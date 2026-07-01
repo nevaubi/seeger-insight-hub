@@ -40,7 +40,7 @@ const counselQuery = (masterCaseId: string) =>
     },
   });
 
-export const Route = createFileRoute('/roster')({
+export const Route = createFileRoute('/_authenticated/roster')({
   component: RosterPage,
   errorComponent: ({ error }) => (
     <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
