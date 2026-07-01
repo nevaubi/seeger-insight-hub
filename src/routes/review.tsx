@@ -706,13 +706,18 @@ function DocCell({ file, onRemove, onRetry }: { file: ReviewFile; onRemove: () =
 }
 
 function CellView({ cell, running }: { cell?: CellWithCites; running: boolean }) {
-  if (running && (!cell || cell.state === 'pending' || cell.state === 'running')) {
-    return <span className="inline-flex items-center gap-1.5 text-muted-foreground text-[12px]"><Loader2 className="h-3 w-3 animate-spin" /> Extracting…</span>;
-  }
+  const skeleton = (
+    <div className="space-y-1.5 py-0.5" aria-label="Extracting">
+      <div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: '85%' }} />
+      <div className="h-2.5 rounded bg-muted animate-pulse" style={{ width: '55%' }} />
+    </div>
+  );
+  if (running && (!cell || cell.state === 'pending' || cell.state === 'running')) return skeleton;
   if (!cell || cell.state === 'pending') return <span className="text-muted-foreground/40">·</span>;
-  if (cell.state === 'running') return <span className="inline-flex items-center gap-1.5 text-muted-foreground text-[12px]"><Loader2 className="h-3 w-3 animate-spin" /> Extracting…</span>;
+  if (cell.state === 'running') return skeleton;
   if (cell.state === 'error') return <span className="inline-flex items-center gap-1 text-destructive text-[12px]" title={cell.error ?? ''}><XCircle className="h-3 w-3" /> Error</span>;
   if (cell.state === 'not_found') return <span className="text-muted-foreground/60 text-[12px] italic">Not found</span>;
+
 
   const cites = (cell.review_cell_citations ?? []).slice().sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0));
   const needsReview = cell.state === 'needs_review';
