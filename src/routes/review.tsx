@@ -78,7 +78,7 @@ import { useMatter } from '@/lib/matter-context';
 import { cn } from '@/lib/utils';
 
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.gif,.txt,.md';
-const MAX_BYTES = 20 * 1024 * 1024;
+const MAX_BYTES = 25 * 1024 * 1024;
 
 const TYPE_LABELS: Record<ReviewColumnType, string> = {
   text: 'Text',
@@ -258,7 +258,7 @@ function ReviewPage() {
     try {
       const sid = await ensureSet();
       for (const file of accepted) {
-        if (file.size > MAX_BYTES) { toast.error(`${file.name} exceeds 20MB`); continue; }
+        if (file.size > MAX_BYTES) { toast.error(`${file.name} exceeds 25MB`); continue; }
         const safe = file.name.replace(/[^\w.\-]+/g, '_');
         const path = `${sid}/${crypto.randomUUID()}-${safe}`;
         const { error: upErr } = await supabase.storage
@@ -403,7 +403,7 @@ function ReviewPage() {
     <AppShell>
       <PageHeader
         title="Tabular Review"
-        description="Upload up to 5 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
+        description="Upload up to 25 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
       >
         <div className="flex items-center gap-2">
           {readyFiles.length > 0 && columns.length === 0 && (
@@ -483,7 +483,7 @@ function ReviewPage() {
             <p className="font-sans text-sm text-foreground">
               {atLimit ? `Maximum ${MAX_REVIEW_FILES} files reached` : 'Drag documents here, or choose files'}
             </p>
-            <p className="text-[11px] text-muted-foreground">PDF, images, or text · up to {MAX_REVIEW_FILES} · 20MB each · {files.length}/{MAX_REVIEW_FILES} used</p>
+            <p className="text-[11px] text-muted-foreground">PDF, images, or text · up to {MAX_REVIEW_FILES} · 25MB each · {files.length}/{MAX_REVIEW_FILES} used</p>
           </div>
           {!atLimit && (
             <Button variant="secondary" size="sm" className="gap-2 shrink-0" disabled={uploading} onClick={() => inputRef.current?.click()}>
@@ -652,10 +652,16 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
           <div className={cn('font-serif text-sm', needsReview ? 'text-amber-700' : 'text-foreground')}>
             {cell.value_text || <span className="italic text-muted-foreground">—</span>}
           </div>
+          {cell.reasoning && (
+            <div className="border-t border-border pt-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Reasoning</div>
+              <p className="text-[11px] text-muted-foreground">{cell.reasoning}</p>
+            </div>
+          )}
           {needsReview && (
             <div className="flex items-start gap-1.5 text-[11px] text-amber-700 bg-amber-50 rounded-sm px-2 py-1.5">
               <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-              <span>Value not verbatim-verified against the source — please confirm.</span>
+              <span>Flagged for review — unverified against the source or low-confidence. Confirm before relying on it.</span>
             </div>
           )}
           <div className="border-t border-border pt-2">
