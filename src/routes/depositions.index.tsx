@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/select';
 import { supabase, type Deposition } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
-import { ingestDeposition, analyzeDeposition } from '@/lib/depo-api';
+import { ingestDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 
