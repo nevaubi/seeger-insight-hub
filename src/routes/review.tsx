@@ -489,6 +489,14 @@ function ReviewPage() {
 
   const anyRunning = runningCols.size > 0 || cells.some((c) => c.state === 'running');
   const errorCount = useMemo(() => cells.filter((c) => c.state === 'error').length, [cells]);
+  const incompleteCount = useMemo(() => {
+    let n = 0;
+    for (const col of columns) for (const f of readyFiles) {
+      const st = cellMap.get(`${f.id}:${col.id}`)?.state;
+      if (!st || st === 'pending' || st === 'error' || st === 'not_found') n++;
+    }
+    return n;
+  }, [columns, readyFiles, cellMap]);
   const atLimit = files.length >= MAX_REVIEW_FILES;
   const canRun = readyFiles.length > 0 && columns.length > 0;
 
