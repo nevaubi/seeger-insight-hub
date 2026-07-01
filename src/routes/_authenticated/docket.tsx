@@ -190,6 +190,8 @@ function DocketPage() {
       </PageHeader>
 
       <div className="px-8 py-6">
+        <DocketWatcherCard digest={digest ?? null} />
+
         <div className="flex items-center justify-between gap-4 mb-4">
           <div className="relative w-full max-w-md">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
