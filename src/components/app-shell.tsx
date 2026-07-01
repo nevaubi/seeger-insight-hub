@@ -57,6 +57,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/draft', label: 'Drafting', icon: PenLine },
       { to: '/review', label: 'Tabular Review', icon: Table2 },
       { to: '/depositions', label: 'Depositions', icon: Mic },
+      { to: '/practice-profile', label: 'Practice Profile', icon: BookOpen },
     ],
   },
 ];
