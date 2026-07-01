@@ -707,6 +707,9 @@ function DepositionWorkspace() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Findings will appear here as soon as the analysis completes.
                 </p>
+                <div className="mt-3 flex justify-center">
+                  <ClaudeBadge />
+                </div>
               </Card>
             ) : hasError ? (
               <Card className="p-8 text-center border-destructive/40">
