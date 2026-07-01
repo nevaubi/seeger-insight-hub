@@ -82,6 +82,8 @@ import { cn } from '@/lib/utils';
 
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.gif,.txt,.md';
 const MAX_BYTES = 25 * 1024 * 1024;
+const DOC_COL_KEY = '__doc__';
+
 
 const TYPE_LABELS: Record<ReviewColumnType, string> = {
   text: 'Text',
