@@ -321,27 +321,45 @@ function ReviewPage() {
     }
   }, [setId, readyFiles.length, qc]);
 
-  const runAll = useCallback(() => {
-    columns.forEach((c) => runColumn(c.id));
-  }, [columns, runColumn]);
+  const runColumns = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    const queue = [...ids];
+    const worker = async () => {
+      while (queue.length) {
+        const next = queue.shift();
+        if (next) await runColumn(next);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+  }, [runColumn]);
 
-  const addMetadataColumns = useCallback(async () => {
-    const existing = new Set(columns.map((c) => c.name.toLowerCase()));
-    const todo = METADATA_COLUMNS.filter((c) => !existing.has(c.name.toLowerCase()));
-    if (todo.length === 0) {
-      toast.info('Metadata columns already added');
-      return;
-    }
-    for (const c of todo) {
-      await addColumn.mutateAsync({
+  const runAll = useCallback(() => {
+    void runColumns(columns.map((c) => c.id));
+  }, [columns, runColumns]);
+
+  const addColumns = useMutation({
+    mutationFn: async (cols: TemplateColumn[]) => {
+      if (!cols.length) return [] as ReviewColumn[];
+      const sid = await ensureSet();
+      const rows = cols.map((c, i) => ({
+        review_set_id: sid,
         name: c.name,
         data_type: c.data_type,
-        prompt: c.prompt,
+        prompt: c.prompt || null,
         enum_options: c.enum_options ?? null,
-      });
-    }
-    toast.success(`Added ${todo.length} metadata column${todo.length === 1 ? '' : 's'}`);
-  }, [columns, addColumn]);
+        ordinal: columns.length + i,
+      }));
+      const { data, error } = await supabase.from('review_columns').insert(rows).select('*');
+      if (error) throw error;
+      return (data ?? []) as ReviewColumn[];
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['review-columns', setId] });
+      toast.success(`Added ${data.length} column${data.length === 1 ? '' : 's'}`);
+    },
+    onError: (e: any) => toast.error(`Could not add columns: ${e.message}`),
+  });
+
 
   // Source preview drawer state
   const [drawer, setDrawer] = useState<{
