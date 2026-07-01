@@ -285,6 +285,7 @@ export interface Deposition {
   source_format: string | null;
   filename: string | null;
   status: DepositionStatus;
+  error: string | null;
   metadata: DepositionMetadata | null;
   created_at: string;
   updated_at: string;
