@@ -421,10 +421,10 @@ function DepositionWorkspace() {
           <div className="shrink-0">
             <Button
               variant="outline"
-              onClick={() => analyzeM.mutate()}
-              disabled={analyzeM.isPending}
+              onClick={() => void runAnalyze()}
+              disabled={isAnalyzing}
             >
-              {analyzeM.isPending ? (
+              {isAnalyzing ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing…
                 </>
