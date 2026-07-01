@@ -333,8 +333,8 @@ function ReviewPage() {
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const runColumn = useCallback(async (columnId: string, fileIds?: string[]) => {
-    if (!setId || !readyFiles.length) return;
+  const runColumn = useCallback(async (columnId: string, fileIds?: string[]): Promise<ExtractResult[] | null> => {
+    if (!setId || !readyFiles.length) return null;
     setRunningCols((s) => new Set(s).add(columnId));
     try {
       const body: Record<string, unknown> = { review_set_id: setId, column_id: columnId };
@@ -346,24 +346,21 @@ function ReviewPage() {
       });
       const respBody = await res.json().catch(() => ({}));
       if (!res.ok || respBody?.ok === false) throw new Error(respBody?.error || `Extraction failed (${res.status})`);
+      return Array.isArray(respBody?.results) ? (respBody.results as ExtractResult[]) : [];
     } catch (e) {
       toast.error('Extraction failed', { description: (e as Error).message });
+      return null;
     } finally {
       setRunningCols((s) => { const n = new Set(s); n.delete(columnId); return n; });
       qc.invalidateQueries({ queryKey: ['review-cells', setId] });
     }
   }, [setId, readyFiles.length, qc]);
 
-  const runColumns = useCallback(async (ids: string[]) => {
-    if (!ids.length) return;
-    const queue = [...ids];
-    const worker = async () => {
-      while (queue.length) {
-        const next = queue.shift();
-        if (next) await runColumn(next);
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+  const runTasks = useCallback(async (tasks: { columnId: string; fileIds?: string[] }[], concurrency = 6) => {
+    const queue = [...tasks];
+    if (!queue.length) return;
+    const worker = async () => { while (queue.length) { const t = queue.shift(); if (t) await runColumn(t.columnId, t.fileIds); } };
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   }, [runColumn]);
 
   const retryFailed = useCallback(async () => {
@@ -374,26 +371,56 @@ function ReviewPage() {
       arr.push(c.review_file_id);
       byCol.set(c.review_column_id, arr);
     }
-    const entries = Array.from(byCol.entries());
-    if (!entries.length) return;
-    const queue = [...entries];
-    const worker = async () => {
-      while (queue.length) {
-        const next = queue.shift();
-        if (next) await runColumn(next[0], next[1]);
+    const tasks = Array.from(byCol.entries()).map(([columnId, fileIds]) => ({ columnId, fileIds }));
+    if (!tasks.length) return;
+    await runTasks(tasks, 6);
+  }, [cells, runTasks]);
+
+  const runIncomplete = useCallback(async () => {
+    const tasks: { columnId: string; fileIds: string[] }[] = [];
+    for (const col of columns) {
+      const fids: string[] = [];
+      for (const f of readyFiles) {
+        const st = cellMap.get(`${f.id}:${col.id}`)?.state;
+        if (!st || st === 'pending' || st === 'error' || st === 'not_found') fids.push(f.id);
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(4, entries.length) }, worker));
-  }, [cells, runColumn]);
+      if (fids.length) tasks.push({ columnId: col.id, fileIds: fids });
+    }
+    if (!tasks.length) { toast.info('Nothing incomplete to extract'); return; }
+    await runTasks(tasks, 6);
+  }, [columns, readyFiles, cellMap, runTasks]);
 
   const runAll = useCallback(async () => {
-    autoSweptRef.current = false;
-    await runColumns(columns.map((c) => c.id));
-    if (!autoSweptRef.current) {
-      autoSweptRef.current = true;
-      await retryFailed();
+    const stateMap = new Map<string, Map<string, string>>();
+    const record = (colId: string, results: ExtractResult[] | null, scope?: string[]) => {
+      let m = stateMap.get(colId); if (!m) { m = new Map(); stateMap.set(colId, m); }
+      if (results) { for (const r of results) m.set(r.file_id, r.state); }
+      else if (scope) { for (const fid of scope) m.set(fid, 'error'); }
+    };
+    {
+      const queue = columns.map((c) => c.id);
+      const worker = async () => { while (queue.length) { const id = queue.shift(); if (!id) continue; const res = await runColumn(id); record(id, res); } };
+      await Promise.all(Array.from({ length: Math.min(6, queue.length || 1) }, worker));
     }
-  }, [columns, runColumns, retryFailed]);
+    const MAX_SWEEPS = 2;
+    const countEmpty = () => { let n = 0; for (const m of stateMap.values()) for (const s of m.values()) if (s === 'error' || s === 'not_found') n++; return n; };
+    let prev = countEmpty();
+    for (let sweep = 0; sweep < MAX_SWEEPS && prev > 0; sweep++) {
+      const tasks: { columnId: string; fileIds: string[] }[] = [];
+      for (const [colId, m] of stateMap.entries()) {
+        const fids = Array.from(m.entries()).filter(([, s]) => s === 'error' || s === 'not_found').map(([f]) => f);
+        if (fids.length) tasks.push({ columnId: colId, fileIds: fids });
+      }
+      if (!tasks.length) break;
+      const queue = [...tasks];
+      const worker = async () => { while (queue.length) { const t = queue.shift(); if (!t) continue; const res = await runColumn(t.columnId, t.fileIds); record(t.columnId, res, t.fileIds); } };
+      await Promise.all(Array.from({ length: Math.min(6, tasks.length) }, worker));
+      const now = countEmpty();
+      if (now >= prev) break;
+      prev = now;
+    }
+  }, [columns, runColumn]);
+
 
 
   const addColumns = useMutation({
