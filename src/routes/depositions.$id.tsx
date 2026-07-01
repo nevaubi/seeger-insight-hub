@@ -28,6 +28,7 @@ import {
   supabase,
   type Deposition,
   type DepositionLine,
+  type DepositionSegment,
   type DepositionFinding,
   type FindingStance,
   type DepoAskResponse,
@@ -35,6 +36,33 @@ import {
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
+
+type VerifyStatus = 'verified' | 'unverified' | 'failed' | null | undefined;
+
+function VerifyMark({ status }: { status: VerifyStatus }) {
+  if (status === 'verified') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10.5px] text-emerald-700"
+        title="Quote verified verbatim in the transcript"
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-[10.5px] text-amber-700"
+        title="Quote could not be verified verbatim against the transcript"
+      >
+        <AlertTriangle className="h-3.5 w-3.5" />
+        <span className="uppercase tracking-wide">unverified</span>
+      </span>
+    );
+  }
+  return null;
+}
 
 export const Route = createFileRoute('/depositions/$id')({
   validateSearch: (search: Record<string, unknown>): { analyze: boolean } => ({
@@ -209,14 +237,46 @@ function DepositionWorkspace() {
     refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
   });
 
+  const segmentsQ = useQuery({
+    queryKey: ['deposition-segments', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('deposition_segments')
+        .select('*')
+        .eq('deposition_id', id)
+        .order('ordinal', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as DepositionSegment[];
+    },
+  });
+
+  const runQ = useQuery({
+    queryKey: ['deposition-latest-run', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('deposition_runs')
+        .select('stats')
+        .eq('deposition_id', id)
+        .eq('kind', 'analyze')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { stats: Record<string, unknown> | null } | null;
+    },
+    refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
+  });
+
   // Transcript: refs + search + scroll-to-cite
   const [search, setSearch] = useState('');
+  const [mobileView, setMobileView] = useState<'transcript' | 'findings'>('transcript');
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
   const highlightTimer = useRef<number | null>(null);
 
   const scrollToCite = useCallback(
     (span: CiteSpan) => {
       if (span.page_start == null || span.line_start == null) return;
+      setMobileView('transcript');
       const anchor = document.getElementById(`line-${span.page_start}-${span.line_start}`);
       anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const keys = new Set<string>();
@@ -247,6 +307,31 @@ function DepositionWorkspace() {
     }
     return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
   }, [linesQ.data]);
+
+  // Line -> segment lookup via pointer walk (segments are ordered, non-overlapping)
+  const segmentByLineKey = useMemo(() => {
+    const map = new Map<string, DepositionSegment>();
+    const segs = segmentsQ.data ?? [];
+    const lines = linesQ.data ?? [];
+    if (segs.length === 0 || lines.length === 0) return map;
+    let si = 0;
+    for (const l of lines) {
+      // Advance segment pointer until this line is not past its end
+      while (
+        si < segs.length &&
+        (l.page > segs[si].page_end ||
+          (l.page === segs[si].page_end && l.line > segs[si].line_end))
+      ) {
+        si += 1;
+      }
+      if (si >= segs.length) break;
+      const s = segs[si];
+      const afterStart =
+        l.page > s.page_start || (l.page === s.page_start && l.line >= s.line_start);
+      if (afterStart) map.set(`${l.page}-${l.line}`, s);
+    }
+    return map;
+  }, [segmentsQ.data, linesQ.data]);
 
   const searchLower = search.trim().toLowerCase();
 
@@ -395,9 +480,15 @@ function DepositionWorkspace() {
   const hasError = depo.status === 'error';
   const noFindings = findings.length === 0;
 
+  const droppedCount = (() => {
+    const stats = runQ.data?.stats as { dropped?: number } | null | undefined;
+    const n = stats?.dropped;
+    return typeof n === 'number' && n > 0 ? n : 0;
+  })();
+
   return (
     <AppShell>
-      <div className="border-b border-border bg-card px-8 py-5">
+      <div className="border-b border-border bg-card px-8 py-8">
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
             <Link
@@ -406,16 +497,16 @@ function DepositionWorkspace() {
             >
               <ArrowLeft className="h-3 w-3" /> Depositions
             </Link>
-            <div className="mt-1 flex flex-wrap items-center gap-3">
-              <h1 className="font-serif text-[26px] leading-tight font-semibold tracking-[-0.015em]">
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h1 className="font-serif text-[32px] leading-[1.15] font-semibold tracking-[-0.015em] text-foreground">
                 {title}
               </h1>
               <AlignmentBadge alignment={depo.party_alignment} role={depo.witness_role} />
             </div>
             {subtitleBits.length > 0 && (
-              <div className="mt-1 text-xs font-sans text-muted-foreground tabular-nums">
+              <p className="mt-2 font-sans text-sm leading-relaxed text-muted-foreground tabular-nums">
                 {subtitleBits.join(' · ')}
-              </div>
+              </p>
             )}
           </div>
           <div className="shrink-0">
@@ -439,9 +530,30 @@ function DepositionWorkspace() {
       </div>
 
       <div className="px-8 py-6">
+        {/* Mobile toggle (below lg) */}
+        <div className="mb-4 lg:hidden">
+          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+            {(['transcript', 'findings'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setMobileView(v)}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium capitalize rounded-sm transition-colors',
+                  mobileView === v
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-[58%_1fr] gap-6">
           {/* LEFT: transcript */}
-          <div className="min-w-0">
+          <div className={cn('min-w-0', mobileView !== 'transcript' && 'hidden lg:block')}>
             <Card className="p-0 overflow-hidden flex flex-col h-[calc(100vh-11rem)] sticky top-4">
               <div className="border-b border-border bg-card px-4 py-3 shrink-0">
                 <div className="relative">
@@ -461,49 +573,113 @@ function DepositionWorkspace() {
                   </div>
                 ) : (
                   <div className="py-2">
-                    {linesByPage.map(([page, pageLines]) => (
-                      <div key={page}>
-                        <div className="sticky top-0 z-10 bg-secondary/70 backdrop-blur border-y border-border px-4 py-1 text-[10.5px] font-sans font-medium uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
-                          Page {page}
-                        </div>
-                        <div className="py-1">
-                          {pageLines.map((l) => {
-                            const key = `${l.page}-${l.line}`;
-                            const isMatch =
-                              searchLower.length > 0 &&
-                              l.text.toLowerCase().includes(searchLower);
-                            const isHi = highlighted.has(key);
-                            const isQ = /^\s*Q\./.test(l.text);
-                            const isA = /^\s*A\./.test(l.text);
-                            return (
-                              <div
-                                key={l.id}
-                                id={`line-${l.page}-${l.line}`}
-                                className={cn(
-                                  'flex gap-3 px-4 py-[2px] transition-colors',
-                                  isHi && 'bg-primary/15',
-                                  !isHi && isMatch && 'bg-amber-200/40',
-                                )}
-                              >
-                                <span className="shrink-0 w-11 font-mono text-[10.5px] leading-5 text-muted-foreground/70 tabular-nums select-none">
-                                  {l.page}:{String(l.line).padStart(2, '0')}
-                                </span>
-                                <span
-                                  className={cn(
-                                    'font-mono text-[12.5px] leading-5 whitespace-pre-wrap',
-                                    isQ && 'text-foreground font-semibold',
-                                    isA && 'text-foreground',
-                                    !isQ && !isA && 'text-foreground/85',
+                    {linesByPage.map(([page, pageLines]) => {
+                      // Determine "previous segment" carried over from the last line of the previous page
+                      return (
+                        <div key={page}>
+                          <div className="sticky top-0 z-10 bg-secondary/70 backdrop-blur border-y border-border px-4 py-1 text-[10.5px] font-sans font-medium uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                            Page {page}
+                          </div>
+                          <div className="py-1">
+                            {pageLines.map((l, idx) => {
+                              const key = `${l.page}-${l.line}`;
+                              const isMatch =
+                                searchLower.length > 0 &&
+                                l.text.toLowerCase().includes(searchLower);
+                              const isHi = highlighted.has(key);
+                              const seg = segmentByLineKey.get(key);
+                              // Prev line across pages: prefer previous line on this page,
+                              // else previous page's last line via lines array lookup
+                              const prevLine =
+                                idx > 0
+                                  ? pageLines[idx - 1]
+                                  : (() => {
+                                      const all = linesQ.data ?? [];
+                                      const i = all.findIndex(
+                                        (x) => x.page === l.page && x.line === l.line,
+                                      );
+                                      return i > 0 ? all[i - 1] : undefined;
+                                    })();
+                              const prevSeg = prevLine
+                                ? segmentByLineKey.get(`${prevLine.page}-${prevLine.line}`)
+                                : undefined;
+                              const isFirstOfSeg = !!seg && seg.id !== prevSeg?.id;
+
+                              const kind = (seg?.kind || '').toLowerCase();
+                              const speaker = (seg?.speaker || '').trim();
+                              const isBareQA = speaker === 'Q' || speaker === 'A' || speaker === '';
+                              let label = '';
+                              if (kind === 'question') label = 'Q';
+                              else if (kind === 'answer') label = 'A';
+                              else if (kind === 'objection') label = 'OBJECTION';
+                              else if (kind === 'event') label = '(RECORD)';
+                              else label = (speaker || kind || '').toUpperCase();
+                              if (
+                                (kind === 'question' ||
+                                  kind === 'answer' ||
+                                  kind === 'objection' ||
+                                  kind === 'event') &&
+                                speaker &&
+                                !isBareQA
+                              ) {
+                                label = `${label} · ${speaker}`;
+                              }
+
+                              // Turn styling by kind
+                              const turnAccent =
+                                kind === 'question'
+                                  ? 'border-l-2 border-primary/40'
+                                  : kind === 'answer'
+                                    ? 'border-l-2 border-transparent bg-secondary/25'
+                                    : kind === 'objection' || kind === 'event' || kind === 'colloquy'
+                                      ? 'border-l-2 border-transparent'
+                                      : 'border-l-2 border-transparent';
+                              const textTone =
+                                kind === 'question'
+                                  ? 'text-foreground font-medium'
+                                  : kind === 'answer'
+                                    ? 'text-foreground'
+                                    : kind === 'objection' ||
+                                        kind === 'event' ||
+                                        kind === 'colloquy'
+                                      ? 'text-muted-foreground italic'
+                                      : 'text-foreground/85';
+
+                              return (
+                                <div key={l.id}>
+                                  {isFirstOfSeg && label && (
+                                    <div className="mt-2 px-4 pl-6 text-[10px] font-sans font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+                                      {label}
+                                    </div>
                                   )}
-                                >
-                                  {l.text}
-                                </span>
-                              </div>
-                            );
-                          })}
+                                  <div
+                                    id={`line-${l.page}-${l.line}`}
+                                    className={cn(
+                                      'flex gap-3 pl-3 pr-4 py-[2px] transition-colors',
+                                      turnAccent,
+                                      isHi && 'bg-primary/15',
+                                      !isHi && isMatch && 'bg-amber-200/40',
+                                    )}
+                                  >
+                                    <span className="shrink-0 w-11 font-mono text-[10.5px] leading-5 text-muted-foreground/70 tabular-nums select-none">
+                                      {l.page}:{String(l.line).padStart(2, '0')}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        'font-mono text-[12.5px] leading-5 whitespace-pre-wrap',
+                                        textTone,
+                                      )}
+                                    >
+                                      {l.text}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -511,7 +687,16 @@ function DepositionWorkspace() {
           </div>
 
           {/* RIGHT: findings tabs */}
-          <div className="min-w-0">
+          <div className={cn('min-w-0', mobileView !== 'findings' && 'hidden lg:block')}>
+            {droppedCount > 0 && !isAnalyzing && !hasError && (
+              <div className="mb-3 flex items-start gap-2 rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>
+                  {droppedCount} candidate finding{droppedCount === 1 ? '' : 's'} were dropped
+                  because their quotes couldn't be verified verbatim against the transcript.
+                </span>
+              </div>
+            )}
             {isAnalyzing ? (
               <Card className="p-8 text-center">
                 <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
@@ -523,7 +708,7 @@ function DepositionWorkspace() {
                 </p>
               </Card>
             ) : hasError ? (
-              <Card className="p-6 text-center border-destructive/40">
+              <Card className="p-8 text-center border-destructive/40">
                 <AlertTriangle className="mx-auto h-5 w-5 text-destructive" />
                 <div className="mt-2 font-serif text-base font-semibold">Analysis failed</div>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -538,7 +723,7 @@ function DepositionWorkspace() {
                 </Button>
               </Card>
             ) : noFindings && !analyzed && !searchParams.analyze ? (
-              <Card className="p-6 text-center">
+              <Card className="p-8 text-center">
                 <Sparkles className="mx-auto h-5 w-5 text-muted-foreground" />
                 <div className="mt-2 font-serif text-base font-semibold">Not analyzed yet</div>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -550,13 +735,13 @@ function DepositionWorkspace() {
               </Card>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
-                <TabsList className="grid grid-cols-6 w-full">
-                  <TabsTrigger value="summary">Summary</TabsTrigger>
-                  <TabsTrigger value="admissions">Admissions</TabsTrigger>
-                  <TabsTrigger value="chronology">Chronology</TabsTrigger>
-                  <TabsTrigger value="exhibits">Exhibits</TabsTrigger>
-                  <TabsTrigger value="quality">Quality</TabsTrigger>
-                  <TabsTrigger value="ask">Ask</TabsTrigger>
+                <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap h-auto p-1">
+                  <TabsTrigger value="summary" className="shrink-0 px-3">Summary</TabsTrigger>
+                  <TabsTrigger value="admissions" className="shrink-0 px-3">Admissions</TabsTrigger>
+                  <TabsTrigger value="chronology" className="shrink-0 px-3">Chronology</TabsTrigger>
+                  <TabsTrigger value="exhibits" className="shrink-0 px-3">Exhibits</TabsTrigger>
+                  <TabsTrigger value="quality" className="shrink-0 px-3">Quality</TabsTrigger>
+                  <TabsTrigger value="ask" className="shrink-0 px-3">Ask</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="summary" className="mt-4">
@@ -741,9 +926,7 @@ function AdmissionsTab({
                   <h3 className="font-serif text-[15px] font-semibold leading-snug text-foreground">
                     {f.title || 'Admission'}
                   </h3>
-                  {f.verify_status === 'verified' && (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                  )}
+                  <VerifyMark status={f.verify_status} />
                 </div>
                 {f.issue_tags && f.issue_tags.length > 0 && (
                   <div className="mt-2">
@@ -901,6 +1084,7 @@ function QualityTab({
                   {data.category}
                 </Badge>
               )}
+              <VerifyMark status={f.verify_status} />
             </div>
             {f.detail && (
               <p className="mt-1.5 text-sm text-foreground/85 leading-relaxed">{f.detail}</p>
