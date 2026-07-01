@@ -83,6 +83,9 @@ import { cn } from '@/lib/utils';
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.tiff,.tif,.gif,.txt,.md';
 const MAX_BYTES = 25 * 1024 * 1024;
 const DOC_COL_KEY = '__doc__';
+type ExtractResult = { file_id: string; state: string; value: string | null; confidence: number | null };
+const CONFIDENCE_LOW = 0.7;
+
 
 
 const TYPE_LABELS: Record<ReviewColumnType, string> = {
