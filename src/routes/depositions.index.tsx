@@ -282,11 +282,6 @@ function DepositionsPage() {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Parsing transcript…
                 </span>
               )}
-              {stage === 'analyzing' && (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing testimony…
-                </span>
-              )}
             </div>
             <Button onClick={onSubmit} disabled={!file || busy}>
               {busy ? (
