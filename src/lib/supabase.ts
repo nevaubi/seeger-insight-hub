@@ -247,6 +247,37 @@ export const TAG_LABELS: Record<string, string> = {
 
 export const tagLabel = (t: string) => TAG_LABELS[t] ?? t.replace(/_/g, ' ');
 
+// ---- Practice Profile ----
+export interface PracticeProfile {
+  id: string;
+  case_id: string;
+  name: string | null;
+  profile_md: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---- Docket Watcher ----
+export interface DocketDigestItem {
+  entry_number: number;
+  date_filed?: string;
+  label: string;
+  why_it_matters: string;
+  deadline?: string;
+}
+
+export interface DocketDigest {
+  id: string;
+  case_id: string;
+  created_at: string;
+  new_entries: number;
+  headline: string | null;
+  summary_md: string | null;
+  items: DocketDigestItem[];
+  model: string | null;
+  error: string | null;
+}
+
 // ---- Depositions ----
 export type DepositionStatus = 'ingested' | 'analyzing' | 'analyzed' | 'error';
 
