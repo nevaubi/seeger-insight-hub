@@ -773,6 +773,11 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
           </span>
 
           <span className="mt-1 flex items-center gap-1.5 flex-wrap">
+            {cell.confidence != null && cell.confidence < CONFIDENCE_LOW && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600" title={`Low confidence (${(cell.confidence * 100).toFixed(0)}%)`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />{(cell.confidence * 100).toFixed(0)}%
+              </span>
+            )}
             {needsReview && (
               <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600"><AlertTriangle className="h-2.5 w-2.5" /> review</span>
             )}
