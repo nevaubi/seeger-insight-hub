@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/select';
 import { supabase, type Deposition } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
-import { ingestDeposition, analyzeDeposition } from '@/lib/depo-api';
+import { ingestDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 
@@ -119,7 +119,7 @@ function DepositionsPage() {
   const [witnessRole, setWitnessRole] = useState<string>('');
   const [autoAnalyze, setAutoAnalyze] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState<'idle' | 'parsing' | 'analyzing'>('idle');
+  const [stage, setStage] = useState<'idle' | 'parsing'>('idle');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -149,15 +149,18 @@ function DepositionsPage() {
         throw new Error(ingest.error || 'Ingest failed');
       }
       const depositionId = ingest.deposition_id;
-      if (autoAnalyze) {
-        setStage('analyzing');
-        const analyze = await analyzeDeposition(depositionId);
-        if (!analyze.ok) throw new Error(analyze.error || 'Analysis failed');
-      }
-      toast.success('Deposition ready');
+      toast.success(
+        autoAnalyze
+          ? 'Transcript ready — analyzing in the background'
+          : 'Transcript ready',
+      );
       await qc.invalidateQueries({ queryKey: ['depositions', caseId] });
       reset();
-      navigate({ to: '/depositions/$id', params: { id: depositionId } });
+      navigate({
+        to: '/depositions/$id',
+        params: { id: depositionId },
+        search: { analyze: autoAnalyze },
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Upload failed');
     } finally {
@@ -277,11 +280,6 @@ function DepositionsPage() {
               {stage === 'parsing' && (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Parsing transcript…
-                </span>
-              )}
-              {stage === 'analyzing' && (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing testimony…
                 </span>
               )}
             </div>

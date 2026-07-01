@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Loader2,
@@ -37,6 +37,9 @@ import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 
 export const Route = createFileRoute('/depositions/$id')({
+  validateSearch: (search: Record<string, unknown>): { analyze: boolean } => ({
+    analyze: search.analyze === true || search.analyze === 'true',
+  }),
   component: DepositionWorkspace,
   errorComponent: ({ error }) => (
     <AppShell>
@@ -157,6 +160,7 @@ function IssueTags({ tags }: { tags: string[] | null }) {
 
 function DepositionWorkspace() {
   const { id } = Route.useParams();
+  const searchParams = Route.useSearch();
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -171,6 +175,8 @@ function DepositionWorkspace() {
       if (error) throw error;
       return data as Deposition | null;
     },
+    refetchInterval: (q) =>
+      (q.state.data as Deposition | null)?.status === 'analyzing' ? 2500 : false,
   });
 
   const linesQ = useQuery({
@@ -187,6 +193,7 @@ function DepositionWorkspace() {
     },
   });
 
+  const currentStatus = depoQ.data?.status;
   const findingsQ = useQuery({
     queryKey: ['deposition-findings', id],
     queryFn: async () => {
@@ -199,6 +206,7 @@ function DepositionWorkspace() {
       if (error) throw error;
       return (data ?? []) as DepositionFinding[];
     },
+    refetchInterval: currentStatus === 'analyzing' ? 2500 : false,
   });
 
   // Transcript: refs + search + scroll-to-cite
@@ -252,20 +260,58 @@ function DepositionWorkspace() {
     return m;
   }, [findings]);
 
+  // Optimistically bump status → 'analyzing' so polling begins and a reload still shows the running state
+  const setStatusAnalyzing = useCallback(async () => {
+    await supabase.from('depositions').update({ status: 'analyzing' }).eq('id', id);
+    qc.invalidateQueries({ queryKey: ['deposition', id] });
+  }, [id, qc]);
+
   // Re-run analysis
   const analyzeM = useMutation({
     mutationFn: () => analyzeDeposition(id),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       if (!res.ok) {
-        toast.error(res.error || 'Analysis failed');
+        const msg = res.error || 'Analysis failed';
+        await supabase
+          .from('depositions')
+          .update({ status: 'error', error: msg })
+          .eq('id', id);
+        qc.invalidateQueries({ queryKey: ['deposition', id] });
+        toast.error(msg);
         return;
       }
       toast.success('Analysis complete');
       qc.invalidateQueries({ queryKey: ['deposition-findings', id] });
       qc.invalidateQueries({ queryKey: ['deposition', id] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Analysis failed'),
+    onError: async (e) => {
+      const msg = e instanceof Error ? e.message : 'Analysis failed';
+      await supabase
+        .from('depositions')
+        .update({ status: 'error', error: msg })
+        .eq('id', id);
+      qc.invalidateQueries({ queryKey: ['deposition', id] });
+      toast.error(msg);
+    },
   });
+
+  const runAnalyze = useCallback(async () => {
+    await setStatusAnalyzing();
+    analyzeM.mutate();
+  }, [analyzeM, setStatusAnalyzing]);
+
+  // Auto-start analysis once when we arrive with ?analyze=true on an ingested deposition
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    if (!searchParams.analyze) return;
+    if (!depoQ.data) return;
+    if (depoQ.data.status !== 'ingested') return;
+    if (analyzeM.isPending) return;
+    autoStartedRef.current = true;
+    void runAnalyze();
+  }, [searchParams.analyze, depoQ.data, analyzeM.isPending, runAnalyze]);
+
 
   // Review controls
   const reviewM = useMutation({
@@ -345,6 +391,8 @@ function DepositionWorkspace() {
   ].filter(Boolean) as string[];
 
   const analyzed = depo.status === 'analyzed';
+  const isAnalyzing = depo.status === 'analyzing' || analyzeM.isPending;
+  const hasError = depo.status === 'error';
   const noFindings = findings.length === 0;
 
   return (
@@ -373,10 +421,10 @@ function DepositionWorkspace() {
           <div className="shrink-0">
             <Button
               variant="outline"
-              onClick={() => analyzeM.mutate()}
-              disabled={analyzeM.isPending}
+              onClick={() => void runAnalyze()}
+              disabled={isAnalyzing}
             >
-              {analyzeM.isPending ? (
+              {isAnalyzing ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing…
                 </>
@@ -464,27 +512,40 @@ function DepositionWorkspace() {
 
           {/* RIGHT: findings tabs */}
           <div className="min-w-0">
-            {noFindings && !analyzed ? (
+            {isAnalyzing ? (
+              <Card className="p-8 text-center">
+                <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+                <div className="mt-3 font-serif text-base font-semibold">
+                  Analyzing testimony…
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Findings will appear here as soon as the analysis completes.
+                </p>
+              </Card>
+            ) : hasError ? (
+              <Card className="p-6 text-center border-destructive/40">
+                <AlertTriangle className="mx-auto h-5 w-5 text-destructive" />
+                <div className="mt-2 font-serif text-base font-semibold">Analysis failed</div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {depo.error || 'Something went wrong while analyzing this transcript.'}
+                </p>
+                <Button
+                  className="mt-4"
+                  onClick={() => void runAnalyze()}
+                  disabled={analyzeM.isPending}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" /> Retry analysis
+                </Button>
+              </Card>
+            ) : noFindings && !analyzed && !searchParams.analyze ? (
               <Card className="p-6 text-center">
                 <Sparkles className="mx-auto h-5 w-5 text-muted-foreground" />
                 <div className="mt-2 font-serif text-base font-semibold">Not analyzed yet</div>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Run analysis to surface admissions, chronology, and exhibits.
                 </p>
-                <Button
-                  className="mt-4"
-                  onClick={() => analyzeM.mutate()}
-                  disabled={analyzeM.isPending}
-                >
-                  {analyzeM.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 h-4 w-4" /> Run analysis
-                    </>
-                  )}
+                <Button className="mt-4" onClick={() => void runAnalyze()}>
+                  <Sparkles className="mr-2 h-4 w-4" /> Run analysis
                 </Button>
               </Card>
             ) : (
