@@ -422,7 +422,6 @@ function SynthesisPanel({
     expansions,
   } = state;
 
-  const [reasoningOpen, setReasoningOpen] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [flashRef, setFlashRef] = useState<string | null>(null);
@@ -442,28 +441,32 @@ function SynthesisPanel({
           ? 'routing'
           : 'searching';
 
-  // collapse timeline once the writer (final round) starts streaming output
-  useEffect(() => {
-    if (currentRound != null && currentRound === finalRound) {
-      setTimelineOpen(false);
-      setReasoningOpen(false);
-    }
-  }, [currentRound, finalRound]);
+  const writerActive = running && writerRound != null && currentRound === writerRound;
+  const answerStarted = useMemo(() => {
+    if (writerRound == null) return false;
+    const wr = rounds[writerRound];
+    if (!wr) return false;
+    return wr.textOrder.some((id) => (wr.textBlocks[wr.blockIndex[id]]?.text ?? '').trim().length > 0);
+  }, [rounds, writerRound]);
+  const showWriting = writerActive && !answerStarted;
+  const showAnswer = answerStarted || finalRound != null;
+  const traceSteps = searches.length + notes.length + Object.keys(expansions).length;
 
-  // open timeline at start of a new query
+  // Collapse the timeline the moment the writer is called; keep it open while researching.
   useEffect(() => {
-    if (running) {
-      setReasoningOpen(true);
-      setTimelineOpen(true);
-    }
-  }, [submitted, running]);
+    if (writerActive) setTimelineOpen(false);
+  }, [writerActive]);
+  useEffect(() => {
+    if (running && !writerActive) setTimelineOpen(true);
+  }, [submitted, running, writerActive]);
 
 
   // auto-scroll reasoning panel as new thinking streams
   useEffect(() => {
     const el = reasoningScrollRef.current;
-    if (el && reasoningOpen) el.scrollTop = el.scrollHeight;
-  }, [thinking, reasoningOpen]);
+    if (el && timelineOpen) el.scrollTop = el.scrollHeight;
+  }, [thinking, timelineOpen]);
+
 
   // Track whether conversation is scrolled near the bottom
   const handleConversationScroll = useCallback(() => {
