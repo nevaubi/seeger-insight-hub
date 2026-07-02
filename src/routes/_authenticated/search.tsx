@@ -1004,7 +1004,7 @@ function EvidenceColumn({
 const RAIL_LEFT = 11; // px — hairline connector x-position
 const NODE_COL = 24;  // px — column reserved for node + rail
 
-type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'web' | 'verify' | 'error';
+type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'web' | 'verify' | 'skipped' | 'error';
 const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: string }> = {
   search:  { name: 'Record search',  icon: SearchIcon, accent: 'text-accent' },
   read:    { name: 'Read full text', icon: BookOpen,   accent: 'text-gold' },
@@ -1012,12 +1012,14 @@ const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: s
   caselaw: { name: 'Case law',       icon: BookOpen,   accent: 'text-primary' },
   web:     { name: 'Web sources',    icon: Globe,      accent: 'text-destructive/80' },
   verify:  { name: 'Grounding check', icon: ShieldCheck, accent: 'text-primary' },
+  skipped: { name: 'Skipped',        icon: SlidersHorizontal, accent: 'text-muted-foreground/60' },
   error:   { name: 'Lookup failed',  icon: SlidersHorizontal, accent: 'text-destructive' },
 };
 
 function classifyTool(text: string): { kind: Kind; name: string; label: string } {
   const num = (text.match(/\d+/) ?? [''])[0];
   const plural = num === '1' ? '' : 's';
+  if (/ skipped:/.test(text)) return { kind: 'skipped', name: 'Skipped', label: text.replace(/^.*skipped:\s*/, '') };
   if (/ lookup error:/.test(text)) return { kind: 'error', name: 'Lookup failed', label: text.replace(/^.*lookup error:\s*/, '') };
   if (text.startsWith('Read ')) return { kind: 'read', name: 'Read full text', label: `${num} passage${plural} of full order text` };
   if (text.startsWith('Searched case law')) return { kind: 'caselaw', name: 'Case law', label: `${num} published opinion${plural}` };
