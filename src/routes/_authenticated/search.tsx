@@ -1279,12 +1279,27 @@ function RunCard({
                           done={isDone}
                           delayMs={i * 40}
                           meta={s.count === undefined ? undefined : s.count === 0 ? 'no matches' : `${s.count}/${s.k}`}
+                          startedAt={s.startedAt}
+                          endedAt={s.endedAt}
+                          now={now}
                         />
                       );
                     })}
                     {rTools.map((n, i) => {
                       const c = classifyTool(n.text);
-                      return <StepRow key={`t-${r}-${i}`} kind={c.kind} name={c.name} label={c.label} done delayMs={(rSearches.length + i) * 40} />;
+                      return (
+                        <StepRow
+                          key={`t-${r}-${i}`}
+                          kind={c.kind}
+                          name={c.name}
+                          label={c.label}
+                          done
+                          delayMs={(rSearches.length + i) * 40}
+                          startedAt={n.startedAt}
+                          endedAt={n.endedAt}
+                          now={now}
+                        />
+                      );
                     })}
                     {exp > 0 && <ExpandRow count={exp} />}
                     {rInterim.map((n, i) => (
