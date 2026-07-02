@@ -151,6 +151,7 @@ type SseExpand = { type: 'expand'; round: number; source: string; count: number 
 type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
 type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
 type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
+type SseFollowups = { type: 'followups'; suggestions: string[] };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
