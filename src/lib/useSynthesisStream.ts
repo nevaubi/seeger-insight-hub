@@ -46,6 +46,8 @@ export type SearchEvt = {
   filter: Record<string, unknown>;
   k: number;
   count?: number;
+  startedAt?: number;
+  endedAt?: number;
 };
 
 export type RoundState = {
@@ -54,6 +56,8 @@ export type RoundState = {
   textOrder: string[];
   blockIndex: Record<string, number>;
   stop_reason?: 'tool_use' | 'end_turn';
+  startedAt?: number;
+  endedAt?: number;
 };
 
 export type CitationEvt = {
@@ -70,7 +74,24 @@ export type CitationEvt = {
   num: number;
 };
 
-export type RoundNote = { round: number; text: string };
+export type RoundNote = { round: number; text: string; startedAt?: number; endedAt?: number };
+
+// ---- Planner / verifier / web (v30 additive) -----------------------------
+
+export type PlanFacet = {
+  id: string;
+  question: string;
+  hypothesis: string;
+  specialists: string[];
+  keywords?: string[];
+  court?: string | null;
+};
+
+export type PlanEvt = { rationale: string; facets: PlanFacet[] };
+
+export type WebResult = { round: number; title?: string | null; url?: string | null; published?: string | null };
+
+export type VerifyEvt = { unsupported: number; notes: string; model?: string };
 
 // ---- Discriminated SSE event union ---------------------------------------
 
