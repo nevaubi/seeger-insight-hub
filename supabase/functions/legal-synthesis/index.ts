@@ -485,6 +485,28 @@ const CASELAW_TOOL_SCHEMA = {
   required: ["query"],
 };
 
+// v30: Tavily-backed web search, scoped to reputable legal + regulatory + scientific
+// sources by a server-side domain allowlist. Kept small (max 8 results, ~2KB excerpt each)
+// so the writer context stays sane.
+const WEB_TOOL_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description:
+        "Natural-language web query for a targeted lookup on reputable legal, regulatory, or " +
+        "scientific sources (e.g. 'Eleventh Circuit Daubert general causation meningioma', " +
+        "'FDA Depo-Provera label change intracranial meningioma', 'NEJM medroxyprogesterone " +
+        "meningioma cohort study'). Results are restricted server-side to an allowlist of " +
+        "courts, uscourts.gov, fda.gov, ema.europa.eu, who.int, NIH/PubMed, NEJM, JAMA, " +
+        "Lancet, BMJ, Law360, Bloomberg Law, and SSRN — any other domain is dropped.",
+    },
+    published_after: { type: "string", description: "Optional YYYY-MM-DD lower bound (Tavily days-back)." },
+    max_results: { type: "integer", description: "Cap results (default 8, max 8)." },
+  },
+  required: ["query"],
+};
+
 const GEMINI_TOOLS = [
   { type: "function", function: { name: "search_the_record", description: SEARCH_TOOL_DESCRIPTION, parameters: SEARCH_TOOL_SCHEMA } },
   {
