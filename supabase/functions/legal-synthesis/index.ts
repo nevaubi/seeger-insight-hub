@@ -1753,6 +1753,7 @@ Deno.serve(async (req: Request) => {
           if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
           else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
           else if (c.name === "search_caselaw") emit({ type: "tool", round, tool: "search_caselaw", args: c.input });
+          else if (c.name === "search_web") emit({ type: "tool", round, tool: "search_web", args: c.input });
           else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
         }
 
