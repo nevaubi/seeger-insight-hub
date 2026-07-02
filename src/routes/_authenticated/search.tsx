@@ -1194,10 +1194,13 @@ function RunCard({
   reasoningScrollRef,
   expansions,
   writerRound,
+  plan,
+  webResults,
+  verify,
 }: {
   running: boolean;
   searches: SearchEvt[];
-  notes: { round: number; text: string }[];
+  notes: { round: number; text: string; startedAt?: number; endedAt?: number }[];
   currentRound: number | null;
   finalRound: number | null;
   citations: CitationEvt[];
@@ -1206,13 +1209,17 @@ function RunCard({
   reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
   expansions: Record<number, number>;
   writerRound: number | null;
+  plan: { rationale: string; facets: { id: string; question: string; specialists: string[] }[] } | null;
+  webResults: { round: number; title?: string | null; url?: string | null }[];
+  verify: { unsupported: number; notes: string } | null;
 }) {
-  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
+  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'Searched ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
   const isToolNote = (t: string) => TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
   const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
   const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
 
   const writerActive = running && writerRound != null && currentRound === writerRound;
+  const now = useTicker(running);
 
   const researchRounds = useMemo(() => {
     const set = new Set<number>();
