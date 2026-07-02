@@ -48,8 +48,8 @@ import {
   tagLabel,
   SUPABASE_ANON_KEY,
   SYNTHESIS_ENDPOINT,
+  CORPUS_INGEST_ENDPOINT,
 } from '@/lib/supabase';
-import { embedQuery, modelReady } from '@/lib/embed';
 import {
   useSynthesisStream,
   type Chunk,
