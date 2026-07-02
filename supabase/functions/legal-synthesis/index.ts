@@ -1770,6 +1770,9 @@ Deno.serve(async (req: Request) => {
             if (c.name === "search_caselaw") {
               return { kind: "caselaw" as const, c, cl: await runCaselawSearch(c.input, question, seen) };
             }
+            if (c.name === "search_web") {
+              return { kind: "web" as const, c, wb: await runWebSearch(c.input, question, seen) };
+            }
             const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
             let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
             if (c.input.expand !== false && sr.hitIds.length) {
