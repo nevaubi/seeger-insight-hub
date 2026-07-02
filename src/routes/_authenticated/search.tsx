@@ -775,6 +775,9 @@ function SynthesisPanel({
               reasoningScrollRef={reasoningScrollRef}
               expansions={expansions}
               writerRound={writerRound}
+              plan={plan}
+              webResults={webResults}
+              verify={verify}
             />
 
             {showWriting && <WritingIndicator />}
