@@ -781,7 +781,7 @@ async function runReadOrder(
   const a = (input && typeof input === "object") ? input : {};
   const orderType = a.order_type ? String(a.order_type).toUpperCase() : null;
   const stem = (a.order_number != null && String(a.order_number).trim()) ? String(a.order_number).trim() : null;
-  if (!orderType && !stem) throw new Error("read_order needs an order_type and/or order_number");
+  if (!orderType && !stem) throw new Error("skipped: no order_type or order_number provided — call list_orders first to identify the order");
   const rows = await callRpc("order_chunks", {
     p_case_id: caseId,
     p_order_type: orderType,
