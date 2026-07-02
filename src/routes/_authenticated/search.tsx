@@ -1153,6 +1153,7 @@ function InterimNoteRow({ text }: { text: string }) {
 
 function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
+  const shown = useSmoothText(text, streaming, 70);
   return (
     <div className="mt-2">
       <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
@@ -1163,7 +1164,7 @@ function WriterReasoning({ text, streaming }: { text: string; streaming: boolean
       </button>
       {open && (
         <div className="mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/60 pr-1">
-          {text}
+          {shown}
           {streaming && <span className="motion-stream-caret" aria-hidden />}
         </div>
       )}
