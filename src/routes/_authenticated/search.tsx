@@ -34,6 +34,8 @@ import {
   Download,
   FileText,
   Printer,
+  Globe,
+  ShieldCheck,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -72,6 +74,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { toast } from 'sonner';
 
 import { useMatter, type Matter } from '@/lib/matter-context';
+import { SplitPane } from '@/components/split-pane';
 
 const FALLBACK_EXAMPLES_SYNTH = [
   'What must plaintiffs do to establish proof of use, and by when?',
@@ -190,6 +193,31 @@ function fmtElapsed(ms: number): string {
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
   const s = ms / 1000;
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+}
+
+// Shared 250 ms ticker — one interval per RunCard, not per row. Reduced-motion
+// slows to 1 s.
+function useTicker(active: boolean): number {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const id = window.setInterval(() => setTick((n) => (n + 1) & 0xffff), prefersReduced ? 1000 : 250);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return active ? performance.now() : 0;
+}
+
+// Small elapsed pill for one step. Ticks while endedAt is undefined and
+// startedAt exists; freezes to endedAt-startedAt otherwise.
+function StepClock({ startedAt, endedAt, now }: { startedAt?: number; endedAt?: number; now: number }) {
+  if (startedAt == null) return null;
+  const ms = endedAt != null ? endedAt - startedAt : Math.max(0, now - startedAt);
+  return (
+    <span className="text-[10.5px] text-muted-foreground/60 tabular-nums shrink-0" aria-label={endedAt != null ? 'elapsed' : 'running'}>
+      {fmtElapsed(ms)}
+    </span>
+  );
 }
 
 function ModeButton({
@@ -420,6 +448,9 @@ function SynthesisPanel({
     chunks,
     chunkOrder,
     expansions,
+    plan,
+    webResults,
+    verify,
   } = state;
 
   const [timelineOpen, setTimelineOpen] = useState(true);
@@ -657,10 +688,9 @@ function SynthesisPanel({
   }
 
   // ----- ACTIVE / RESTING STATE -----
-  return (
-    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:flex lg:gap-6 lg:overflow-hidden">
-      {/* LEFT: chat pane (conversation scrolls, composer pinned at bottom) */}
-      <div className="lg:flex-[3] min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0">
+  const leftPane = (
+    <div className="min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0 lg:pr-3">
+
         <div
           ref={conversationScrollRef}
           onScroll={handleConversationScroll}
@@ -745,6 +775,9 @@ function SynthesisPanel({
               reasoningScrollRef={reasoningScrollRef}
               expansions={expansions}
               writerRound={writerRound}
+              plan={plan}
+              webResults={webResults}
+              verify={verify}
             />
 
             {showWriting && <WritingIndicator />}
@@ -793,21 +826,34 @@ function SynthesisPanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
-
           />
         </div>
-      </div>
+    </div>
+  );
 
-      {/* RIGHT: persistent evidence column */}
-      <EvidenceColumn
-        chunks={chunks}
-        sortedChunkRefs={sortedChunkRefs}
-        citationsByRef={citationsByRef}
-        chunkOrder={chunkOrder}
-        running={running}
-        flashRef={flashRef}
-        caseId={currentMatter.master_case_id}
-        matter={insightMatter}
+  const rightPane = (
+    <EvidenceColumn
+      chunks={chunks}
+      sortedChunkRefs={sortedChunkRefs}
+      citationsByRef={citationsByRef}
+      chunkOrder={chunkOrder}
+      running={running}
+      flashRef={flashRef}
+      caseId={currentMatter.master_case_id}
+      matter={insightMatter}
+    />
+  );
+
+  return (
+    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:overflow-hidden">
+      <SplitPane
+        left={leftPane}
+        right={rightPane}
+        defaultPercent={62}
+        min={38}
+        max={78}
+        storageKey="ask-record-split"
+        className="lg:h-full lg:gap-0"
       />
     </div>
   );
@@ -958,12 +1004,14 @@ function EvidenceColumn({
 const RAIL_LEFT = 11; // px — hairline connector x-position
 const NODE_COL = 24;  // px — column reserved for node + rail
 
-type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'error';
+type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'web' | 'verify' | 'error';
 const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: string }> = {
   search:  { name: 'Record search',  icon: SearchIcon, accent: 'text-accent' },
   read:    { name: 'Read full text', icon: BookOpen,   accent: 'text-gold' },
   index:   { name: 'Record index',   icon: Layers,     accent: 'text-muted-foreground' },
   caselaw: { name: 'Case law',       icon: BookOpen,   accent: 'text-primary' },
+  web:     { name: 'Web sources',    icon: Globe,      accent: 'text-destructive/80' },
+  verify:  { name: 'Grounding check', icon: ShieldCheck, accent: 'text-primary' },
   error:   { name: 'Lookup failed',  icon: SlidersHorizontal, accent: 'text-destructive' },
 };
 
@@ -973,6 +1021,7 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
   if (/ lookup error:/.test(text)) return { kind: 'error', name: 'Lookup failed', label: text.replace(/^.*lookup error:\s*/, '') };
   if (text.startsWith('Read ')) return { kind: 'read', name: 'Read full text', label: `${num} passage${plural} of full order text` };
   if (text.startsWith('Searched case law')) return { kind: 'caselaw', name: 'Case law', label: `${num} published opinion${plural}` };
+  if (text.startsWith('Searched reputable web')) return { kind: 'web', name: 'Web sources', label: `${num} reputable source${plural}` };
   if (/controlling order/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} controlling order${plural}` };
   if (/key date/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} key date${plural}` };
   if (/counsel/.test(text)) return { kind: 'index', name: 'Record index', label: `${num} counsel of record` };
@@ -1032,6 +1081,9 @@ function StepRow({
   active = false,
   done = false,
   delayMs = 0,
+  startedAt,
+  endedAt,
+  now = 0,
 }: {
   kind: Kind;
   name?: string;
@@ -1040,6 +1092,9 @@ function StepRow({
   active?: boolean;
   done?: boolean;
   delayMs?: number;
+  startedAt?: number;
+  endedAt?: number;
+  now?: number;
 }) {
   const m = KIND_META[kind];
   const Icon = m.icon;
@@ -1050,7 +1105,10 @@ function StepRow({
         <div className="flex items-center gap-1.5 leading-[16px]">
           <Icon className={`h-3 w-3 shrink-0 ${m.accent}`} strokeWidth={1.75} />
           <span className="text-[12px] font-semibold tracking-[-0.005em] text-foreground/90">{name ?? m.name}</span>
-          {meta && <span className="ml-auto text-[11px] text-muted-foreground/80 tabular-nums shrink-0">{meta}</span>}
+          <span className="ml-auto inline-flex items-center gap-2 shrink-0">
+            {meta && <span className="text-[11px] text-muted-foreground/80 tabular-nums">{meta}</span>}
+            <StepClock startedAt={startedAt} endedAt={endedAt} now={now} />
+          </span>
         </div>
         <div
           className={
@@ -1151,10 +1209,13 @@ function RunCard({
   reasoningScrollRef,
   expansions,
   writerRound,
+  plan,
+  webResults,
+  verify,
 }: {
   running: boolean;
   searches: SearchEvt[];
-  notes: { round: number; text: string }[];
+  notes: { round: number; text: string; startedAt?: number; endedAt?: number }[];
   currentRound: number | null;
   finalRound: number | null;
   citations: CitationEvt[];
@@ -1163,13 +1224,17 @@ function RunCard({
   reasoningScrollRef: React.MutableRefObject<HTMLDivElement | null>;
   expansions: Record<number, number>;
   writerRound: number | null;
+  plan: { rationale: string; facets: { id: string; question: string; specialists: string[] }[] } | null;
+  webResults: { round: number; title?: string | null; url?: string | null }[];
+  verify: { unsupported: number; notes: string } | null;
 }) {
-  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
+  const TOOL_PREFIXES = ['Listed ', 'Found ', 'Read ', 'Searched ', 'list_orders', 'lookup_counsel', 'list_deadlines'];
   const isToolNote = (t: string) => TOOL_PREFIXES.some((p) => t.startsWith(p)) || / lookup error:/.test(t);
   const toolNotes = useMemo(() => notes.filter((n) => isToolNote(n.text)), [notes]);
   const interimNotes = useMemo(() => notes.filter((n) => !isToolNote(n.text)), [notes]);
 
   const writerActive = running && writerRound != null && currentRound === writerRound;
+  const now = useTicker(running);
 
   const researchRounds = useMemo(() => {
     const set = new Set<number>();
@@ -1204,6 +1269,31 @@ function RunCard({
           />
 
           <div className="space-y-6">
+            {plan && plan.facets.length > 0 && (
+              <div className="flex items-start gap-3 motion-fade-rise">
+                <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+                  <div className="relative z-10 grid h-[14px] w-[14px] place-items-center rounded-full bg-gold">
+                    <Sparkles className="h-[8px] w-[8px] text-primary-foreground" strokeWidth={3} />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 leading-[16px]">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Plan</span>
+                    <span className="text-[11px] text-muted-foreground tabular-nums">{plan.facets.length} facet{plan.facets.length === 1 ? '' : 's'}</span>
+                    {webResults.length > 0 && (
+                      <span className="text-[11px] text-muted-foreground/70">· {webResults.length} web source{webResults.length === 1 ? '' : 's'}</span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {plan.facets.slice(0, 6).map((f) => (
+                      <span key={f.id} className="rounded-full border border-border/70 bg-secondary/40 px-2 py-0.5 text-[10.5px] font-medium text-foreground/75">
+                        {f.id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             {researchRounds.map((r) => {
               const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
               const rTools = toolNotes.filter((n) => n.round === r);
@@ -1229,12 +1319,27 @@ function RunCard({
                           done={isDone}
                           delayMs={i * 40}
                           meta={s.count === undefined ? undefined : s.count === 0 ? 'no matches' : `${s.count}/${s.k}`}
+                          startedAt={s.startedAt}
+                          endedAt={s.endedAt}
+                          now={now}
                         />
                       );
                     })}
                     {rTools.map((n, i) => {
                       const c = classifyTool(n.text);
-                      return <StepRow key={`t-${r}-${i}`} kind={c.kind} name={c.name} label={c.label} done delayMs={(rSearches.length + i) * 40} />;
+                      return (
+                        <StepRow
+                          key={`t-${r}-${i}`}
+                          kind={c.kind}
+                          name={c.name}
+                          label={c.label}
+                          done
+                          delayMs={(rSearches.length + i) * 40}
+                          startedAt={n.startedAt}
+                          endedAt={n.endedAt}
+                          now={now}
+                        />
+                      );
                     })}
                     {exp > 0 && <ExpandRow count={exp} />}
                     {rInterim.map((n, i) => (
@@ -1281,6 +1386,29 @@ function RunCard({
                 <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
                   {workingLabel}
                 </span>
+              </div>
+            )}
+
+            {verify && (
+              <div className="flex items-start gap-3 motion-fade-rise">
+                <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+                  <div className={`relative z-10 grid h-[14px] w-[14px] place-items-center rounded-full ${verify.unsupported === 0 ? 'bg-primary' : 'bg-destructive'}`}>
+                    <ShieldCheck className="h-[8px] w-[8px] text-primary-foreground" strokeWidth={3} />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 leading-[16px]">
+                    <span className="text-[12px] font-semibold text-foreground/90">Grounding check</span>
+                    <span className={`text-[11px] tabular-nums ${verify.unsupported === 0 ? 'text-muted-foreground/80' : 'text-destructive'}`}>
+                      {verify.unsupported === 0 ? 'all sentences grounded' : `${verify.unsupported} unsupported`}
+                    </span>
+                  </div>
+                  {verify.notes && (
+                    <div className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground font-serif">
+                      {verify.notes}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

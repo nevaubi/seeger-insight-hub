@@ -46,6 +46,8 @@ export type SearchEvt = {
   filter: Record<string, unknown>;
   k: number;
   count?: number;
+  startedAt?: number;
+  endedAt?: number;
 };
 
 export type RoundState = {
@@ -54,6 +56,8 @@ export type RoundState = {
   textOrder: string[];
   blockIndex: Record<string, number>;
   stop_reason?: 'tool_use' | 'end_turn';
+  startedAt?: number;
+  endedAt?: number;
 };
 
 export type CitationEvt = {
@@ -70,7 +74,24 @@ export type CitationEvt = {
   num: number;
 };
 
-export type RoundNote = { round: number; text: string };
+export type RoundNote = { round: number; text: string; startedAt?: number; endedAt?: number };
+
+// ---- Planner / verifier / web (v30 additive) -----------------------------
+
+export type PlanFacet = {
+  id: string;
+  question: string;
+  hypothesis: string;
+  specialists: string[];
+  keywords?: string[];
+  court?: string | null;
+};
+
+export type PlanEvt = { rationale: string; facets: PlanFacet[] };
+
+export type WebResult = { round: number; title?: string | null; url?: string | null; published?: string | null };
+
+export type VerifyEvt = { unsupported: number; notes: string; model?: string };
 
 // ---- Discriminated SSE event union ---------------------------------------
 
@@ -126,6 +147,10 @@ type SseToolError = {
 // Neighbor/sibling expansion: the edge function pulled `count` adjacent passages around the
 // round's best hits for surrounding context. Aggregated per round in the UI.
 type SseExpand = { type: 'expand'; round: number; source: string; count: number };
+// v30 additive frames (planner/web/verify) — safe to ignore if absent.
+type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
+type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
+type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -141,6 +166,9 @@ export type SynthEvent =
   | SseTool
   | SseToolError
   | SseExpand
+  | SsePlan
+  | SseWebResult
+  | SseVerify
   | SseError
   | SseDone;
 
@@ -157,11 +185,18 @@ export type SynthState = {
   rounds: Record<number, RoundState>;
   currentRound: number | null;
   finalRound: number | null;
-  writerRound: number | null; // the round the Opus writer runs in (carries its extended thinking)
+  writerRound: number | null;
   citations: CitationEvt[];
   chunks: Record<string, Chunk>;
   chunkOrder: string[];
-  expansions: Record<number, number>; // round -> count of adjacent passages auto-pulled
+  expansions: Record<number, number>;
+  // v30 additive
+  plan: PlanEvt | null;
+  webResults: WebResult[];
+  verify: VerifyEvt | null;
+  // transient tool-start timestamps keyed by `${round}:${tool}` so we can
+  // compute per-step durations when the matching `done` frame arrives.
+  _toolStarts: Record<string, number>;
 };
 
 const INITIAL: SynthState = {
@@ -180,6 +215,10 @@ const INITIAL: SynthState = {
   chunks: {},
   chunkOrder: [],
   expansions: {},
+  plan: null,
+  webResults: [],
+  verify: null,
+  _toolStarts: {},
 };
 
 type Action =
@@ -196,6 +235,7 @@ function ensureRound(rounds: Record<number, RoundState>, round: number): RoundSt
       textBlocks: [],
       textOrder: [],
       blockIndex: {},
+      startedAt: performance.now(),
     }
   );
 }
@@ -214,6 +254,8 @@ function describeTool(tool: string, count: number): string {
       return `Read ${count} passage${count === 1 ? '' : 's'} of full order text`;
     case 'search_caselaw':
       return `Searched case law — ${count} opinion${count === 1 ? '' : 's'}`;
+    case 'search_web':
+      return `Searched reputable web — ${count} source${count === 1 ? '' : 's'}`;
     default:
       return `${tool} returned ${count} result${count === 1 ? '' : 's'}`;
   }
@@ -259,6 +301,7 @@ function reducer(state: SynthState, action: Action): SynthState {
                 keywords: evt.keywords,
                 filter: evt.filter ?? {},
                 k: evt.k,
+                startedAt: performance.now(),
               },
             ],
           };
@@ -272,11 +315,11 @@ function reducer(state: SynthState, action: Action): SynthState {
               additions.push(ch.ref);
             }
           }
-          // attach count to most recent search of this round
+          // attach count + endedAt to most recent search of this round
           const nextSearches = [...state.searches];
           for (let i = nextSearches.length - 1; i >= 0; i--) {
             if (nextSearches[i].round === evt.round && nextSearches[i].count === undefined) {
-              nextSearches[i] = { ...nextSearches[i], count: list.length };
+              nextSearches[i] = { ...nextSearches[i], count: list.length, endedAt: performance.now() };
               break;
             }
           }
@@ -323,7 +366,8 @@ function reducer(state: SynthState, action: Action): SynthState {
         }
         case 'round_end': {
           const cur = ensureRound(state.rounds, evt.round);
-          const updated: RoundState = { ...cur, stop_reason: evt.stop_reason };
+          const now = performance.now();
+          const updated: RoundState = { ...cur, stop_reason: evt.stop_reason, endedAt: now };
           if (evt.stop_reason === 'end_turn') {
             return {
               ...state,
@@ -344,37 +388,66 @@ function reducer(state: SynthState, action: Action): SynthState {
             rounds: nextRounds,
             currentRound: null,
             notes: interim
-              ? [...state.notes, { round: evt.round, text: interim }]
+              ? [...state.notes, { round: evt.round, text: interim, startedAt: cur.startedAt, endedAt: now }]
               : state.notes,
           };
         }
         case 'tool': {
-          // Structured router tool (list_orders / lookup_counsel / list_deadlines).
-          // The done frame carries the result count; surface it as a research
-          // note. The start frame only advances the active round.
+          // Start frame: stamp start time for this (round,tool) pair.
+          // Done frame: push a note with duration.
+          const key = `${evt.round}:${evt.tool}`;
           if (evt.done) {
+            const startedAt = state._toolStarts[key];
+            const endedAt = performance.now();
+            const nextStarts = { ...state._toolStarts };
+            delete nextStarts[key];
             return {
               ...state,
+              _toolStarts: nextStarts,
               notes: [
                 ...state.notes,
-                { round: evt.round, text: describeTool(evt.tool, evt.count ?? 0) },
+                { round: evt.round, text: describeTool(evt.tool, evt.count ?? 0), startedAt, endedAt },
               ],
             };
           }
           return {
             ...state,
             currentRound: Math.max(state.currentRound ?? -1, evt.round),
+            _toolStarts: { ...state._toolStarts, [key]: performance.now() },
           };
         }
-        case 'tool_error':
-          // Non-fatal: the backend continues with whatever else it gathered, so
-          // record this as a note rather than a fatal error.
+        case 'tool_error': {
+          const key = `${evt.round}:${evt.tool}`;
+          const startedAt = state._toolStarts[key];
+          const endedAt = performance.now();
+          const nextStarts = { ...state._toolStarts };
+          delete nextStarts[key];
           return {
             ...state,
+            _toolStarts: nextStarts,
             notes: [
               ...state.notes,
-              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}` },
+              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}`, startedAt, endedAt },
             ],
+          };
+        }
+        case 'plan':
+          return {
+            ...state,
+            plan: { rationale: evt.rationale ?? '', facets: evt.facets ?? [] },
+          };
+        case 'web_result':
+          return {
+            ...state,
+            webResults: [
+              ...state.webResults,
+              { round: evt.round, title: evt.title ?? null, url: evt.url ?? null, published: evt.published ?? null },
+            ],
+          };
+        case 'verify':
+          return {
+            ...state,
+            verify: { unsupported: evt.unsupported, notes: evt.notes, model: evt.model },
           };
         case 'expand':
           // Neighbor/sibling expansion: aggregate the adjacent-passage count per round.
