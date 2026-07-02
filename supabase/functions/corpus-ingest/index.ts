@@ -1,4 +1,4 @@
-// Supabase Edge Function: corpus-ingest (v4)
+// Supabase Edge Function: corpus-ingest (v6)
 // RAG ingestion + embedding migration for the litigation corpus, using Voyage AI voyage-law-2
 // (1024-dim, legal-domain model). All embedding is a plain HTTPS call.
 //
@@ -29,6 +29,39 @@
 //   ones. It targets an existing documents.id, purges that document's current chunks first
 //   (idempotent), and does not touch court_orders (the caller decides whether a court_orders
 //   row is warranted).
+//
+// v5 — PACER PAGE-STAMP STRIPPING (cleanPage):
+//   Every page of a PACER/CM-ECF PDF carries a header stamp like
+//     "Case 3:25-md-03140-MCR-HTC   Document 661   Filed 06/15/26   Page 2 of 4".
+//   Those lines are court-added page furniture, not order text. cleanPage() removes them in
+//   two passes:
+//     1. INLINE: pdftotext sometimes merges the stamp onto the SAME line as the page's last
+//        text line (common in line-numbered hearing transcripts), optionally followed by a
+//        bare repeated page number. The inline pass removes that trailing stamp substring
+//        while preserving the real text before it. To guarantee an in-sentence docket
+//        citation is never clipped, the inline pattern requires the FULL stamp form —
+//        "Filed MM/DD/YY" AND "Page N of N" — and must sit at end-of-line.
+//     2. FULL LINE: a line that is nothing but a stamp is dropped entirely. Here the Filed
+//        and Page parts are optional, which also catches OCR variants ("Document168 _
+//        Filed 03/13/25 Page1of4", stamps truncated after the document number).
+//   "Case No. ..." caption lines never match (the docket number must follow "Case"
+//   immediately). Applies to every text source — plain_text pages, PDF-fallback pages, and
+//   ingest_text (OCR) pages — since all paths chunk via cleanPage.
+//
+// v6 — CLEAN TITLES + REFERENCE-SCOPED CLASSIFICATION:
+//   - canonical_title / doc_label were previously the first 300 chars of the RAW PACER
+//     docket text (description_clean is never populated in this corpus), which dragged the
+//     "(Attachments: # 1 Exhibit ...)" enumeration and clerk annotations into titles and
+//     truncated them mid-word. cleanTitle() now derives the title from description_raw by
+//     cutting the attachments enumeration and "(Entered: ...)" tail, stripping trailing
+//     clerk initials and "Modified on ..." notes, and truncating at a word boundary. The
+//     old three-field join is gone: short_description is a fallback, not an appendage.
+//   - classify() and extractOrderNumber() previously ran over the WHOLE docket text, so an
+//     entry's REFERENCE CHAIN leaked into its own type: "Declaration re 679 Joint MOTION to
+//     Exclude ..." classified the declaration as a motion, and "ORDER denying 399 Motion to
+//     Modify ... Common Benefit Order No. 1" lifted order number 1 from the REFERENCED
+//     order. Both now run on classificationScope(): the leading segment of the entry's own
+//     text, cut at the first docket reference ("re 677", "Re: 606", "399 Motion ...").
 //
 // Vector space: chunks.embedding_v2 vector(1024). Documents embed with input_type 'document';
 // queries with input_type 'query'. Retrieval via match_chunks_v2 / hybrid_search_v2.
@@ -71,6 +104,7 @@ const CHUNK_OVERLAP = 200;      // trailing-context overlap
 const MAX_CHUNKS_PER_DOC = 120; // voyage batching makes larger docs cheap
 const MIN_TEXT_CHARS = 400;     // below this, not worth ingesting
 const VOYAGE_BATCH = 96;        // inputs per embeddings request
+const TITLE_MAX = 300;          // canonical_title / doc_label ceiling (word-boundary capped)
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -169,11 +203,78 @@ function extractOrderNumber(text: string): string | null {
   return m ? m[1] : null;
 }
 
+// v6: the leading segment of the entry's OWN description, cut at the first docket
+// reference — "re 677", "Re: 606", or a bare "399 Motion/Order/..." citation — so the
+// reference chain never leaks into the entry's own classification or order number.
+// PACER puts the entry's own type first ("Declaration re 677 ...", "ORDER denying 399
+// Motion ..."), so the lead segment is the honest self-description.
+function classificationScope(descriptionRaw: string, shortDescription: string): string {
+  const raw = (descriptionRaw ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return (shortDescription ?? "").replace(/\s+/g, " ").trim();
+  const cuts: number[] = [];
+  const reRef = raw.search(/\bre:?\s+\d/i);
+  if (reRef > 0) cuts.push(reRef);
+  const bareRef = raw.search(/\b\d{1,5}\s+(?:motion|order|memorandum|notice|response|reply|brief|complaint|declaration|stipulation)\b/i);
+  if (bareRef > 0) cuts.push(bareRef);
+  const lead = cuts.length ? raw.slice(0, Math.min(...cuts)) : raw;
+  return lead.trim() || raw;
+}
+
+// v6: a clean human title from the PACER docket text — the "(Attachments: ...)"
+// enumeration, "(Entered: ...)" stamp, trailing clerk initials, and "Modified on ..."
+// notes are removed, and truncation happens at a word boundary. short_description is the
+// fallback when the docket description is empty; it is never appended.
+function cleanTitle(descriptionRaw: string, shortDescription: string, entryNumber: number | null): string {
+  let t = (descriptionRaw ?? "").replace(/\s+/g, " ").trim();
+  const attIdx = t.search(/\(Attachments?:/i);
+  if (attIdx > 0) t = t.slice(0, attIdx);
+  const entIdx = t.search(/\(Entered:/i);
+  if (entIdx > 0) t = t.slice(0, entIdx);
+  t = t.replace(/\bModified on \d[\d/]*.*$/i, "");
+  t = t.replace(/\s*\([a-z]{2,4}\)\.?\s*$/, "");
+  t = t.trim().replace(/[\s,;\u2014-]+$/, "");
+  if (!t) t = (shortDescription ?? "").replace(/\s+/g, " ").trim();
+  if (!t) t = `Docket entry ${entryNumber ?? "?"}`;
+  if (t.length > TITLE_MAX) {
+    const head = t.slice(0, TITLE_MAX - 3);
+    const cut = head.lastIndexOf(" ");
+    t = (cut > 200 ? head.slice(0, cut) : head).trimEnd() + "\u2026";
+  }
+  return t;
+}
+
 // ---------- page-aware chunking (v3) ----------
 interface Piece { content: string; char_start: number; char_end: number; page_start: number | null; page_end: number | null }
 
+// v5: PACER/CM-ECF page stamp, e.g.
+//   "Case 3:25-md-03140-MCR-HTC   Document 661   Filed 06/15/26   Page 2 of 4"
+// STAMP_CORE matches the invariant lead ("Case <docket> Document <n>"); "Case No. ..."
+// caption lines never match because the docket number must follow "Case" immediately.
+const STAMP_CORE = String.raw`Case\s+\d{1,2}:\d{2}-(?:md|cv|mc|cr|misc)-\d{3,6}(?:-[A-Za-z][A-Za-z-]*)?\s+Document\s*\d+(?:-\d+)?`;
+
+// Full-line stamp: the whole line is nothing but the stamp. Filed/Page are OPTIONAL here,
+// which also catches OCR variants ("Document168 _ Filed 03/13/25 Page1of4") and stamps
+// truncated after the document number. May carry a trailing bare repeated page number.
+const STAMP_LINE_RE = new RegExp(
+  `^\\s*${STAMP_CORE}\\s*_*\\s*(?:Filed\\s+\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})?\\s*(?:Page\\s*\\d+\\s*of\\s*\\d+)?(?:\\s+\\d{1,3})?\\s*$`,
+);
+
+// Inline stamp: pdftotext merged the stamp onto the same line as the page's last text line
+// (common in line-numbered hearing transcripts), optionally followed by a bare repeated
+// page number. Requires the FULL stamp form (Filed AND Page N of N) and end-of-line, so an
+// in-sentence docket citation (which continues with prose or punctuation) is never clipped.
+const STAMP_INLINE_RE = new RegExp(
+  `\\s*${STAMP_CORE}\\s*_*\\s*Filed\\s+\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}\\s+Page\\s*\\d+\\s*of\\s*\\d+(?:\\s+\\d{1,3})?\\s*(?=\\n|$)`,
+  "g",
+);
+
 function cleanPage(p: string): string {
-  return p.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{4,}/g, "\n\n\n");
+  const inlineStripped = p.replace(/\r\n/g, "\n").replace(STAMP_INLINE_RE, "");
+  const noStamps = inlineStripped
+    .split("\n")
+    .filter((ln) => !STAMP_LINE_RE.test(ln))
+    .join("\n");
+  return noStamps.replace(/[ \t]+\n/g, "\n").replace(/\n{4,}/g, "\n\n\n");
 }
 
 // Split CourtListener plain_text into pages on form-feed separators (pdftotext inserts \f
@@ -265,16 +366,24 @@ async function extractPdfPages(filepathLocal: string): Promise<string[] | null> 
 // ---------- candidate discovery ----------
 interface Candidate {
   docket_entry_id: string; entry_number: number | null; date_filed: string | null;
-  descr: string; document_id: string; cl_recap_document_id: number; order_type: string;
+  descr: string; title: string; order_number: string | null;
+  document_id: string; cl_recap_document_id: number; order_type: string;
 }
+// v6: descr is now the classification SCOPE (the entry's own leading segment), title is the
+// cleaned human title, and order_number is extracted from the scope — so a referenced
+// order's number can never be mistaken for this entry's own.
 function toCandidate(e: any, main: any): Candidate | null {
   if (!main?.cl_recap_document_id) return null;
-  const descr = [e.description_clean, e.description_raw, main.short_description]
-    .map((s: any) => (s ?? "").toString().trim()).filter(Boolean).join(" \u2014 ");
-  const cls = classify(descr);
+  const rawDesc = ((e.description_clean ?? e.description_raw) ?? "").toString();
+  const shortDesc = (main.short_description ?? "").toString();
+  const scope = classificationScope(rawDesc, shortDesc);
+  const cls = classify(scope);
   return {
     docket_entry_id: e.id, entry_number: e.entry_number ?? null, date_filed: e.date_filed ?? null,
-    descr, document_id: main.id, cl_recap_document_id: main.cl_recap_document_id, order_type: cls.order_type,
+    descr: scope,
+    title: cleanTitle(rawDesc, shortDesc, e.entry_number ?? null),
+    order_number: extractOrderNumber(scope),
+    document_id: main.id, cl_recap_document_id: main.cl_recap_document_id, order_type: cls.order_type,
   };
 }
 function mainDoc(e: any): any {
@@ -300,11 +409,10 @@ async function findCandidates(caseId: string, limit: number): Promise<Candidate[
     if (!main?.cl_recap_document_id) continue;
     if (main.is_available_remote === false) continue;
     if (existing.has(main.id)) continue;
-    const descr = [e.description_clean, e.description_raw, main.short_description].map((s: any) => (s ?? "").toString().trim()).filter(Boolean).join(" \u2014 ");
-    const cls = classify(descr);
-    if (!cls.significant) continue;
     const c = toCandidate(e, main);
-    if (c) out.push(c);
+    if (!c) continue;
+    if (!classify(c.descr).significant) continue;
+    out.push(c);
     if (out.length >= limit) break;
   }
   return out;
@@ -383,15 +491,15 @@ async function ingestCandidate(caseId: string, c: Candidate): Promise<Record<str
     return { entry: c.entry_number, ok: false, reason: `voyage: ${(e as Error).message}` };
   }
 
-  // 4) register in court_orders
-  const title = c.descr.slice(0, 300) || `Docket entry ${c.entry_number}`;
+  // 4) register in court_orders (v6: cleaned title + scope-derived type/number)
+  const title = c.title;
   const baseTags = ["auto_ingested", "courtlistener"];
   if (textSource === "pdf_extract") baseTags.push("pdf_extracted");
   const orderRow = {
     case_id: caseId,
     document_id: c.document_id,
     order_type: c.order_type,
-    order_number: extractOrderNumber(c.descr),
+    order_number: c.order_number,
     canonical_title: title,
     order_date: c.date_filed,
     summary: null,
@@ -426,7 +534,7 @@ async function ingestCandidate(caseId: string, c: Candidate): Promise<Record<str
     doc_source: "courtlistener",
     doc_label: title,
     order_type: c.order_type,
-    order_number: extractOrderNumber(c.descr),
+    order_number: c.order_number,
     order_date: c.date_filed,
     tags: ["auto_ingested"],
   }));
@@ -653,14 +761,14 @@ Deno.serve(async (req: Request) => {
 
     if (action === "ingest_text") {
       const res = await ingestText(payload);
-      console.log(`[corpus-ingest v4] ingest_text ${JSON.stringify({ doc: res.document_id, ok: res.ok, n: res.chunks, why: res.reason ?? null })}`);
+      console.log(`[corpus-ingest v6] ingest_text ${JSON.stringify({ doc: res.document_id, ok: res.ok, n: res.chunks, why: res.reason ?? null })}`);
       return json({ ok: res.ok !== false, result: res }, res.ok === false ? 422 : 200);
     }
 
     if (action === "reembed") {
       const limit = Math.max(96, Math.min(600, Number(payload?.limit) || 480));
       const res = await reembed(limit);
-      console.log(`[corpus-ingest v4] reembed ${JSON.stringify(res)}`);
+      console.log(`[corpus-ingest v6] reembed ${JSON.stringify(res)}`);
       return json({ ok: true, ...res });
     }
 
@@ -668,7 +776,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "candidates") {
       const cands = await findCandidates(caseId, 40);
-      return json({ ok: true, count: cands.length, candidates: cands.map((c) => ({ entry: c.entry_number, date: c.date_filed, type: c.order_type, descr: c.descr.slice(0, 110) })) });
+      return json({ ok: true, count: cands.length, candidates: cands.map((c) => ({ entry: c.entry_number, date: c.date_filed, type: c.order_type, descr: c.title.slice(0, 110) })) });
     }
 
     if (action === "ingest_one") {
@@ -678,7 +786,7 @@ Deno.serve(async (req: Request) => {
       const c = cands.find((x) => x.entry_number === entryNumber);
       if (!c) return json({ ok: false, error: "entry not found among pending candidates (already ingested, no available document, or not order-like)" }, 404);
       const res = await ingestCandidate(caseId, c);
-      console.log(`[corpus-ingest v4] ingest_one ${JSON.stringify(res)}`);
+      console.log(`[corpus-ingest v6] ingest_one ${JSON.stringify(res)}`);
       return json({ ok: true, result: res });
     }
 
@@ -687,7 +795,7 @@ Deno.serve(async (req: Request) => {
       const cands = await findCandidates(caseId, limit);
       const results: Record<string, unknown>[] = [];
       for (const c of cands) results.push(await ingestCandidate(caseId, c));
-      console.log(`[corpus-ingest v4] backfill ${JSON.stringify(results.map((r) => ({ e: r.entry, ok: r.ok, n: r.chunks, src: r.text_source ?? null })))}`);
+      console.log(`[corpus-ingest v6] backfill ${JSON.stringify(results.map((r) => ({ e: r.entry, ok: r.ok, n: r.chunks, src: r.text_source ?? null })))}`);
       return json({ ok: true, attempted: results.length, results });
     }
 
@@ -695,7 +803,7 @@ Deno.serve(async (req: Request) => {
       const entryNumber = Number(payload?.entry_number);
       if (!Number.isFinite(entryNumber)) return json({ ok: false, error: "entry_number required" }, 400);
       const res = await reingestEntry(caseId, entryNumber);
-      console.log(`[corpus-ingest v4] reingest ${JSON.stringify(res)}`);
+      console.log(`[corpus-ingest v6] reingest ${JSON.stringify(res)}`);
       return json({ ok: true, result: res });
     }
 
@@ -705,13 +813,13 @@ Deno.serve(async (req: Request) => {
       const results: Record<string, unknown>[] = [];
       for (const n of entries) results.push(await reingestEntry(caseId, n));
       const remaining = (await v2EraEntries(caseId, 100)).length;
-      console.log(`[corpus-ingest v4] reingest_all ${JSON.stringify({ done: results.map((r) => ({ e: r.entry, ok: r.ok, n: r.chunks, src: r.text_source ?? null, why: r.reason ?? null })), remaining })}`);
+      console.log(`[corpus-ingest v6] reingest_all ${JSON.stringify({ done: results.map((r) => ({ e: r.entry, ok: r.ok, n: r.chunks, src: r.text_source ?? null, why: r.reason ?? null })), remaining })}`);
       return json({ ok: true, attempted: results.length, results, remaining });
     }
 
     return json({ ok: false, error: "unknown action (candidates | ingest_one | backfill | reingest | reingest_all | ingest_text | reembed | embed_query | search_test)" }, 400);
   } catch (e) {
-    console.error(`[corpus-ingest v4] ${action} failed: ${(e as Error).message}`);
+    console.error(`[corpus-ingest v6] ${action} failed: ${(e as Error).message}`);
     return json({ ok: false, action, error: (e as Error).message }, 500);
   }
 });
