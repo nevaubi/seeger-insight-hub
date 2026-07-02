@@ -131,6 +131,33 @@
   }
 }
 
+/* ---- Typography scale utilities (shared type ramp) ---- */
+@utility t-eyebrow {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+@utility t-meta {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+@utility t-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum', 'ss01';
+}
+@utility focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background),
+              0 0 0 3px color-mix(in oklab, var(--ring) 55%, transparent);
+}
+
+
 /* Motion foundation — shared keyframes & utilities. */
 :root {
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
