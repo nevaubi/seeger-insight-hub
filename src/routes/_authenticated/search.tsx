@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Children,
   cloneElement,
@@ -36,6 +36,8 @@ import {
   Printer,
   Globe,
   ShieldCheck,
+  Shuffle,
+  MessageSquarePlus,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,6 +50,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   supabase,
   tagLabel,
+  fetchQuestionSuggestions,
+  type QuestionSuggestion,
   SUPABASE_ANON_KEY,
   SYNTHESIS_ENDPOINT,
   CORPUS_INGEST_ENDPOINT,
