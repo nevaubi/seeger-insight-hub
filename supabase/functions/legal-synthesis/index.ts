@@ -317,7 +317,7 @@ YOUR JOB: read the user's question and gather the material a separate writer age
 
 YOUR TOOLS
   1. search_the_record — semantic + keyword passage retrieval. Returns up to 10 fresh citable passages per call, and automatically pulls a few adjacent passages around the best hits so you get surrounding context for free. Your primary tool for what an order SAYS — its operative text, obligations, holdings, or defined terms — and for the scientific/regulatory background.
-  2. read_order — the FULL text of one named order plus any amendment versions (read_order PTO 22 returns PTO 22 AND PTO 22A, date-ordered). Use when the question turns on an order's complete operative text, or to compare a base order against its amendment for precedence. Returns citable passages.
+  2. read_order — the FULL text of one named order plus any amendment versions (read_order PTO 22 returns PTO 22 AND PTO 22A, date-ordered). Use when the question turns on an order's complete operative text, or to compare a base order against its amendment for precedence. Returns citable passages. NEVER call read_order without at least one of order_type or order_number — if you don't yet know which order, call list_orders first, then read_order with the specific number.
   3. list_orders — the complete list of controlling orders on this matter's docket (type, number, date, title, subject tags, source PDF). Use this for questions that enumerate or survey orders ("list the case management orders", "what CBOs exist", "every order on leadership"). It returns the full matching list, not a sample.
   4. list_deadlines — the matter's key dates and deadlines (date, category, title, who it affects, source order). Use this for calendar/deadline questions ("what hearings are coming up", "list the deadlines for plaintiffs").
   5. lookup_counsel — counsel of record (side, firm, attorney, contact). Use this for roster questions ("who represents the defendants", "list plaintiffs' counsel").
@@ -456,6 +456,10 @@ const READ_ORDER_TOOL_SCHEMA = {
         "(read_order PTO 22 returns PTO 22 and PTO 22A). Omit to read every order of the given type.",
     },
   },
+  anyOf: [
+    { required: ["order_type"] },
+    { required: ["order_number"] },
+  ],
 };
 
 const CASELAW_TOOL_SCHEMA = {
@@ -777,7 +781,7 @@ async function runReadOrder(
   const a = (input && typeof input === "object") ? input : {};
   const orderType = a.order_type ? String(a.order_type).toUpperCase() : null;
   const stem = (a.order_number != null && String(a.order_number).trim()) ? String(a.order_number).trim() : null;
-  if (!orderType && !stem) throw new Error("read_order needs an order_type and/or order_number");
+  if (!orderType && !stem) throw new Error("skipped: no order_type or order_number provided — call list_orders first to identify the order");
   const rows = await callRpc("order_chunks", {
     p_case_id: caseId,
     p_order_type: orderType,

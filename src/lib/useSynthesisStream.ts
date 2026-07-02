@@ -422,12 +422,16 @@ function reducer(state: SynthState, action: Action): SynthState {
           const endedAt = performance.now();
           const nextStarts = { ...state._toolStarts };
           delete nextStarts[key];
+          const isSkip = /^skipped:/i.test(evt.message ?? '');
+          const text = isSkip
+            ? `${evt.tool} skipped: ${evt.message.replace(/^skipped:\s*/i, '')}`
+            : `${evt.tool} lookup error: ${evt.message}`;
           return {
             ...state,
             _toolStarts: nextStarts,
             notes: [
               ...state.notes,
-              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}`, startedAt, endedAt },
+              { round: evt.round, text, startedAt, endedAt },
             ],
           };
         }

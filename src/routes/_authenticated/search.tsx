@@ -1004,7 +1004,7 @@ function EvidenceColumn({
 const RAIL_LEFT = 11; // px — hairline connector x-position
 const NODE_COL = 24;  // px — column reserved for node + rail
 
-type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'web' | 'verify' | 'error';
+type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'web' | 'verify' | 'skipped' | 'error';
 const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: string }> = {
   search:  { name: 'Record search',  icon: SearchIcon, accent: 'text-accent' },
   read:    { name: 'Read full text', icon: BookOpen,   accent: 'text-gold' },
@@ -1012,12 +1012,14 @@ const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: s
   caselaw: { name: 'Case law',       icon: BookOpen,   accent: 'text-primary' },
   web:     { name: 'Web sources',    icon: Globe,      accent: 'text-destructive/80' },
   verify:  { name: 'Grounding check', icon: ShieldCheck, accent: 'text-primary' },
+  skipped: { name: 'Skipped',        icon: SlidersHorizontal, accent: 'text-muted-foreground/60' },
   error:   { name: 'Lookup failed',  icon: SlidersHorizontal, accent: 'text-destructive' },
 };
 
 function classifyTool(text: string): { kind: Kind; name: string; label: string } {
   const num = (text.match(/\d+/) ?? [''])[0];
   const plural = num === '1' ? '' : 's';
+  if (/ skipped:/.test(text)) return { kind: 'skipped', name: 'Skipped', label: text.replace(/^.*skipped:\s*/, '') };
   if (/ lookup error:/.test(text)) return { kind: 'error', name: 'Lookup failed', label: text.replace(/^.*lookup error:\s*/, '') };
   if (text.startsWith('Read ')) return { kind: 'read', name: 'Read full text', label: `${num} passage${plural} of full order text` };
   if (text.startsWith('Searched case law')) return { kind: 'caselaw', name: 'Case law', label: `${num} published opinion${plural}` };
@@ -1030,6 +1032,7 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
 
 // Round header: numbered circle on the rail + eyebrow + one-line reasoning.
 function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
+  const shown = useSmoothText(reasoning, streaming, 55);
   return (
     <div className="flex items-start gap-3 motion-stream-in">
       <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
@@ -1041,9 +1044,9 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
         <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1">
           Round {round} phase
         </div>
-        {reasoning ? (
+        {shown ? (
           <p className="font-serif text-[13.5px] leading-[1.55] text-foreground/85">
-            {reasoning}
+            {shown}
             {streaming && <span className="motion-stream-caret" aria-hidden />}
           </p>
         ) : streaming ? (
@@ -1150,6 +1153,7 @@ function InterimNoteRow({ text }: { text: string }) {
 
 function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
+  const shown = useSmoothText(text, streaming, 70);
   return (
     <div className="mt-2">
       <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
@@ -1160,7 +1164,7 @@ function WriterReasoning({ text, streaming }: { text: string; streaming: boolean
       </button>
       {open && (
         <div className="mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/60 pr-1">
-          {text}
+          {shown}
           {streaming && <span className="motion-stream-caret" aria-hidden />}
         </div>
       )}
