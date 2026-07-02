@@ -1,12 +1,41 @@
-// Supabase Edge Function: legal-synthesis
+// Supabase Edge Function: legal-synthesis (v29)
 // Multi-agent, multi-matter RAG over a litigation record (controlling orders + filings).
 //   Router = Gemini 3.1 Flash-Lite (OpenAI-compatible endpoint): plans and runs up to
-//            3 rounds, calling tools — search_the_record, read_order, list_orders,
-//            lookup_counsel, list_deadlines, and search_caselaw (external published
-//            opinions via CourtListener) — streams concise reasoning, then stops.
+//   3 rounds, calling tools — search_the_record, read_order, list_orders,
+//   lookup_counsel, list_deadlines, and search_caselaw (external published
+//   opinions via CourtListener) — streams concise reasoning, then stops.
 //   Writer = Claude Opus 4.8: one clean turn over the gathered passages (with native
-//            sentence-level citations) plus a structured record index.
+//   sentence-level citations) plus a structured record index.
 // SSE streaming throughout.
+//
+// v29 — TRANSIENT-FAILURE RESILIENCE (retry + backoff + model fallback):
+//   - The writer call now retries on transient upstream failures (HTTP 429/5xx/529 and
+//     mid-stream `overloaded_error` / rate-limit SSE events) with exponential backoff,
+//     honoring a Retry-After header when the API sends one. Up to WRITER_MAX_ATTEMPTS
+//     total attempts; the FINAL attempt falls back to WRITER_FALLBACK_MODEL (capacity
+//     errors are usually model-specific, so switching models beats a same-model retry).
+//     The fallback attempt omits the adaptive-thinking parameters (they are tuned for
+//     the primary model) and streams a plain cited answer.
+//   - SAFETY GUARD: a retry is only attempted while ZERO answer text has streamed to the
+//     client. Once any answer text is visible, a rerun would duplicate it — so a
+//     mid-answer interruption is surfaced as a clear error instead of retried.
+//   - The Voyage query-embedding call retries once on transient failure (an embedding
+//     failure previously killed the entire run before any retrieval happened).
+//   - A transient Gemini router failure is retried once per round before falling through
+//     (router failures remain non-fatal: the writer runs with whatever was gathered).
+//   - Retry progress is streamed into the research trace as thinking text, and the
+//     terminal error message tells the user the research above is preserved.
+//   - synthesis_runs now records the writer model actually used (primary or fallback).
+//
+// v28 — EMBEDDINGS MOVED TO voyage-law-2 (1024-dim, server-side):
+//   - The query embedding is now generated INSIDE this function via the Voyage AI API
+//     (model voyage-law-2, input_type 'query'). Callers send only { question }; the
+//     legacy `embedding` field is accepted for backward compatibility but is used only
+//     if it is already a 1024-dim vector — a legacy 384-dim bge vector is ignored and
+//     the function self-embeds instead.
+//   - Passage retrieval now calls hybrid_search_v2 (chunks.embedding_v2, vector(1024)).
+//   - MIN_SIM retuned for voyage-law-2's score distribution (relevant hits typically
+//     score 0.4–0.7; 0.35 admits borderline material while cutting noise).
 //
 // MATTER SCOPING: every request is scoped to a single matter via case_id (the matter's
 //   MDL-master case). When case_id/matter are omitted, the function defaults to the
@@ -26,32 +55,45 @@
 // tool call each round avoids that entirely.
 //
 // Request (POST JSON):
-//   { question: string, embedding: string ("[...]" 384-dim), initial_filter?: object,
+//   { question: string, embedding?: string (optional — only honored if 1024-dim; the
+//     function self-embeds via voyage-law-2 otherwise), initial_filter?: object,
 //     case_id?: string (matter master case), matter?: { name, short_name, mdl_number, court, judge } }
 // Response: text/event-stream (events: round, thinking, search, chunks, tool, expand, text,
 //   citation, round_end, search_error, tool_error, error, done).
 //
-// Secrets: ANTHROPIC_API_KEY, GEMINI_API_KEY (user-provided). COURTLISTENER_API_KEY optional
-//   (enables search_caselaw; without it that one tool degrades gracefully). ROUTER_MODEL
-//   optional (default gemini-3.1-flash-lite). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY auto-injected.
+// Secrets: ANTHROPIC_API_KEY, GEMINI_API_KEY, VOYAGE_API_KEY (user-provided).
+//   COURTLISTENER_API_KEY optional (enables search_caselaw; without it that one tool degrades
+//   gracefully). ROUTER_MODEL optional (default gemini-3.1-flash-lite). WRITER_FALLBACK_MODEL
+//   optional (default claude-sonnet-4-6). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY auto-injected.
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
+const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY") ?? "";
 const ROUTER_MODEL = Deno.env.get("ROUTER_MODEL") ?? "gemini-3.1-flash-lite";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const MODEL = "claude-opus-4-8";
+const WRITER_FALLBACK_MODEL = Deno.env.get("WRITER_FALLBACK_MODEL") ?? "claude-sonnet-4-6";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
+const VOYAGE_MODEL = "voyage-law-2";
+const VOYAGE_TIMEOUT_MS = 20000;
 const MAX_ROUNDS = 3;
 const PER_SEARCH_K = 10;        // targeted retrieval: up to 10 fresh passages per search
 const MAX_TOTAL_CHUNKS = 60;    // absolute ceiling across primary hits + neighbor/order expansion
-const MIN_SIM = 0.2;            // vector-only floor (lexical hits bypass it); lowered from 0.3 to admit
-                               // borderline-relevant passages that bge-small scores in the 0.2-0.3 band
+const MIN_SIM = 0.35;           // vector-only floor (lexical hits bypass it); tuned for voyage-law-2,
+                                // whose relevant query↔passage cosines typically land in 0.4–0.7
 const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
 const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
 const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
 const WRITER_EFFORT = "high";    // adaptive-thinking depth for the writer (low|medium|high|xhigh|max)
 const WRITER_MAX_TOKENS = 24000; // enforced output ceiling (thinking + answer); we stream, so it's safe
+
+// ---------- v29: transient-failure handling ----------
+const WRITER_MAX_ATTEMPTS = 3;    // total writer attempts; the final one uses WRITER_FALLBACK_MODEL
+const EMBED_MAX_ATTEMPTS = 2;     // total voyage query-embedding attempts
+const RETRY_BASE_DELAY_MS = 2000; // backoff base: ~2s, then ~5s (plus jitter)
+const RETRY_MAX_DELAY_MS = 15000; // hard cap on any single backoff wait
 
 // ---------- CourtListener (external case-law authority) ----------
 // The deployed edge function reaches CourtListener's REST API directly (it cannot use the
@@ -92,6 +134,79 @@ type Matter = {
   court: string;
   judge: string;
 };
+
+// ---------- v29: retry primitives ----------
+// A typed upstream error carrying the HTTP status and any Retry-After hint, so retry
+// classification can be exact for request-level failures and message-based for
+// mid-stream SSE error events (which carry no HTTP status).
+class ApiError extends Error {
+  status: number;
+  retryAfterMs: number | null;
+  constructor(message: string, status: number, retryAfterMs: number | null = null) {
+    super(message);
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
+
+// Transient upstream conditions worth retrying. Status-based when we have a status
+// (ApiError); otherwise message-based — this is how a mid-stream Anthropic
+// `overloaded_error` (message "Overloaded") is classified as retryable.
+function isRetryableError(e: unknown): boolean {
+  if (e instanceof ApiError) return RETRYABLE_STATUS.has(e.status);
+  const msg = ((e as Error)?.message ?? "").toLowerCase();
+  return /overloaded|rate.?limit|too many requests|timed?.?out|temporarily unavailable|service unavailable|internal server error|upstream|connection (?:reset|closed)/.test(msg);
+}
+
+// Exponential backoff with jitter, honoring an upstream Retry-After hint when present.
+function retryDelayMs(attempt: number, e: unknown): number {
+  const hinted = e instanceof ApiError && e.retryAfterMs != null ? e.retryAfterMs : 0;
+  const backoff = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2.5, attempt - 1), RETRY_MAX_DELAY_MS);
+  const jitter = Math.floor(Math.random() * 500);
+  return Math.min(Math.max(hinted, backoff) + jitter, RETRY_MAX_DELAY_MS);
+}
+
+// ---------- Voyage query embedding (v28) ----------
+// Embeds the user's question server-side with the SAME model family that embedded the
+// corpus (voyage-law-2), input_type 'query'. Returns a pgvector text literal (1024 dims).
+async function voyageEmbedQuery(text: string): Promise<string> {
+  if (!VOYAGE_API_KEY) throw new Error("VOYAGE_API_KEY not configured");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), VOYAGE_TIMEOUT_MS);
+  try {
+    const resp = await fetch(VOYAGE_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: [text.slice(0, 8000)], model: VOYAGE_MODEL, input_type: "query", truncation: true }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      const ra = resp.headers.get("retry-after");
+      const raMs = ra && Number.isFinite(Number(ra)) ? Number(ra) * 1000 : null;
+      throw new ApiError(`Voyage ${resp.status}: ${t.slice(0, 200)}`, resp.status, raMs);
+    }
+    const data = await resp.json();
+    const emb = data?.data?.[0]?.embedding;
+    if (!Array.isArray(emb)) throw new Error("Voyage returned no embedding");
+    return "[" + emb.map((x: number) => Number(x).toFixed(6)).join(",") + "]";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Dimension of a pgvector text literal like "[0.1,-0.2,...]" (0 when empty/invalid).
+function vecDims(v: string): number {
+  const s = (v ?? "").trim();
+  if (!s.startsWith("[") || !s.endsWith("]") || s.length < 3) return 0;
+  return s.split(",").length;
+}
 
 // ---------- Writer system prompt (all matters) ----------
 // One unified builder drives every matter, including Depo-Provera (via DEFAULT_MATTER).
@@ -148,7 +263,7 @@ HOW TO ANSWER
 You are a research aid, not a substitute for the attorney's judgment. Accuracy and traceability to the record are paramount.`;
 }
 
-// ---------- Router system prompt builder (all matters; describes all five tools) ----------
+// ---------- Router system prompt builder (all matters; describes all six tools) ----------
 function buildRouterSystem(m: Matter): string {
   return `You are the retrieval router for a litigation research assistant working the ${m.name} record (MDL No. ${m.mdl_number}, before ${m.judge}). You support the plaintiffs' leadership, including Seeger Weiss LLP, co-lead counsel.
 
@@ -443,13 +558,13 @@ async function callRpc(fn: string, body: any): Promise<any[]> {
 }
 
 // Build the Anthropic citable search_result block AND the UI chunk payload from one DB
-// row. Shared by hybrid_search, expand_neighbors, and order_chunks so every retrieval path
-// produces identical shapes. `extra` carries provenance flags (e.g. { neighbor: true }).
+// row. Shared by hybrid_search_v2, expand_neighbors, and order_chunks so every retrieval
+// path produces identical shapes. `extra` carries provenance flags (e.g. { neighbor: true }).
 function mapRow(r: any, extra: Record<string, unknown> = {}): { searchResult: any; chunk: any } {
   const sentences = splitSentences(r.content);
   const label = orderLabel(r);
   const page = pageCite(r);
-  const title = `${label}${page ? " · " + page : ""}`;
+  const title = `${label}${page ? " \u00b7 " + page : ""}`;
   const source = r.pdf_url || `mdl:${r.id}`;
   const searchResult = {
     type: "search_result",
@@ -500,7 +615,7 @@ function collectRows(rows: any[], seen: Set<string>, limit: number, extra: Recor
   return { searchResults, chunks, ids };
 }
 
-// Call hybrid_search on the same Supabase, scoped to the matter's case_id. Returns new
+// Call hybrid_search_v2 on the same Supabase, scoped to the matter's case_id. Returns new
 // (deduped) chunks plus `hitIds` (top fresh hits in score order, for neighbor expansion).
 // `displayFilter` is the user-applied filter (shown in the UI); `caseId` is injected into
 // the RPC filter only, so it never appears in the UI filter chips.
@@ -517,13 +632,13 @@ async function runSearch(
   let k = Number.isFinite(input?.k) ? Math.floor(input.k) : PER_SEARCH_K;
   k = Math.max(1, Math.min(PER_SEARCH_K, k));
 
-  // Overfetch then dedup: hybrid_search is deterministic, so a near-identical query in a
+  // Overfetch then dedup: hybrid_search_v2 is deterministic, so a near-identical query in a
   // later round returns the same top rows — which are already in `seen` and would net ZERO
   // new passages. Asking the RPC for more than k (bounded by its internal 50-row pools) lets
   // us skip the already-seen rows and still hand back up to k FRESH passages per call.
   const fetchK = Math.max(k, Math.min(50, k + seen.size));
 
-  const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/hybrid_search`, {
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/hybrid_search_v2`, {
     method: "POST",
     headers: {
       "apikey": SERVICE_KEY,
@@ -534,7 +649,7 @@ async function runSearch(
   });
   if (!resp.ok) {
     const body = await resp.text();
-    throw new Error(`hybrid_search failed (${resp.status}): ${body.slice(0, 300)}`);
+    throw new Error(`hybrid_search_v2 failed (${resp.status}): ${body.slice(0, 300)}`);
   }
   const rows: any[] = await resp.json();
   const { searchResults, chunks, ids } = collectRows(rows, seen, k);
@@ -543,7 +658,7 @@ async function runSearch(
 
 // Neighbor/sibling expansion: pull the chunks adjacent (chunk_index +/- NEIGHBOR_WINDOW,
 // same document) to a set of center hits, so the writer sees contiguous context instead of
-// isolated snippets. Positional \u2014 no embedding needed.
+// isolated snippets. Positional — no embedding needed.
 async function expandNeighbors(
   caseId: string,
   centerIds: string[],
@@ -817,7 +932,7 @@ function fmtCounselLine(c: any): string {
 function fmtDeadlineLine(d: any): string {
   const cat = d.category ? ` [${d.category}]` : "";
   const title = d.title ? ` ${String(d.title).replace(/\s+/g, " ").trim()}` : "";
-  const range = d.end_date && d.end_date !== d.event_date ? ` \u2192 ${d.end_date}` : "";
+  const range = d.end_date && d.end_date !== d.event_date ? ` → ${d.end_date}` : "";
   const time = d.event_time ? ` ${d.event_time}` : "";
   const affects = d.affects ? ` (affects: ${d.affects})` : "";
   const src = d.source_order_type
@@ -907,7 +1022,9 @@ async function geminiRouterRound(
   });
   if (!res.ok || !res.body) {
     const t = await res.text().catch(() => "");
-    throw new Error(`Gemini router ${res.status}: ${t.slice(0, 400)}`);
+    const ra = res.headers.get("retry-after");
+    const raMs = ra && Number.isFinite(Number(ra)) ? Number(ra) * 1000 : null;
+    throw new ApiError(`Gemini router ${res.status}: ${t.slice(0, 400)}`, res.status, raMs);
   }
 
   const reader = res.body.getReader();
@@ -1000,7 +1117,9 @@ async function streamTurn(
   });
   if (!res.ok || !res.body) {
     const t = await res.text().catch(() => "");
-    throw new Error(`Anthropic API ${res.status}: ${t.slice(0, 400)}`);
+    const ra = res.headers.get("retry-after");
+    const raMs = ra && Number.isFinite(Number(ra)) ? Number(ra) * 1000 : null;
+    throw new ApiError(`Anthropic API ${res.status}: ${t.slice(0, 400)}`, res.status, raMs);
   }
 
   const reader = res.body.getReader();
@@ -1102,7 +1221,7 @@ Deno.serve(async (req: Request) => {
   let payload: any;
   try { payload = await req.json(); } catch { return new Response("Bad JSON", { status: 400, headers: CORS }); }
   const question = (payload?.question ?? "").toString().trim();
-  const embedding = (payload?.embedding ?? "").toString().trim();
+  const clientEmbedding = (payload?.embedding ?? "").toString().trim();
   const initialFilter = (payload?.initial_filter && typeof payload.initial_filter === "object") ? payload.initial_filter : {};
   const caseId = (payload?.case_id ?? "").toString().trim() || DEFAULT_CASE_ID;
   const matter: Matter = (payload?.matter && typeof payload.matter === "object")
@@ -1111,7 +1230,12 @@ Deno.serve(async (req: Request) => {
   const writerSystem = buildWriterSystem(matter);
   const routerSystem = buildRouterSystem(matter);
 
-  if (!question || !embedding) return new Response("Missing question or embedding", { status: 400, headers: CORS });
+  if (!question) return new Response("Missing question", { status: 400, headers: CORS });
+
+  // v28: a client-supplied embedding is honored only when it is already in the corpus's
+  // vector space (1024-dim voyage-law-2); anything else (including legacy 384-dim bge
+  // vectors from older frontends) is ignored and the function embeds the question itself.
+  const hasClientVec = vecDims(clientEmbedding) === 1024;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -1123,11 +1247,32 @@ Deno.serve(async (req: Request) => {
       const missing: string[] = [];
       if (!GEMINI_API_KEY) missing.push("GEMINI_API_KEY");
       if (!ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
+      if (!hasClientVec && !VOYAGE_API_KEY) missing.push("VOYAGE_API_KEY");
       if (missing.length) {
-        emit({ type: "error", message: `${missing.join(" and ")} not set. Add ${missing.length > 1 ? "them" : "it"} in Supabase \u2192 Project Settings \u2192 Edge Functions \u2192 Secrets, then retry.` });
+        emit({ type: "error", message: `${missing.join(" and ")} not set. Add ${missing.length > 1 ? "them" : "it"} in Supabase → Project Settings → Edge Functions → Secrets, then retry.` });
         emit({ type: "done", rounds: 0, chunk_count: 0, citation_count: 0 });
         controller.close();
         return;
+      }
+
+      // Resolve the query embedding (server-side voyage-law-2 unless the client already
+      // supplied a 1024-dim vector). v29: one retry on transient Voyage failures — an
+      // embedding failure here previously killed the run before any retrieval happened.
+      let embedding = hasClientVec ? clientEmbedding : "";
+      if (!embedding) {
+        for (let attempt = 1; attempt <= EMBED_MAX_ATTEMPTS && !embedding; attempt++) {
+          try {
+            embedding = await voyageEmbedQuery(question);
+          } catch (e) {
+            if (attempt >= EMBED_MAX_ATTEMPTS || !isRetryableError(e)) {
+              emit({ type: "error", message: `Query embedding failed: ${(e as Error).message}` });
+              emit({ type: "done", rounds: 0, chunk_count: 0, citation_count: 0 });
+              controller.close();
+              return;
+            }
+            await sleep(retryDelayMs(attempt, e));
+          }
+        }
       }
 
       const emittedResults: any[] = [];   // UI chunks, in citation-index order
@@ -1136,6 +1281,7 @@ Deno.serve(async (req: Request) => {
       const seen = new Set<string>();
       const searchesLog: any[] = [];
       let rounds = 0, answerText = "", citationCount = 0, finalErr: string | null = null;
+      let writerModelUsed = MODEL;
 
       let userText = question;
       if (initialFilter && Object.keys(initialFilter).length) {
@@ -1145,7 +1291,8 @@ Deno.serve(async (req: Request) => {
       // ----- Phase 1: Gemini router gathers the record -----
       // History is plain text (rationale + compact results), never replayed tool-call parts,
       // so Gemini 3's thought_signature requirement never triggers. Router failures are
-      // non-fatal: we fall through to the writer with whatever was gathered.
+      // non-fatal: we fall through to the writer with whatever was gathered. v29: a
+      // transient router failure is retried ONCE per round before falling through.
       const routerMessages: any[] = [
         { role: "system", content: routerSystem },
         { role: "user", content: userText },
@@ -1154,18 +1301,30 @@ Deno.serve(async (req: Request) => {
       while (rounds < MAX_ROUNDS) {
         const round = rounds + 1;
         emit({ type: "round", round });
-        let r: { rationale: string; toolCalls: any[]; finish: string | null };
+        let r: { rationale: string; toolCalls: any[]; finish: string | null } | null = null;
         try {
           r = await geminiRouterRound(routerMessages, round, emit);
-        } catch (e) {
-          emit({ type: "search_error", round, message: `Router: ${(e as Error).message}` });
-          emit({ type: "round_end", round, stop_reason: "router_error" });
-          rounds = round;
-          break;
+        } catch (e1) {
+          if (isRetryableError(e1)) {
+            await sleep(retryDelayMs(1, e1));
+            try {
+              r = await geminiRouterRound(routerMessages, round, emit);
+            } catch (e2) {
+              emit({ type: "search_error", round, message: `Router: ${(e2 as Error).message}` });
+              emit({ type: "round_end", round, stop_reason: "router_error" });
+              rounds = round;
+              break;
+            }
+          } else {
+            emit({ type: "search_error", round, message: `Router: ${(e1 as Error).message}` });
+            emit({ type: "round_end", round, stop_reason: "router_error" });
+            rounds = round;
+            break;
+          }
         }
         rounds = round;
 
-        if (!r.toolCalls.length) {
+        if (!r || !r.toolCalls.length) {
           emit({ type: "round_end", round, stop_reason: "router_done" });
           break;
         }
@@ -1241,7 +1400,7 @@ Deno.serve(async (req: Request) => {
               searchesLog.push({ round, tool: "search_caselaw", args: s.c.input, returned: s.cl.count });
               emit({ type: "chunks", round, chunks: s.cl.chunks });
               emit({ type: "tool", round, tool: "search_caselaw", count: s.cl.count, done: true });
-              const lines = s.cl.chunks.map((c: any) => `- ${c.full_citation}${c.cite_count != null ? ` (cited ${c.cite_count}×)` : ""}`);
+              const lines = s.cl.chunks.map((c: any) => `- ${c.full_citation}${c.cite_count != null ? ` (cited ${c.cite_count}\u00d7)` : ""}`);
               const moreNote = s.cl.total > s.cl.count ? ` of ${s.cl.total} matching` : "";
               resultBlocks.push(
                 s.cl.count
@@ -1297,6 +1456,11 @@ Deno.serve(async (req: Request) => {
       }
 
       // ----- Phase 2: Opus 4.8 writer synthesizes with citations (extended thinking ON) -----
+      // v29: wrapped in a bounded retry loop. Transient upstream failures (429/5xx/529 and
+      // mid-stream overloaded/rate-limit SSE errors) back off and retry; the FINAL attempt
+      // falls back to WRITER_FALLBACK_MODEL. A retry is only attempted while ZERO answer
+      // text has streamed — once any answer text is visible, a rerun would duplicate it, so
+      // a mid-answer interruption is surfaced as an explicit error instead.
       const writerRound = rounds + 1;
       try {
         emit({ type: "round", round: writerRound, writer: true });
@@ -1321,30 +1485,71 @@ Deno.serve(async (req: Request) => {
               recordIndexBlocks.join("\n\n"),
           });
         }
-        // Adaptive thinking lets the writer plan structure and decide which passages support
-        // which claims BEFORE writing — materially improving citation coverage. Opus 4.8 uses
-        // adaptive thinking + output_config.effort (NOT the legacy enabled/budget_tokens, which
-        // 400s). display:"summarized" is required for the reasoning to stream as readable text
-        // (the default "omitted" returns empty thinking blocks).
-        const body: any = {
-          model: MODEL,
-          max_tokens: WRITER_MAX_TOKENS,
-          thinking: { type: "adaptive", display: "summarized" },
-          output_config: { effort: WRITER_EFFORT },
-          system: [{ type: "text", text: writerSystem, cache_control: { type: "ephemeral" } }],
-          messages: [{ role: "user", content: writerUser }],
-          stream: true,
-        };
-        const turn = await streamTurn(
-          body, writerRound, emit, emittedResults,
-          () => {}, () => { citationCount++; },
-        );
+
+        let turn: { assistantContent: any[]; stopReason: string | null; text: string } | null = null;
+        let lastErr: unknown = null;
+        for (let attempt = 1; attempt <= WRITER_MAX_ATTEMPTS; attempt++) {
+          // Capacity errors (529 Overloaded) are usually model-specific: the final attempt
+          // switches to the fallback writer rather than trying the same model again.
+          writerModelUsed = attempt === WRITER_MAX_ATTEMPTS ? WRITER_FALLBACK_MODEL : MODEL;
+
+          // Adaptive thinking lets the writer plan structure and decide which passages support
+          // which claims BEFORE writing — materially improving citation coverage. Opus 4.8 uses
+          // adaptive thinking + output_config.effort (NOT the legacy enabled/budget_tokens, which
+          // 400s). display:"summarized" is required for the reasoning to stream as readable text
+          // (the default "omitted" returns empty thinking blocks). The fallback model omits
+          // these parameters (they are tuned for the primary model) and streams a plain cited
+          // answer — degraded thinking depth is preferable to no answer at all.
+          const body: any = {
+            model: writerModelUsed,
+            max_tokens: WRITER_MAX_TOKENS,
+            system: [{ type: "text", text: writerSystem, cache_control: { type: "ephemeral" } }],
+            messages: [{ role: "user", content: writerUser }],
+            stream: true,
+          };
+          if (writerModelUsed === MODEL) {
+            body.thinking = { type: "adaptive", display: "summarized" };
+            body.output_config = { effort: WRITER_EFFORT };
+          }
+
+          let sawAnswerText = false;
+          try {
+            if (attempt > 1) {
+              emit({
+                type: "thinking",
+                round: writerRound,
+                text: `\n[Transient upstream error — retrying the writer (attempt ${attempt}/${WRITER_MAX_ATTEMPTS}${writerModelUsed !== MODEL ? `, falling back to ${writerModelUsed}` : ""}).]\n`,
+              });
+            }
+            turn = await streamTurn(
+              body, writerRound, emit, emittedResults,
+              () => { sawAnswerText = true; }, () => { citationCount++; },
+            );
+            break;
+          } catch (e) {
+            lastErr = e;
+            // Never auto-retry once answer text has already streamed — a rerun would
+            // duplicate the visible answer in the client. Surface the interruption instead.
+            if (sawAnswerText) {
+              throw new Error(`The answer stream was interrupted mid-write (${(e as Error).message}). The research gathered above is preserved — re-run the question to get a complete answer.`);
+            }
+            if (attempt >= WRITER_MAX_ATTEMPTS || !isRetryableError(e)) throw e;
+            await sleep(retryDelayMs(attempt, e));
+          }
+        }
+        if (!turn) {
+          throw (lastErr instanceof Error ? lastErr : new Error("Writer produced no output"));
+        }
         emit({ type: "round_end", round: writerRound, stop_reason: turn.stopReason });
         answerText = turn.text;
         rounds = writerRound;
       } catch (e) {
-        finalErr = (e as Error).message;
-        emit({ type: "error", message: finalErr });
+        const msg = (e as Error).message;
+        finalErr = msg;
+        const friendly = isRetryableError(e)
+          ? `The writer model is temporarily overloaded upstream (${msg}). ${WRITER_MAX_ATTEMPTS} attempts were made, including a fallback model. The research gathered above is preserved — re-run the question in a moment.`
+          : msg;
+        emit({ type: "error", message: friendly });
       }
 
       emit({ type: "done", rounds, chunk_count: emittedResults.length, citation_count: citationCount });
@@ -1359,7 +1564,9 @@ Deno.serve(async (req: Request) => {
             initial_filter: { ...initialFilter, case_id: caseId, matter: matter.slug },
             rounds, searches: searchesLog,
             chunk_ids: emittedResults.map((c) => c.ref), answer: answerText,
-            citation_count: citationCount, model: `${ROUTER_MODEL} -> ${MODEL} (thinking)`, error: finalErr,
+            citation_count: citationCount,
+            model: `${ROUTER_MODEL} -> ${writerModelUsed}${writerModelUsed === MODEL ? " (thinking; voyage-law-2 retrieval)" : " (fallback writer; voyage-law-2 retrieval)"}`,
+            error: finalErr,
           }),
         });
       } catch { /* ignore */ }
