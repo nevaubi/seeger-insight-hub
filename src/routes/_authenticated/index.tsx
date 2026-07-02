@@ -82,7 +82,7 @@ function Dashboard() {
       <div className="px-8 py-6 space-y-10">
         {/* Stat cards */}
         <section className="motion-safe:motion-fade-rise">
-          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground mb-2.5 font-sans">At a glance</div>
+          <div className="t-eyebrow mb-2.5">At a glance</div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <StatCard icon={Gavel} label="Controlling orders" value={data.counts.orders} />
             <StatCard icon={FileText} label="Cases in roster" value={data.counts.cases} />
