@@ -1691,10 +1691,6 @@ Deno.serve(async (req: Request) => {
       let rounds = 0, answerText = "", citationCount = 0, finalErr: string | null = null;
       let writerModelUsed = MODEL;
 
-      let userText = question;
-      if (initialFilter && Object.keys(initialFilter).length) {
-        userText += `\n\n[The user applied these filters in the interface; they are enforced on every search and may not be removed: ${JSON.stringify(initialFilter)}.]`;
-      }
 
       // ----- Phase 0 (v30): PLANNER decomposes the question into facets + HyDE hypotheses.
       // Non-fatal on failure (falls back to a single-facet plan). Runs in the background of
