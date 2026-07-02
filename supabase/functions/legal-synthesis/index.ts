@@ -1,3 +1,20 @@
+// Supabase Edge Function: legal-synthesis (v30)
+// v30 — MULTI-AGENT GRAPH + WIDER RAG + TAVILY WEB SUB-AGENT:
+//   * PLANNER (Gemini 3.1 Pro): decomposes the question into facets, writes a HyDE
+//     hypothesis per facet, and picks which specialists to run. Emitted as `plan` SSE.
+//   * SPECIALISTS: the existing router loop still dispatches tools in parallel, plus a new
+//     `search_web` tool backed by Tavily, scoped to a reputable-legal + regulatory +
+//     scientific domain allowlist (courtlistener, uscourts, fda.gov, nejm, jamanetwork, ...).
+//   * VOYAGE RERANK-2: after retrieval, all record passages are reranked; top 80 survive.
+//   * CRITIC (Gemini 3.5 Flash): coverage/gap check; may trigger ONE extra router round.
+//     Emitted as `critic` SSE.
+//   * VERIFIER (Gemini 3.5 Flash): post-stream citation-grounding pass. Emitted as `verify`
+//     SSE (advisory; the writer output is NOT rewritten in Phase A).
+//   * Retrieval knobs widened: MAX_ROUNDS 3->5, PER_SEARCH_K 10->15, EXPAND_TOP_N 3->5,
+//     MAX_TOTAL_CHUNKS 60->120 (pre-rerank), MAX_WRITER_CHUNKS 80 (post-rerank ceiling).
+// New SSE event types (additive; the reducer's default case keeps old clients working):
+//   plan, critic, verify, web_result.
+//
 // Supabase Edge Function: legal-synthesis (v29)
 // Multi-agent, multi-matter RAG over a litigation record (controlling orders + filings).
 //   Router = Gemini 3.1 Flash-Lite (OpenAI-compatible endpoint): plans and runs up to
@@ -78,22 +95,51 @@ const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const VOYAGE_MODEL = "voyage-law-2";
 const VOYAGE_TIMEOUT_MS = 20000;
-const MAX_ROUNDS = 3;
-const PER_SEARCH_K = 10;        // targeted retrieval: up to 10 fresh passages per search
-const MAX_TOTAL_CHUNKS = 60;    // absolute ceiling across primary hits + neighbor/order expansion
-const MIN_SIM = 0.35;           // vector-only floor (lexical hits bypass it); tuned for voyage-law-2,
-                                // whose relevant query↔passage cosines typically land in 0.4–0.7
-const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
-const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
-const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
-const WRITER_EFFORT = "high";    // adaptive-thinking depth for the writer (low|medium|high|xhigh|max)
-const WRITER_MAX_TOKENS = 24000; // enforced output ceiling (thinking + answer); we stream, so it's safe
+const MAX_ROUNDS = 5;
+const PER_SEARCH_K = 15;        // v30: widened retrieval
+const MAX_TOTAL_CHUNKS = 120;   // v30: pre-rerank ceiling across all record passages
+const MAX_WRITER_CHUNKS = 80;   // v30: post-rerank cap actually handed to the writer
+const MIN_SIM = 0.32;           // slightly relaxed to feed the reranker more candidates
+const NEIGHBOR_WINDOW = 1;
+const EXPAND_TOP_N = 5;         // v30: expand more hits per search
+const READ_ORDER_LIMIT = 40;
+const WRITER_EFFORT = "high";
+const WRITER_MAX_TOKENS = 24000;
 
 // ---------- v29: transient-failure handling ----------
-const WRITER_MAX_ATTEMPTS = 3;    // total writer attempts; the final one uses WRITER_FALLBACK_MODEL
-const EMBED_MAX_ATTEMPTS = 2;     // total voyage query-embedding attempts
-const RETRY_BASE_DELAY_MS = 2000; // backoff base: ~2s, then ~5s (plus jitter)
-const RETRY_MAX_DELAY_MS = 15000; // hard cap on any single backoff wait
+const WRITER_MAX_ATTEMPTS = 3;
+const EMBED_MAX_ATTEMPTS = 2;
+const RETRY_BASE_DELAY_MS = 2000;
+const RETRY_MAX_DELAY_MS = 15000;
+
+// ---------- v30: multi-agent + web + rerank ----------
+const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-pro-preview";
+const CRITIC_MODEL  = Deno.env.get("CRITIC_MODEL")  ?? "gemini-3.5-flash";
+const VERIFIER_MODEL = Deno.env.get("VERIFIER_MODEL") ?? "gemini-3.5-flash";
+const RERANK_URL   = "https://api.voyageai.com/v1/rerank";
+const RERANK_MODEL = "rerank-2";
+const RERANK_TIMEOUT_MS = 15000;
+const TAVILY_URL = "https://api.tavily.com/search";
+const TAVILY_API_KEY = Deno.env.get("TAVILY_API_KEY") ?? "";
+const TAVILY_TIMEOUT_MS = 15000;
+const WEB_MAX_RESULTS = 8;
+const WEB_EXCERPT_CHARS = 2000;
+// Reputable legal + regulatory + scientific domains only. Tavily filters upstream via
+// include_domains; we also re-check server-side (defense in depth) before handing results
+// to the writer.
+const WEB_ALLOWED_DOMAINS = [
+  // Case law + court sites
+  "courtlistener.com", "law.cornell.edu", "justia.com", "casetext.com",
+  "supremecourt.gov", "uscourts.gov", "ca11.uscourts.gov", "flnd.uscourts.gov",
+  "jpml.uscourts.gov",
+  // Legal news / secondary
+  "reuters.com", "law360.com", "bloomberglaw.com", "abajournal.com", "ssrn.com",
+  // Regulatory
+  "fda.gov", "ema.europa.eu", "who.int",
+  // Scientific / medical
+  "nih.gov", "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov",
+  "nejm.org", "jamanetwork.com", "thelancet.com", "bmj.com",
+];
 
 // ---------- CourtListener (external case-law authority) ----------
 // The deployed edge function reaches CourtListener's REST API directly (it cannot use the
@@ -276,6 +322,7 @@ YOUR TOOLS
   4. list_deadlines — the matter's key dates and deadlines (date, category, title, who it affects, source order). Use this for calendar/deadline questions ("what hearings are coming up", "list the deadlines for plaintiffs").
   5. lookup_counsel — counsel of record (side, firm, attorney, contact). Use this for roster questions ("who represents the defendants", "list plaintiffs' counsel").
   6. search_caselaw — EXTERNAL published court opinions (federal/state case law via CourtListener), with full Bluebook citations and holding text. This is the ONLY tool that reaches OUTSIDE this matter's closed record. Use it when the question turns on what the LAW is — a doctrine, legal standard, or test (e.g. the Daubert/Rule 702 standard for expert admissibility, general-causation proof requirements, pleading standards, preemption, choice-of-law) — rather than on what this matter's own orders provide. Restrict to the controlling jurisdiction with court when you know it (this MDL sits in the Eleventh Circuit — court: "ca11" — and N.D. Fla. — court: "flnd"; the Supreme Court is "scotus"). Set most_cited: true to surface the leading authority on a settled doctrine.
+  7. search_web — Targeted web search over REPUTABLE sources ONLY (an allowlist: uscourts.gov, courtlistener.com, cornell/justia, fda.gov, ema.europa.eu, who.int, NIH/PubMed, NEJM, JAMA, Lancet, BMJ, Law360, Bloomberg Law, SSRN). Use SPARINGLY and only when the matter record and search_caselaw are insufficient — for very recent agency guidance, a peer-reviewed study not in the corpus, or reputable commentary on a doctrine. Never for the matter's own orders. Any non-allowlisted domain is dropped.
 Prefer the structured tools (3-5) when the question is fundamentally an enumeration or a roster/calendar lookup — they are complete and exact. Prefer search_the_record when the question turns on the language or substance of an order, or on the scientific/regulatory record; reach for read_order once you know the specific order whose full text or amendment history matters. You may combine tools across rounds (e.g., list_orders to find the right order, then read_order to pull its full text).
 
 WHEN TO REACH OUTSIDE THE RECORD (search_caselaw): the matter tools (1-5) answer "what does this MDL require?"; search_caselaw answers "what does the governing law hold?". Use it when the question asks about a legal standard, the basis for a ruling, or how a court would analyze an issue — and especially when an attorney needs the controlling precedent behind an order (e.g. "what is the Daubert standard the court will apply at the Rule 702 hearing?" warrants both search_the_record for the matter's 702 schedule AND search_caselaw, court: "ca11", for the circuit's expert-admissibility precedent). Do NOT use it for the matter's own orders, deadlines, or roster. When a question has both a record facet and a law facet, fire the matter search and the caselaw search in PARALLEL in the same round. If a pure record question needs no external law, do not call it.
@@ -316,12 +363,12 @@ Before each round's tool calls, narrate your retrieval reasoning in ONE to THREE
   Avoid: "Searching the record for information." / "Looking for relevant documents." / "Calling list_orders now."
 
 PROCESS
-  - Use up to THREE rounds, but cover each round's independent facets in PARALLEL (multiple tool calls at once) rather than spreading them across rounds. Reserve later rounds for genuine follow-ups — pinning an exact term you just discovered, reading the full text of an order a search surfaced, or filling a specific gap.
+  - Use up to FIVE rounds, but cover each round's independent facets in PARALLEL (multiple tool calls at once) rather than spreading them across rounds. Reserve later rounds for genuine follow-ups — pinning an exact term you just discovered, reading the full text of an order a search surfaced, or filling a specific gap identified by the critic.
   - For a single-issue question, one or two precise searches are usually enough. For a question that turns on several orders, provisions, dates, or parties, fan out across facets in the first round, then deepen.
   - Pull MORE when a thread is clearly load-bearing: if a search shows an order is central, follow up with read_order for its full text; if the question hinges on whether an order was amended, read the base and amendment together. Match retrieval depth to how much the answer depends on it.
   - Favor COVERAGE of what the question turns on: the order numbers, dates, deadlines, parties, defined terms, and — for background questions — the studies or regulatory actions it touches.
   - As soon as the gathered material is sufficient to answer comprehensively, STOP: reply with a brief one-line note that retrieval is complete and do NOT call a tool again. Do not write the answer or any analysis.
-  - Never exceed three rounds.`;
+  - Never exceed five rounds.`;
 }
 
 // ---------- Tool schemas (JSON Schema) ----------
@@ -439,6 +486,28 @@ const CASELAW_TOOL_SCHEMA = {
   required: ["query"],
 };
 
+// v30: Tavily-backed web search, scoped to reputable legal + regulatory + scientific
+// sources by a server-side domain allowlist. Kept small (max 8 results, ~2KB excerpt each)
+// so the writer context stays sane.
+const WEB_TOOL_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description:
+        "Natural-language web query for a targeted lookup on reputable legal, regulatory, or " +
+        "scientific sources (e.g. 'Eleventh Circuit Daubert general causation meningioma', " +
+        "'FDA Depo-Provera label change intracranial meningioma', 'NEJM medroxyprogesterone " +
+        "meningioma cohort study'). Results are restricted server-side to an allowlist of " +
+        "courts, uscourts.gov, fda.gov, ema.europa.eu, who.int, NIH/PubMed, NEJM, JAMA, " +
+        "Lancet, BMJ, Law360, Bloomberg Law, and SSRN — any other domain is dropped.",
+    },
+    published_after: { type: "string", description: "Optional YYYY-MM-DD lower bound (Tavily days-back)." },
+    max_results: { type: "integer", description: "Cap results (default 8, max 8)." },
+  },
+  required: ["query"],
+};
+
 const GEMINI_TOOLS = [
   { type: "function", function: { name: "search_the_record", description: SEARCH_TOOL_DESCRIPTION, parameters: SEARCH_TOOL_SCHEMA } },
   {
@@ -497,6 +566,21 @@ const GEMINI_TOOLS = [
         "List this matter's key dates and deadlines (date, category, title, who it affects, and source order). Use for " +
         "calendar and deadline questions. Returns the full matching list.",
       parameters: DEADLINES_TOOL_SCHEMA,
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_web",
+      description:
+        "Targeted web search over REPUTABLE legal, regulatory, and scientific sources ONLY " +
+        "(CourtListener, uscourts.gov, Cornell LII, Justia, FDA/EMA/WHO, NIH/PubMed, NEJM, " +
+        "JAMA, Lancet, BMJ, Law360, Bloomberg Law, SSRN). Use SPARINGLY, and ONLY when the " +
+        "matter record and search_caselaw are insufficient — e.g. very recent regulatory " +
+        "actions or agency guidance, secondary commentary on a doctrine, or a peer-reviewed " +
+        "study the corpus does not include. Results are provisional context, not a substitute " +
+        "for the matter record or published case law. Any non-allowlisted domain is dropped.",
+      parameters: WEB_TOOL_SCHEMA,
     },
   },
 ];
@@ -1213,6 +1297,331 @@ async function streamTurn(
   return { assistantContent, stopReason, text: turnText };
 }
 
+// ============================================================================
+// v30: multi-agent helpers — Tavily web search, Voyage rerank, Planner, Critic, Verifier
+// ============================================================================
+
+// ---------- Tavily web sub-agent ----------
+function domainOf(url: string): string {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; }
+}
+function isAllowlistedDomain(host: string): boolean {
+  if (!host) return false;
+  return WEB_ALLOWED_DOMAINS.some((d) => host === d || host.endsWith("." + d));
+}
+
+async function tavilySearch(query: string, maxResults: number, daysBack?: number): Promise<any[]> {
+  if (!TAVILY_API_KEY) return [];
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TAVILY_TIMEOUT_MS);
+  try {
+    const body: Record<string, unknown> = {
+      api_key: TAVILY_API_KEY,
+      query,
+      search_depth: "advanced",
+      max_results: Math.max(1, Math.min(WEB_MAX_RESULTS, maxResults)),
+      include_answer: false,
+      include_raw_content: false,
+      include_domains: WEB_ALLOWED_DOMAINS,
+    };
+    if (Number.isFinite(daysBack) && (daysBack as number) > 0) body.days = daysBack;
+    const resp = await fetch(TAVILY_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      throw new Error(`Tavily ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    return Array.isArray(data?.results) ? data.results : [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Wraps Tavily into the same {searchResults, chunks, count} shape as the other tools.
+async function runWebSearch(
+  input: any,
+  question: string,
+  seen: Set<string>,
+): Promise<{ searchResults: any[]; chunks: any[]; count: number; unavailable?: string }> {
+  if (!TAVILY_API_KEY) {
+    return { searchResults: [], chunks: [], count: 0, unavailable: "TAVILY_API_KEY not configured" };
+  }
+  const a = (input && typeof input === "object") ? input : {};
+  const q = (a.query && String(a.query).trim()) || question;
+  const maxR = Number.isFinite(a.max_results) ? Math.floor(a.max_results) : WEB_MAX_RESULTS;
+  let daysBack: number | undefined;
+  if (a.published_after) {
+    const ms = Date.parse(String(a.published_after));
+    if (Number.isFinite(ms)) daysBack = Math.max(1, Math.ceil((Date.now() - ms) / 86400000));
+  }
+  let raw: any[] = [];
+  try { raw = await tavilySearch(q, maxR, daysBack); }
+  catch (e) { return { searchResults: [], chunks: [], count: 0, unavailable: (e as Error).message }; }
+
+  const searchResults: any[] = [];
+  const chunks: any[] = [];
+  let count = 0;
+  for (const r of raw) {
+    const url = String(r?.url ?? "").trim();
+    if (!url) continue;
+    const host = domainOf(url);
+    if (!isAllowlistedDomain(host)) continue; // defense in depth
+    const ref = `web:${url}`;
+    if (seen.has(ref)) continue;
+    if (seen.size >= MAX_TOTAL_CHUNKS) break;
+    seen.add(ref);
+    const title = String(r?.title ?? "").replace(/\s+/g, " ").trim() || host;
+    const content = String(r?.content ?? "").replace(/\s+/g, " ").trim().slice(0, WEB_EXCERPT_CHARS);
+    const published = r?.published_date ? String(r.published_date).slice(0, 10) : null;
+    const header = `${title} — ${host}${published ? ` (${published})` : ""}. Source: ${url}`;
+    const bodySents = content ? splitSentences(content) : [];
+    const sentences = [header, ...bodySents];
+    searchResults.push({
+      type: "search_result",
+      source: url,
+      title,
+      content: sentences.map((s) => ({ type: "text", text: s })),
+      citations: { enabled: true },
+    });
+    chunks.push({
+      ref,
+      kind: "web",
+      order_label: `${host}${published ? ` · ${published}` : ""}`,
+      case_name: title,
+      full_citation: `${title}, ${host}${published ? ` (${published})` : ""}`,
+      court: null,
+      case_date: published,
+      cite_count: null,
+      status: null,
+      docket_number: null,
+      page_start: null,
+      page_end: null,
+      pdf_url: url,
+      excerpted: !!content,
+      sentences,
+    });
+    count++;
+  }
+  return { searchResults, chunks, count };
+}
+
+// ---------- Voyage rerank-2 ----------
+// Takes gathered record passages and reranks them against the question. Returns a new
+// ordering (best->worst) with rerank scores. Web + caselaw chunks bypass rerank (they
+// have their own relevance signal — Tavily rank and CourtListener score/cite count).
+async function voyageRerank(
+  question: string,
+  items: { text: string; idx: number }[],
+): Promise<{ idx: number; score: number }[]> {
+  if (!VOYAGE_API_KEY || items.length <= 1) return items.map((it) => ({ idx: it.idx, score: 0 }));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), RERANK_TIMEOUT_MS);
+  try {
+    const resp = await fetch(RERANK_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: question.slice(0, 2000),
+        documents: items.map((it) => it.text.slice(0, 4000)),
+        model: RERANK_MODEL,
+        top_k: items.length,
+        truncation: true,
+      }),
+    });
+    if (!resp.ok) return items.map((it) => ({ idx: it.idx, score: 0 }));
+    const data = await resp.json();
+    const results = Array.isArray(data?.data) ? data.data : [];
+    return results.map((r: any) => ({
+      idx: items[r.index]?.idx ?? 0,
+      score: Number.isFinite(r.relevance_score) ? r.relevance_score : 0,
+    }));
+  } catch {
+    return items.map((it) => ({ idx: it.idx, score: 0 }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- Gemini JSON call (Planner / Critic / Verifier) ----------
+// Non-streaming Gemini call via the OpenAI-compatible endpoint, returning parsed JSON.
+// Uses response_format: json_object for reliable structured output.
+async function geminiJson(
+  model: string,
+  system: string,
+  user: string,
+  maxTokens = 2048,
+): Promise<any> {
+  const res = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new ApiError(`${model} ${res.status}: ${t.slice(0, 300)}`, res.status, null);
+  }
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content ?? "";
+  try { return JSON.parse(content); } catch {
+    // salvage: some models wrap JSON in fences
+    const m = content.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch { /* fall through */ } }
+    throw new Error(`${model} returned non-JSON output`);
+  }
+}
+
+// ---------- PLANNER ----------
+type Facet = {
+  id: string;
+  question: string;
+  hypothesis: string;      // HyDE passage — a short hypothetical answer used as an extra embedding
+  specialists: string[];   // subset of: search_the_record, read_order, list_orders, lookup_counsel, list_deadlines, search_caselaw, search_web
+  keywords?: string[];
+  court?: string;
+};
+
+async function runPlanner(question: string, matter: Matter): Promise<{ facets: Facet[]; rationale: string }> {
+  const system = `You are the PLANNER for a multi-agent litigation research assistant working the ${matter.name} record (MDL No. ${matter.mdl_number}, before ${matter.judge}).
+
+Decompose the attorney's question into 1–4 independent research FACETS. For each facet, produce:
+  - id: short slug (e.g. "record_daubert_schedule", "ca11_daubert_precedent", "fda_label_update")
+  - question: the focused sub-question this facet answers
+  - hypothesis: a 1–3 sentence HYPOTHETICAL answer (HyDE) — the kind of passage that would answer this facet if it existed in the record. Written in the register of a litigation memo. This is used verbatim as an extra semantic-search query, so make it substantive.
+  - specialists: which retrieval tools to run. Available: search_the_record (matter passages), read_order (full text of a named order), list_orders / list_deadlines / lookup_counsel (structured docket index), search_caselaw (external published opinions via CourtListener), search_web (reputable-only web search: fda.gov, ema.europa.eu, who.int, NIH/PubMed, NEJM, JAMA, Lancet, BMJ, Law360, Bloomberg Law, SSRN, uscourts.gov).
+  - keywords (optional): 1–5 exact terms/phrases to pin (e.g. ["PTO 22", "Daubert"])
+  - court (optional): jurisdiction code for search_caselaw, if applicable ("ca11", "flnd", "scotus")
+
+Rules:
+  * Prefer record + case_law for anything that turns on an order or a legal standard.
+  * Reach for search_web ONLY for very recent regulatory action, agency guidance, or peer-reviewed studies unlikely to be in the corpus. Never for the matter's own orders.
+  * For a simple single-issue question, emit ONE facet — don't over-decompose.
+  * When several facets are independent, they will be executed in PARALLEL.
+  * Never invent case names, statute cites, or PTO numbers.
+
+Return ONLY JSON of the shape: { "rationale": "1–2 sentences on the decomposition", "facets": [ ... ] }`;
+  try {
+    const out = await geminiJson(PLANNER_MODEL, system, question, 2048);
+    const facets = Array.isArray(out?.facets) ? out.facets : [];
+    const normalized: Facet[] = facets.slice(0, 4).map((f: any, i: number) => ({
+      id: String(f?.id ?? `facet_${i + 1}`).slice(0, 64),
+      question: String(f?.question ?? question).trim(),
+      hypothesis: String(f?.hypothesis ?? "").trim(),
+      specialists: Array.isArray(f?.specialists) ? f.specialists.map((s: any) => String(s)) : ["search_the_record"],
+      keywords: Array.isArray(f?.keywords) ? f.keywords.map((k: any) => String(k)) : undefined,
+      court: f?.court ? String(f.court) : undefined,
+    }));
+    return { facets: normalized.length ? normalized : [{ id: "default", question, hypothesis: "", specialists: ["search_the_record"] }], rationale: String(out?.rationale ?? "") };
+  } catch {
+    // Planner failure is non-fatal: fall back to a single default facet so the existing
+    // router loop still runs the question with its normal heuristics.
+    return { facets: [{ id: "default", question, hypothesis: "", specialists: ["search_the_record"] }], rationale: "" };
+  }
+}
+
+// ---------- CRITIC ----------
+async function runCritic(
+  question: string,
+  facets: Facet[],
+  gatheredSummary: string,
+): Promise<{ done: boolean; missing: string[]; followup: string }> {
+  const system = `You are the CRITIC in a multi-agent litigation research pipeline. Given the attorney's question, the PLANNER's facets, and a summary of what has been gathered so far, decide whether retrieval is complete.
+
+Return ONLY JSON: { "done": boolean, "missing": [facet_ids...], "followup": "one short paragraph telling the router what specific gap(s) to fill, or empty string if done" }
+
+Be strict about coverage but tolerate reasonable substitution (a related order that answers the question is fine). If done, set done=true, missing=[], followup="". If not done, name the specific gap in one paragraph — an order to read, a deadline missing from the index, a case-law precedent the answer needs, a regulatory action to look up on the web.`;
+  const user = `Question: ${question}\n\nPlanner facets:\n${facets.map((f) => `- ${f.id}: ${f.question} [specialists: ${f.specialists.join(", ")}]`).join("\n")}\n\nGathered so far:\n${gatheredSummary || "(nothing)"}`;
+  try {
+    const out = await geminiJson(CRITIC_MODEL, system, user, 1024);
+    return {
+      done: !!out?.done,
+      missing: Array.isArray(out?.missing) ? out.missing.map((s: any) => String(s)) : [],
+      followup: String(out?.followup ?? "").trim(),
+    };
+  } catch {
+    return { done: true, missing: [], followup: "" };
+  }
+}
+
+// ---------- VERIFIER ----------
+// Post-writer citation-grounding pass. Advisory only in Phase A — the writer output is NOT
+// rewritten; unsupported sentences are surfaced as a `verify` SSE event so the UI can flag
+// them and the attorney can spot-check.
+async function runVerifier(
+  question: string,
+  answer: string,
+  citedRefs: string[],
+): Promise<{ unsupported: string[]; notes: string }> {
+  if (!answer.trim()) return { unsupported: [], notes: "" };
+  const system = `You are the VERIFIER in a multi-agent litigation research pipeline. Check whether each sentence in the WRITER's answer is grounded in the material that was provided to the writer. The writer streamed inline citations to source passages; only sentences with no supporting citation, or sentences that clearly overreach beyond a cited passage, count as UNSUPPORTED. Be strict but not pedantic — a topic sentence that summarizes a paragraph does not need its own citation if the following sentences are cited.
+
+Return ONLY JSON: { "unsupported": ["short verbatim quote of each unsupported sentence, max 3"], "notes": "one short paragraph, empty if all grounded" }`;
+  const user = `Question: ${question}\n\nWriter answer (as streamed, may include inline superscript citations):\n${answer.slice(0, 12000)}\n\nCited source refs (${citedRefs.length}): ${citedRefs.slice(0, 60).join(", ")}`;
+  try {
+    const out = await geminiJson(VERIFIER_MODEL, system, user, 1024);
+    return {
+      unsupported: Array.isArray(out?.unsupported) ? out.unsupported.slice(0, 3).map((s: any) => String(s)) : [],
+      notes: String(out?.notes ?? "").trim(),
+    };
+  } catch {
+    return { unsupported: [], notes: "" };
+  }
+}
+
+// Reranks the record passages (skipping web + caselaw, which have their own scoring),
+// keeps top MAX_WRITER_CHUNKS, and returns the reordered arrays. Also returns a boolean
+// indicating whether rerank ran (false = fallback / not enough items).
+async function rerankAndTrim(
+  question: string,
+  emittedResults: any[],
+  allSearchResults: any[],
+): Promise<{ chunks: any[]; results: any[]; ran: boolean; kept: number; dropped: number }> {
+  const total = emittedResults.length;
+  if (total <= MAX_WRITER_CHUNKS && total <= 12) {
+    return { chunks: emittedResults, results: allSearchResults, ran: false, kept: total, dropped: 0 };
+  }
+  // Only rerank record passages (kind is undefined). Web + caselaw pass through in place.
+  const recordItems: { text: string; idx: number }[] = [];
+  const nonRecord: number[] = [];
+  emittedResults.forEach((c, idx) => {
+    if (c.kind === "web" || c.kind === "caselaw") { nonRecord.push(idx); return; }
+    const text = (Array.isArray(c.sentences) ? c.sentences.join(" ") : "").slice(0, 4000);
+    recordItems.push({ text, idx });
+  });
+  const scored = await voyageRerank(question, recordItems);
+  if (!scored.length) return { chunks: emittedResults, results: allSearchResults, ran: false, kept: total, dropped: 0 };
+  // Keep all non-record; then top-N record by rerank score, up to MAX_WRITER_CHUNKS total.
+  const budgetForRecord = Math.max(0, MAX_WRITER_CHUNKS - nonRecord.length);
+  const sortedRecordIdx = scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, budgetForRecord)
+    .map((s) => s.idx);
+  const keepSet = new Set<number>([...nonRecord, ...sortedRecordIdx]);
+  // Preserve original ordering for stable citation numbering.
+  const chunks: any[] = [];
+  const results: any[] = [];
+  emittedResults.forEach((c, idx) => {
+    if (!keepSet.has(idx)) return;
+    chunks.push(c);
+    results.push(allSearchResults[idx]);
+  });
+  return { chunks, results, ran: true, kept: chunks.length, dropped: total - chunks.length };
+}
+
 // ---------- handler ----------
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
@@ -1283,9 +1692,41 @@ Deno.serve(async (req: Request) => {
       let rounds = 0, answerText = "", citationCount = 0, finalErr: string | null = null;
       let writerModelUsed = MODEL;
 
+
+      // ----- Phase 0 (v30): PLANNER decomposes the question into facets + HyDE hypotheses.
+      // Non-fatal on failure (falls back to a single-facet plan). Runs in the background of
+      // the first router round — we emit the plan as an SSE event so the UI can render it.
+      let plannedFacets: Facet[] = [];
+      let plannerRationale = "";
+      try {
+        const p = await runPlanner(question, matter);
+        plannedFacets = p.facets;
+        plannerRationale = p.rationale;
+        emit({
+          type: "plan",
+          rationale: plannerRationale,
+          facets: plannedFacets.map((f) => ({
+            id: f.id, question: f.question, hypothesis: f.hypothesis,
+            specialists: f.specialists, keywords: f.keywords ?? [], court: f.court ?? null,
+          })),
+        });
+      } catch { /* planner is best-effort */ }
+
+      // Compose the user turn: original question + planner facets + HyDE hypotheses. The
+      // hypotheses are load-bearing — they double the semantic-search surface via HyDE.
       let userText = question;
       if (initialFilter && Object.keys(initialFilter).length) {
         userText += `\n\n[The user applied these filters in the interface; they are enforced on every search and may not be removed: ${JSON.stringify(initialFilter)}.]`;
+      }
+      if (plannedFacets.length > 1 || (plannedFacets[0]?.hypothesis ?? "").length > 20) {
+        const facetLines = plannedFacets.map((f, i) =>
+          `${i + 1}. [${f.id}] ${f.question}` +
+          (f.specialists?.length ? `\n   specialists: ${f.specialists.join(", ")}` : "") +
+          (f.keywords?.length ? `\n   keywords: ${f.keywords.join(", ")}` : "") +
+          (f.court ? `\n   court: ${f.court}` : "") +
+          (f.hypothesis ? `\n   hypothesis: ${f.hypothesis}` : "")
+        ).join("\n\n");
+        userText += `\n\n[PLANNER decomposed this question into the following facets. Run their specialists in PARALLEL in the first round; each facet's hypothesis is the kind of passage that would answer it — use those as retrieval anchors.]\n\n${facetLines}`;
       }
 
       // ----- Phase 1: Gemini router gathers the record -----
@@ -1345,6 +1786,7 @@ Deno.serve(async (req: Request) => {
           if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
           else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
           else if (c.name === "search_caselaw") emit({ type: "tool", round, tool: "search_caselaw", args: c.input });
+          else if (c.name === "search_web") emit({ type: "tool", round, tool: "search_web", args: c.input });
           else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
         }
 
@@ -1360,6 +1802,9 @@ Deno.serve(async (req: Request) => {
             }
             if (c.name === "search_caselaw") {
               return { kind: "caselaw" as const, c, cl: await runCaselawSearch(c.input, question, seen) };
+            }
+            if (c.name === "search_web") {
+              return { kind: "web" as const, c, wb: await runWebSearch(c.input, question, seen) };
             }
             const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
             let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
@@ -1408,6 +1853,27 @@ Deno.serve(async (req: Request) => {
                   : `search_caselaw returned no opinions for that query; try a broader query or remove the court restriction.`,
               );
             }
+          } else if (s.kind === "web") {
+            if (s.wb.unavailable) {
+              emit({ type: "tool", round, tool: "search_web", count: 0, done: true });
+              emit({ type: "tool_error", round, tool: "search_web", message: `Web search unavailable: ${s.wb.unavailable}.` });
+              resultBlocks.push(`search_web is unavailable (${s.wb.unavailable}); proceed without web sources.`);
+            } else {
+              for (const ch of s.wb.chunks) emittedResults.push(ch);
+              for (const b of s.wb.searchResults) allSearchResults.push(b);
+              searchesLog.push({ round, tool: "search_web", args: s.c.input, returned: s.wb.count });
+              emit({ type: "chunks", round, chunks: s.wb.chunks });
+              emit({ type: "tool", round, tool: "search_web", count: s.wb.count, done: true });
+              for (const ch of s.wb.chunks) {
+                emit({ type: "web_result", round, title: ch.case_name ?? ch.order_label, url: ch.pdf_url, published: ch.case_date });
+              }
+              const lines = s.wb.chunks.map((c: any) => `- ${c.full_citation}`);
+              resultBlocks.push(
+                s.wb.count
+                  ? `search_web found ${s.wb.count} reputable web source(s):\n${lines.join("\n")}`
+                  : `search_web returned no allowlisted results for that query; either the reputable sources didn't surface it, or the domain filter dropped everything.`,
+              );
+            }
           } else if (s.kind === "search") {
             for (const ch of s.sr.chunks) emittedResults.push(ch);
             for (const b of s.sr.searchResults) allSearchResults.push(b);
@@ -1424,7 +1890,7 @@ Deno.serve(async (req: Request) => {
               (s.exp.chunks.length ? `\n(+${s.exp.chunks.length} adjacent passage(s) pulled for surrounding context.)` : ""),
             );
           } else {
-            const structuredLike = s.c.name === "read_order" || s.c.name === "search_caselaw" || STRUCTURED_TOOLS.has(s.c.name);
+            const structuredLike = s.c.name === "read_order" || s.c.name === "search_caselaw" || s.c.name === "search_web" || STRUCTURED_TOOLS.has(s.c.name);
             if (structuredLike) emit({ type: "tool_error", round, tool: s.c.name, message: s.message });
             else emit({ type: "search_error", round, message: s.message });
             resultBlocks.push(`${s.c.name} error: ${s.message}`);
@@ -1454,6 +1920,89 @@ Deno.serve(async (req: Request) => {
           emit({ type: "search_error", round: rounds, message: (e as Error).message });
         }
       }
+
+      // ----- Phase 1b (v30): CRITIC — coverage/gap check. Runs at most once; if it says
+      // retrieval is incomplete AND we still have router budget, do one more router round
+      // with the critic's followup injected into the prompt. Non-fatal on failure.
+      let critic = { done: true, missing: [] as string[], followup: "" };
+      const canDoExtraRound = rounds < MAX_ROUNDS && seen.size < MAX_TOTAL_CHUNKS;
+      const haveEvidenceForCritic = allSearchResults.length > 0 || recordIndexBlocks.length > 0;
+      if (haveEvidenceForCritic && canDoExtraRound) {
+        try {
+          const summary = emittedResults.slice(0, 40).map((c: any) => {
+            const label = c.order_label ?? c.case_name ?? c.kind ?? "chunk";
+            const page = c.page_start != null ? ` p.${c.page_start}` : "";
+            const snip = (Array.isArray(c.sentences) ? c.sentences.join(" ") : "").slice(0, 180);
+            return `- [${label}${page}] ${snip}`;
+          }).join("\n") + (recordIndexBlocks.length ? `\n\n[Structured index blocks: ${recordIndexBlocks.length}]` : "");
+          critic = await runCritic(question, plannedFacets, summary);
+          emit({ type: "critic", done: critic.done, missing: critic.missing, followup: critic.followup });
+          if (!critic.done && critic.followup) {
+            const round = rounds + 1;
+            emit({ type: "round", round });
+            routerMessages.push({
+              role: "user",
+              content: `CRITIC coverage check: the answer set is incomplete. Fill this specific gap and do not repeat searches you already ran:\n\n${critic.followup}${critic.missing.length ? `\n\nMissing facets: ${critic.missing.join(", ")}` : ""}`,
+            });
+            try {
+              const r = await geminiRouterRound(routerMessages, round, emit);
+              rounds = round;
+              if (r?.toolCalls?.length) {
+                // Reuse the same dispatch pipeline (single mini-round). Announce + run.
+                const calls = r.toolCalls.map((t) => ({ name: t.name as string, input: (t.args && typeof t.args === "object") ? t.args : {} }));
+                for (const c of calls) {
+                  if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
+                  else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
+                  else if (c.name === "search_caselaw") emit({ type: "tool", round, tool: "search_caselaw", args: c.input });
+                  else if (c.name === "search_web") emit({ type: "tool", round, tool: "search_web", args: c.input });
+                  else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
+                }
+                const settled = await Promise.all(calls.map(async (c) => {
+                  try {
+                    if (STRUCTURED_TOOLS.has(c.name)) return { kind: "structured" as const, c, sr: await runStructuredTool(c.name, c.input, caseId) };
+                    if (c.name === "read_order") return { kind: "read_order" as const, c, ro: await runReadOrder(c.input, caseId, seen) };
+                    if (c.name === "search_caselaw") return { kind: "caselaw" as const, c, cl: await runCaselawSearch(c.input, question, seen) };
+                    if (c.name === "search_web") return { kind: "web" as const, c, wb: await runWebSearch(c.input, question, seen) };
+                    const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
+                    let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
+                    if (c.input.expand !== false && sr.hitIds.length) {
+                      try { exp = await expandNeighbors(caseId, sr.hitIds.slice(0, EXPAND_TOP_N), seen); } catch { /* best effort */ }
+                    }
+                    return { kind: "search" as const, c, sr, exp };
+                  } catch (e) { return { kind: "error" as const, c, message: (e as Error).message }; }
+                }));
+                for (const s of settled) {
+                  if (s.kind === "structured") { recordIndexBlocks.push(s.sr.writerText); emit({ type: "tool", round, tool: s.c.name, count: s.sr.count, done: true }); }
+                  else if (s.kind === "read_order") { for (const ch of s.ro.chunks) emittedResults.push(ch); for (const b of s.ro.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.ro.chunks }); emit({ type: "tool", round, tool: "read_order", count: s.ro.count, done: true }); }
+                  else if (s.kind === "caselaw" && !s.cl.unavailable) { for (const ch of s.cl.chunks) emittedResults.push(ch); for (const b of s.cl.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.cl.chunks }); emit({ type: "tool", round, tool: "search_caselaw", count: s.cl.count, done: true }); }
+                  else if (s.kind === "web" && !s.wb.unavailable) { for (const ch of s.wb.chunks) emittedResults.push(ch); for (const b of s.wb.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.wb.chunks }); emit({ type: "tool", round, tool: "search_web", count: s.wb.count, done: true }); for (const ch of s.wb.chunks) emit({ type: "web_result", round, title: ch.case_name ?? ch.order_label, url: ch.pdf_url, published: ch.case_date }); }
+                  else if (s.kind === "search") {
+                    for (const ch of s.sr.chunks) emittedResults.push(ch);
+                    for (const b of s.sr.searchResults) allSearchResults.push(b);
+                    emit({ type: "chunks", round, chunks: s.sr.chunks });
+                    if (s.exp.chunks.length) { for (const ch of s.exp.chunks) emittedResults.push(ch); for (const b of s.exp.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.exp.chunks }); emit({ type: "expand", round, source: "neighbors", count: s.exp.chunks.length }); }
+                  }
+                }
+                emit({ type: "round_end", round, stop_reason: "tool_use" });
+              }
+            } catch { /* critic follow-up is best-effort */ }
+          }
+        } catch { /* critic failure is non-fatal */ }
+      }
+
+      // ----- Phase 1c (v30): Voyage rerank-2 across gathered record passages. Web +
+      // caselaw pass through unchanged. Keeps top MAX_WRITER_CHUNKS.
+      const preRerank = emittedResults.length;
+      const rr = await rerankAndTrim(question, emittedResults, allSearchResults);
+      if (rr.ran || rr.dropped > 0) {
+        // Replace the arrays' contents in-place so downstream code (which references the
+        // outer bindings) sees the trimmed set.
+        emittedResults.length = 0; allSearchResults.length = 0;
+        emittedResults.push(...rr.chunks); allSearchResults.push(...rr.results);
+        emit({ type: "rerank", model: RERANK_MODEL, before: preRerank, after: rr.kept, dropped: rr.dropped });
+      }
+
+
 
       // ----- Phase 2: Opus 4.8 writer synthesizes with citations (extended thinking ON) -----
       // v29: wrapped in a bounded retry loop. Transient upstream failures (429/5xx/529 and
@@ -1551,6 +2100,19 @@ Deno.serve(async (req: Request) => {
           : msg;
         emit({ type: "error", message: friendly });
       }
+
+      // ----- Phase 3 (v30): VERIFIER post-stream citation-grounding pass. Advisory only —
+      // the writer output is NOT rewritten; unsupported sentences are surfaced as a
+      // `verify` SSE event so the UI can flag them. Non-fatal on failure.
+      if (answerText.trim() && !finalErr) {
+        try {
+          const citedRefs = emittedResults.map((c: any) => c.ref).filter(Boolean);
+          const v = await runVerifier(question, answerText, citedRefs);
+          emit({ type: "verify", unsupported: v.unsupported, notes: v.notes, model: VERIFIER_MODEL });
+        } catch { /* verifier is best-effort */ }
+      }
+
+
 
       emit({ type: "done", rounds, chunk_count: emittedResults.length, citation_count: citationCount });
       controller.close();
