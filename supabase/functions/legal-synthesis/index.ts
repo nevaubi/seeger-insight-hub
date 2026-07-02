@@ -95,22 +95,51 @@ const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const VOYAGE_MODEL = "voyage-law-2";
 const VOYAGE_TIMEOUT_MS = 20000;
-const MAX_ROUNDS = 3;
-const PER_SEARCH_K = 10;        // targeted retrieval: up to 10 fresh passages per search
-const MAX_TOTAL_CHUNKS = 60;    // absolute ceiling across primary hits + neighbor/order expansion
-const MIN_SIM = 0.35;           // vector-only floor (lexical hits bypass it); tuned for voyage-law-2,
-                                // whose relevant query↔passage cosines typically land in 0.4–0.7
-const NEIGHBOR_WINDOW = 1;      // auto-expansion: pull chunk_index +/- this many from the same document
-const EXPAND_TOP_N = 3;         // auto-expand only the N best hits of each search (stays targeted)
-const READ_ORDER_LIMIT = 40;    // max passages when reading a full order + its amendment versions
-const WRITER_EFFORT = "high";    // adaptive-thinking depth for the writer (low|medium|high|xhigh|max)
-const WRITER_MAX_TOKENS = 24000; // enforced output ceiling (thinking + answer); we stream, so it's safe
+const MAX_ROUNDS = 5;
+const PER_SEARCH_K = 15;        // v30: widened retrieval
+const MAX_TOTAL_CHUNKS = 120;   // v30: pre-rerank ceiling across all record passages
+const MAX_WRITER_CHUNKS = 80;   // v30: post-rerank cap actually handed to the writer
+const MIN_SIM = 0.32;           // slightly relaxed to feed the reranker more candidates
+const NEIGHBOR_WINDOW = 1;
+const EXPAND_TOP_N = 5;         // v30: expand more hits per search
+const READ_ORDER_LIMIT = 40;
+const WRITER_EFFORT = "high";
+const WRITER_MAX_TOKENS = 24000;
 
 // ---------- v29: transient-failure handling ----------
-const WRITER_MAX_ATTEMPTS = 3;    // total writer attempts; the final one uses WRITER_FALLBACK_MODEL
-const EMBED_MAX_ATTEMPTS = 2;     // total voyage query-embedding attempts
-const RETRY_BASE_DELAY_MS = 2000; // backoff base: ~2s, then ~5s (plus jitter)
-const RETRY_MAX_DELAY_MS = 15000; // hard cap on any single backoff wait
+const WRITER_MAX_ATTEMPTS = 3;
+const EMBED_MAX_ATTEMPTS = 2;
+const RETRY_BASE_DELAY_MS = 2000;
+const RETRY_MAX_DELAY_MS = 15000;
+
+// ---------- v30: multi-agent + web + rerank ----------
+const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-pro-preview";
+const CRITIC_MODEL  = Deno.env.get("CRITIC_MODEL")  ?? "gemini-3.5-flash";
+const VERIFIER_MODEL = Deno.env.get("VERIFIER_MODEL") ?? "gemini-3.5-flash";
+const RERANK_URL   = "https://api.voyageai.com/v1/rerank";
+const RERANK_MODEL = "rerank-2";
+const RERANK_TIMEOUT_MS = 15000;
+const TAVILY_URL = "https://api.tavily.com/search";
+const TAVILY_API_KEY = Deno.env.get("TAVILY_API_KEY") ?? "";
+const TAVILY_TIMEOUT_MS = 15000;
+const WEB_MAX_RESULTS = 8;
+const WEB_EXCERPT_CHARS = 2000;
+// Reputable legal + regulatory + scientific domains only. Tavily filters upstream via
+// include_domains; we also re-check server-side (defense in depth) before handing results
+// to the writer.
+const WEB_ALLOWED_DOMAINS = [
+  // Case law + court sites
+  "courtlistener.com", "law.cornell.edu", "justia.com", "casetext.com",
+  "supremecourt.gov", "uscourts.gov", "ca11.uscourts.gov", "flnd.uscourts.gov",
+  "jpml.uscourts.gov",
+  // Legal news / secondary
+  "reuters.com", "law360.com", "bloomberglaw.com", "abajournal.com", "ssrn.com",
+  // Regulatory
+  "fda.gov", "ema.europa.eu", "who.int",
+  // Scientific / medical
+  "nih.gov", "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov",
+  "nejm.org", "jamanetwork.com", "thelancet.com", "bmj.com",
+];
 
 // ---------- CourtListener (external case-law authority) ----------
 // The deployed edge function reaches CourtListener's REST API directly (it cannot use the
