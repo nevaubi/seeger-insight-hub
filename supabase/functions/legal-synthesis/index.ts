@@ -1858,7 +1858,7 @@ Deno.serve(async (req: Request) => {
               (s.exp.chunks.length ? `\n(+${s.exp.chunks.length} adjacent passage(s) pulled for surrounding context.)` : ""),
             );
           } else {
-            const structuredLike = s.c.name === "read_order" || s.c.name === "search_caselaw" || STRUCTURED_TOOLS.has(s.c.name);
+            const structuredLike = s.c.name === "read_order" || s.c.name === "search_caselaw" || s.c.name === "search_web" || STRUCTURED_TOOLS.has(s.c.name);
             if (structuredLike) emit({ type: "tool_error", round, tool: s.c.name, message: s.message });
             else emit({ type: "search_error", round, message: s.message });
             resultBlocks.push(`${s.c.name} error: ${s.message}`);
