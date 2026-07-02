@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState } from 'react';
-import { embedQuery } from '@/lib/embed';
 import { AI_ASSIST_ENDPOINT, SUPABASE_ANON_KEY } from '@/lib/supabase';
 
 // Client for the ai-assist edge function (single-turn transform / draft, SSE).
