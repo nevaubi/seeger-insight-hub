@@ -79,6 +79,7 @@ import { toast } from 'sonner';
 
 import { useMatter, type Matter } from '@/lib/matter-context';
 import { SplitPane } from '@/components/split-pane';
+import { cn } from '@/lib/utils';
 
 const FALLBACK_EXAMPLES_SYNTH = [
   'What must plaintiffs do to establish proof of use, and by when?',
