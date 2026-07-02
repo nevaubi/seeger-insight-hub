@@ -1,4 +1,4 @@
-// Supabase Edge Function: ai-assist
+// Supabase Edge Function: ai-assist (v11)
 // A focused, single-turn writing assistant for the drafting workspace. Three modes:
 //   - "transform": rewrite/expand/shorten/retone/continue a SELECTED passage in the editor.
 //                  Returns clean replacement text only (no citations, no preamble).
@@ -10,32 +10,64 @@
 //                  concise analytical prose grounded in the passage itself.
 //
 // Unlike legal-synthesis (multi-round Gemini router + Claude writer), this is one Claude
-// Opus 4.8 turn. Grounding, when requested, runs a single hybrid_search against the same
+// Opus 4.8 turn. Grounding, when requested, runs a single hybrid_search_v2 against the same
 // matter-scoped record and injects citable search_result blocks.
 //
+// v11 — VOYAGE RETRIEVAL + TRANSIENT-FAILURE RESILIENCE (mirrors legal-synthesis v28/v29):
+//   - Grounding now retrieves via hybrid_search_v2 (chunks.embedding_v2, vector(1024)); the
+//     query embedding is generated INSIDE this function with voyage-law-2 (input_type
+//     'query'). The legacy client `embedding` field is honored only when it is already a
+//     1024-dim vector; a 384-dim bge vector is ignored and the function self-embeds. This
+//     removes the in-browser model dependency and makes the entire courtlistener corpus
+//     (v2-only chunks) reachable for grounded drafting.
+//   - GROUND_MIN_SIM retuned to 0.35 for voyage-law-2's score distribution (relevant hits
+//     typically score 0.4–0.7; lexical hits bypass the floor inside the RPC).
+//   - The Anthropic writer call retries on transient upstream failures (HTTP 408/429/5xx/529
+//     and mid-stream overloaded/rate-limit SSE errors) with exponential backoff, honoring
+//     Retry-After. Up to WRITER_MAX_ATTEMPTS total attempts; the FINAL attempt falls back to
+//     WRITER_FALLBACK_MODEL. A retry only fires while ZERO answer text has streamed — once
+//     any text is visible, a rerun would duplicate it, so the interruption is surfaced.
+//   - The voyage query embedding retries once on transient failure; if embedding cannot be
+//     produced (or VOYAGE_API_KEY is missing), grounding degrades gracefully to an
+//     ungrounded draft (meta.grounded=false with ground_error) instead of failing the run.
+//
 // Request (POST JSON):
-//   { mode: "transform" | "draft",
-//     instruction: string,                 // what to do (command or chat prompt)
-//     selection?: string,                  // transform: the highlighted text
+//   { mode: "transform" | "draft" | "insight",
+//     instruction: string,                 // what to do (command, chat prompt, or question)
+//     selection?: string,                  // transform/insight: the highlighted text
 //     document?: string,                   // current editor contents (context)
 //     messages?: { role: "user"|"assistant", content: string }[],  // draft: prior chat turns
 //     ground?: boolean,                    // draft: retrieve from the record and cite
-//     embedding?: string ("[...]" 384-dim),// required when ground is true
+//     embedding?: string,                  // optional — honored only if 1024-dim; otherwise
+//                                          //   the function self-embeds via voyage-law-2
 //     case_id?: string, matter?: { name, short_name, mdl_number, court, judge } }
-// Response: text/event-stream (events: meta, text, citation, error, done).
+// Response: text/event-stream (events: meta, chunks, text, citation, error, done).
 //
-// Secrets: ANTHROPIC_API_KEY (required), SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (auto).
+// Secrets: ANTHROPIC_API_KEY (required), VOYAGE_API_KEY (required for grounding; without it
+//   grounded drafts degrade to ungrounded), WRITER_FALLBACK_MODEL optional (default
+//   claude-sonnet-4-6). SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (auto).
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const VOYAGE_API_KEY = Deno.env.get("VOYAGE_API_KEY") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const MODEL = "claude-opus-4-8";
+const WRITER_FALLBACK_MODEL = Deno.env.get("WRITER_FALLBACK_MODEL") ?? "claude-sonnet-4-6";
+const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
+const VOYAGE_MODEL = "voyage-law-2";
+const VOYAGE_TIMEOUT_MS = 20000;
 
 const GROUND_K = 8;            // grounding passages per draft request
-const GROUND_MIN_SIM = 0.2;    // vector floor (matches legal-synthesis)
+const GROUND_MIN_SIM = 0.35;   // vector-only floor, tuned for voyage-law-2 (lexical hits bypass it)
 const TRANSFORM_MAX_TOKENS = 4000;
 const DRAFT_MAX_TOKENS = 8000;
 const INSIGHT_MAX_TOKENS = 2500;
+
+// v11: transient-failure handling (mirrors legal-synthesis v29)
+const WRITER_MAX_ATTEMPTS = 3;    // total writer attempts; the final one uses WRITER_FALLBACK_MODEL
+const EMBED_MAX_ATTEMPTS = 2;     // total voyage query-embedding attempts
+const RETRY_BASE_DELAY_MS = 2000; // backoff base: ~2s, then ~5s (plus jitter)
+const RETRY_MAX_DELAY_MS = 15000; // hard cap on any single backoff wait
 
 const DEFAULT_CASE_ID = "4ea28a93-3e76-4b10-b6da-6794fef3c7c1";
 const DEFAULT_MATTER = {
@@ -60,12 +92,85 @@ type Matter = {
   judge: string;
 };
 
+// ---------- v11: retry primitives ----------
+// A typed upstream error carrying the HTTP status and any Retry-After hint, so retry
+// classification can be exact for request-level failures and message-based for
+// mid-stream SSE error events (which carry no HTTP status).
+class ApiError extends Error {
+  status: number;
+  retryAfterMs: number | null;
+  constructor(message: string, status: number, retryAfterMs: number | null = null) {
+    super(message);
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504, 529]);
+
+// Transient upstream conditions worth retrying. Status-based when we have a status
+// (ApiError); otherwise message-based — this is how a mid-stream Anthropic
+// `overloaded_error` (message "Overloaded") is classified as retryable.
+function isRetryableError(e: unknown): boolean {
+  if (e instanceof ApiError) return RETRYABLE_STATUS.has(e.status);
+  const msg = ((e as Error)?.message ?? "").toLowerCase();
+  return /overloaded|rate.?limit|too many requests|timed?.?out|temporarily unavailable|service unavailable|internal server error|upstream|connection (?:reset|closed)/.test(msg);
+}
+
+// Exponential backoff with jitter, honoring an upstream Retry-After hint when present.
+function retryDelayMs(attempt: number, e: unknown): number {
+  const hinted = e instanceof ApiError && e.retryAfterMs != null ? e.retryAfterMs : 0;
+  const backoff = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2.5, attempt - 1), RETRY_MAX_DELAY_MS);
+  const jitter = Math.floor(Math.random() * 500);
+  return Math.min(Math.max(hinted, backoff) + jitter, RETRY_MAX_DELAY_MS);
+}
+
+// ---------- Voyage query embedding (v11) ----------
+// Embeds the grounding query server-side with the SAME model family that embedded the
+// corpus (voyage-law-2), input_type 'query'. Returns a pgvector text literal (1024 dims).
+async function voyageEmbedQuery(text: string): Promise<string> {
+  if (!VOYAGE_API_KEY) throw new Error("VOYAGE_API_KEY not configured");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), VOYAGE_TIMEOUT_MS);
+  try {
+    const resp = await fetch(VOYAGE_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Authorization": `Bearer ${VOYAGE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ input: [text.slice(0, 8000)], model: VOYAGE_MODEL, input_type: "query", truncation: true }),
+    });
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => "");
+      const ra = resp.headers.get("retry-after");
+      const raMs = ra && Number.isFinite(Number(ra)) ? Number(ra) * 1000 : null;
+      throw new ApiError(`Voyage ${resp.status}: ${t.slice(0, 200)}`, resp.status, raMs);
+    }
+    const data = await resp.json();
+    const emb = data?.data?.[0]?.embedding;
+    if (!Array.isArray(emb)) throw new Error("Voyage returned no embedding");
+    return "[" + emb.map((x: number) => Number(x).toFixed(6)).join(",") + "]";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Dimension of a pgvector text literal like "[0.1,-0.2,...]" (0 when empty/invalid).
+function vecDims(v: string): number {
+  const s = (v ?? "").trim();
+  if (!s.startsWith("[") || !s.endsWith("]") || s.length < 3) return 0;
+  return s.split(",").length;
+}
+
 // ---------- retrieval helpers (mirrors legal-synthesis shapes) ----------
 
 function splitSentences(text: string): string[] {
   const norm = (text ?? "").replace(/\s+/g, " ").trim();
   if (!norm) return [];
-  const raw = norm.split(/(?<=[.?!])\s+(?=[A-Z("'“])/);
+  const raw = norm.split(/(?<=[.?!])\s+(?=[A-Z("'\u201c])/);
   const out: string[] = [];
   for (const piece of raw) {
     const t = piece.trim();
@@ -83,14 +188,14 @@ function orderLabel(c: any): string {
 
 function pageCite(c: any): string {
   if (c.page_start == null) return "";
-  return c.page_start === c.page_end ? `p.${c.page_start}` : `p.${c.page_start}–${c.page_end}`;
+  return c.page_start === c.page_end ? `p.${c.page_start}` : `p.${c.page_start}\u2013${c.page_end}`;
 }
 
 function mapRow(r: any): { searchResult: any; chunk: any } {
   const sentences = splitSentences(r.content);
   const label = orderLabel(r);
   const page = pageCite(r);
-  const title = `${label}${page ? " · " + page : ""}`;
+  const title = `${label}${page ? " \u00b7 " + page : ""}`;
   const source = r.pdf_url || `mdl:${r.id}`;
   const searchResult = {
     type: "search_result",
@@ -112,13 +217,13 @@ function mapRow(r: any): { searchResult: any; chunk: any } {
   return { searchResult, chunk };
 }
 
-// Single matter-scoped hybrid_search for grounding a draft.
+// Single matter-scoped hybrid_search_v2 for grounding a draft.
 async function groundSearch(
   query: string,
   embedding: string,
   caseId: string,
 ): Promise<{ searchResults: any[]; chunks: any[] }> {
-  const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/hybrid_search`, {
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/hybrid_search_v2`, {
     method: "POST",
     headers: {
       "apikey": SERVICE_KEY,
@@ -135,7 +240,7 @@ async function groundSearch(
   });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
-    throw new Error(`hybrid_search failed (${resp.status}): ${body.slice(0, 200)}`);
+    throw new Error(`hybrid_search_v2 failed (${resp.status}): ${body.slice(0, 200)}`);
   }
   const rows: any[] = await resp.json();
   const seen = new Set<string>();
@@ -154,47 +259,26 @@ async function groundSearch(
 // ---------- system prompts ----------
 
 function transformSystem(m: Matter): string {
-  return `You are an expert legal-writing assistant embedded in a document editor used by the attorneys and staff of ${m.name}, MDL No. ${m.mdl_number}. Assume fluency with the procedural vocabulary of complex multidistrict litigation.
+  return `You are an expert legal-writing assistant embedded directly in a document editor used by the attorneys and staff of ${m.name}, MDL No. ${m.mdl_number}. The user works on complex multidistrict litigation; assume fluency with its procedural vocabulary.
 
 The user has SELECTED a passage in their document and asked you to transform it. Apply the requested change precisely and return ONLY the revised passage — the exact text that will replace the selection.
 
 Hard rules:
-- Output the replacement text and nothing else: no preamble, no explanation, no sign-off, no surrounding quotation marks, no Markdown code fences.
+- Output the replacement text and nothing else: no preamble, no explanation, no sign-off, no surrounding quotation marks, and no Markdown code fences.
 - Preserve the author's voice, defined terms, internal citations, and formatting conventions unless the instruction is specifically to change them.
 - Write in the register of careful litigation prose — precise, professional, neutral.
-- If the selection is a citation, normalize it to Bluebook form: italicize case names with single asterisks (*Daubert v. Merrell Dow Pharms., Inc.*), give a full cite with reporter, pin cite, court, and year on first reference, and a short form (*Daubert*, 509 U.S. at 592) on later references. Record cites use "PTO-12 ¶ 4", "CMO-3 § II.B", or "Order at 5"; use *id.* (italicized) when the immediately preceding cite is the same source.
-- Do not invent record facts, dates, order numbers, party names, or holdings. Where the instruction would require a fact you do not have, leave a clearly marked placeholder in [BRACKETED ALL-CAPS] (e.g., [INSERT DATE], [CITE CONTROLLING ORDER]) rather than fabricating.
+- Do not invent record facts, dates, order numbers, or holdings. If the instruction would require a fact you do not have, leave a clearly marked placeholder (e.g., [INSERT DATE]) rather than fabricating.
 - If asked to continue or expand, output only the new/expanded text to be inserted, seamlessly matching the surrounding style.`;
 }
 
 function draftSystem(m: Matter, grounded: boolean): string {
-  return `You are the drafting assistant for ${m.name}, MDL No. ${m.mdl_number}, pending in ${m.court}, before ${m.judge}, with Magistrate Judge Hope T. Cannon presiding over discovery. You support the attorneys of plaintiffs' leadership (Seeger Weiss LLP, plaintiff co-lead). Assume an experienced-litigator audience; do not pad with elementary explanation. Lead with substance.
+  return `You are the drafting assistant for ${m.name}, MDL No. ${m.mdl_number}, pending in ${m.court}, before ${m.judge}. You help the attorneys of plaintiffs' leadership draft and revise litigation documents — memos, letters, outlines, motion sections, and the like. Assume an experienced-litigator audience; do not pad with elementary explanation.
 
-DOCUMENT-FORM DISCIPLINE. Identify the document type from the user's instruction and the surrounding document, then produce it in the correct litigation form. Use Markdown (headings, lists, emphasis) so it renders cleanly in the editor and exports cleanly to .docx.
-
-- COURT FILINGS (motions, oppositions, briefs, status reports, stipulations): start with a caption block — "UNITED STATES DISTRICT COURT", "NORTHERN DISTRICT OF FLORIDA", "PENSACOLA DIVISION", then "IN RE: DEPO-PROVERA (DEPOT MEDROXYPROGESTERONE ACETATE) PRODUCTS LIABILITY LITIGATION" with "MDL No. 3140", "This Document Relates To: [ALL ACTIONS / specific case]", "Judge M. Casey Rodgers", "Magistrate Judge Hope T. Cannon". Follow with the document title in bold caps, an introduction, numbered argument headings (I., II., A., B., 1., 2.), a conclusion, and a signature block (date, "Respectfully submitted,", "/s/ [ATTORNEY NAME]", firm block, PSC role). End with a "CERTIFICATE OF SERVICE" stub when the document is filed.
-- PROPOSED ORDERS: caption block, title (e.g., "PRETRIAL ORDER NO. [XX]"), brief recital, then "IT IS ORDERED that:" followed by numbered paragraphs of operative provisions, and a signature line for "M. CASEY RODGERS, UNITED STATES DISTRICT JUDGE" with "DONE AND ORDERED this [DATE]."
-- LETTERS (meet-and-confer, deficiency, scheduling, letters to chambers): letterhead-style — date line, addressee block, "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — [subject]", salutation, body organized as numbered points each tied to a specific request/order/deficiency, closing ("Sincerely," or "Respectfully,"), signature block. Reserve rights where appropriate.
-- DISCOVERY (RFPs, interrogatories, RFAs, subpoenas): caption, title, a Definitions section, an Instructions section (incorporating the Federal Rules and the operative ESI/discovery protocol), then numbered requests each on a single substantive item.
-- MEMOS (bench memos, PSC updates, leadership memos, hearing prep): "MEMORANDUM" header with TO / FROM / DATE / RE block, then Issues / Background / Analysis / Recommendation sections. Cross and direct outlines use a tight numbered/lettered hierarchy of question topics with anticipated answers and exhibits.
-
-LITIGATION DRAFTING RULES.
-- Introduce defined terms (e.g., Defendant Pfizer Inc. ("Pfizer")) and reuse them consistently.
-- Numbered lists for deficiencies, requests, deadlines, and ordered obligations; tabular treatment when columns help.
-- Never invent case names, docket numbers, dates, or holdings. Use [BRACKETED ALL-CAPS] placeholders for unknown facts (e.g., [INSERT DATE], [PARTY NAME], [EXHIBIT A], [CITE CONTROLLING ORDER]).
-- Do not refer to "the user" or "the assistant" anywhere in the output.
-
-CITATION STYLE (Bluebook).
-- Case law on first reference: full case name in italics with single asterisks, reporter, pin cite, court & year — e.g., *Daubert v. Merrell Dow Pharms., Inc.*, 509 U.S. 579, 592–93 (1993); *In re Zantac (Ranitidine) Prods. Liab. Litig.*, 644 F. Supp. 3d 1075, 1110 (S.D. Fla. 2022). Prefer Eleventh Circuit / N.D. Fla. authority for procedural points.
-- Case law on later reference: short form — *Daubert*, 509 U.S. at 592.
-- Record cites use short forms: "PTO-12 ¶ 4", "CMO-3 § II.B at 5", "Order at 7", "Joint Status Report at 3 (ECF No. [XX])". When the very next cite is the same source, use *id.*; use *id.* at [page] when only the pin cite changes. Use *supra* note [n] or *supra* Part [X] for earlier-cited record documents.
-- Use proper signals (*See*, *See, e.g.*, *Cf.*, *But see*, *Compare … with …*) italicized.
-- Federal Rules cited as "Fed. R. Civ. P. 26(f)"; statutes as "28 U.S.C. § 1407"; treatises as "9 Charles Alan Wright & Arthur R. Miller, *Federal Practice and Procedure* § 2284 (3d ed. [YEAR])".
-- Quotations of three or fewer lines run in with quotation marks and a cite; longer quotations are block-indented (Markdown blockquote) with the cite on the next line.
+Produce clean, well-structured document content in Markdown (headings, lists, emphasis as appropriate). Write in precise, professional, neutral litigation prose. Lead with substance.
 
 ${grounded
-  ? `RECORD GROUNDING. You have been given citable passages from this matter's controlling orders as search_result blocks. When you state a fact about this record — an obligation, deadline, party, holding, order number, defined term, or quoted language — ground it in those passages, and let Anthropic's native citations link to the supporting passage. Also write a Bluebook-style short-form cite in the prose itself (e.g., "(PTO-12 ¶ 4)" or "*See* CMO-3 § II.B at 5") so the exported document reads correctly without the UI layer. Quote operative language verbatim where it matters. Do not assert record facts the passages do not support; insert "[CONFIRM: cite controlling order]" or a similar bracketed flag instead. The passages are a focused set, not the entire record — flag gaps rather than filling them.`
-  : `NO RECORD PASSAGES. Draft from the user's instruction and the current document only. Do not fabricate specific record facts (dates, order numbers, holdings, party names); use [BRACKETED ALL-CAPS] placeholders such as [INSERT DATE], [CITE CONTROLLING ORDER], [ECF NO.] so the attorney can fill them.`}
+  ? `RECORD GROUNDING: You have been given citable passages from the matter's controlling orders as search results. When you state a fact about this record — an obligation, deadline, party, holding, order number, or quoted term — ground it in those passages and cite them as you write so each assertion is traceable. Do not assert record facts that the provided passages do not support; if the passages do not cover something the draft needs, insert a clearly marked placeholder (e.g., [CONFIRM: cite controlling order]) rather than inventing it. The passages are a focused set, not the entire record — flag gaps rather than filling them.`
+  : `You have NOT been given record passages for this request. Draft from the user's instruction and the current document only. Do not fabricate specific record facts (dates, order numbers, holdings, party names); where the draft needs one, insert a clearly marked placeholder (e.g., [INSERT DATE], [CITE ORDER]) for the attorney to fill.`}
 
 Return only the requested document content — no meta-commentary about what you did unless the user explicitly asks.`;
 }
@@ -218,6 +302,7 @@ async function streamAnthropic(
   emittedResults: any[],
   emit: (o: any) => void,
   nextCiteNum: () => number,
+  onTextDelta: () => void,
 ): Promise<{ text: string; citationCount: number }> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -230,7 +315,9 @@ async function streamAnthropic(
   });
   if (!res.ok || !res.body) {
     const t = await res.text().catch(() => "");
-    throw new Error(`Anthropic API ${res.status}: ${t.slice(0, 400)}`);
+    const ra = res.headers.get("retry-after");
+    const raMs = ra && Number.isFinite(Number(ra)) ? Number(ra) * 1000 : null;
+    throw new ApiError(`Anthropic API ${res.status}: ${t.slice(0, 400)}`, res.status, raMs);
   }
 
   const reader = res.body.getReader();
@@ -245,6 +332,7 @@ async function streamAnthropic(
         const d = ev.delta || {};
         if (d.type === "text_delta") {
           text += d.text;
+          onTextDelta();
           emit({ type: "text", block_id: ev.index, text: d.text });
         } else if (d.type === "citations_delta") {
           const c = d.citation;
@@ -303,7 +391,7 @@ Deno.serve(async (req: Request) => {
   const selection = (payload?.selection ?? "").toString();
   const document = (payload?.document ?? "").toString();
   const ground = !!payload?.ground;
-  const embedding = (payload?.embedding ?? "").toString().trim();
+  const clientEmbedding = (payload?.embedding ?? "").toString().trim();
   const caseId = (payload?.case_id ?? "").toString().trim() || DEFAULT_CASE_ID;
   const matter: Matter = (payload?.matter && typeof payload.matter === "object")
     ? { ...DEFAULT_MATTER, ...payload.matter }
@@ -314,6 +402,11 @@ Deno.serve(async (req: Request) => {
   if (!instruction && mode !== "insight") return new Response("Missing instruction", { status: 400, headers: CORS });
   if (mode === "transform" && !selection) return new Response("transform mode needs a selection", { status: 400, headers: CORS });
   if (mode === "insight" && !selection) return new Response("insight mode needs a selection", { status: 400, headers: CORS });
+
+  // v11: a client-supplied embedding is honored only when it is already in the corpus's
+  // vector space (1024-dim voyage-law-2); anything else (including legacy 384-dim bge
+  // vectors from older frontends) is ignored and the function embeds the query itself.
+  const hasClientVec = vecDims(clientEmbedding) === 1024;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -336,10 +429,27 @@ Deno.serve(async (req: Request) => {
         const searchResultBlocks: any[] = []; // Anthropic search_result blocks, same order
 
         // ----- Grounding (draft mode only) -----
-        const doGround = mode === "draft" && ground && !!embedding;
+        // v11: grounding no longer depends on a client embedding — the function resolves the
+        // query vector itself (client 1024-dim vector if supplied, otherwise voyage-law-2
+        // self-embed with one retry). Any failure degrades to an ungrounded draft.
+        const doGround = mode === "draft" && ground;
         if (doGround) {
           const query = instruction + (document ? "\n" + document.slice(0, 1000) : "");
           try {
+            let embedding = hasClientVec ? clientEmbedding : "";
+            if (!embedding) {
+              let lastErr: unknown = null;
+              for (let attempt = 1; attempt <= EMBED_MAX_ATTEMPTS && !embedding; attempt++) {
+                try {
+                  embedding = await voyageEmbedQuery(query);
+                } catch (e) {
+                  lastErr = e;
+                  if (attempt >= EMBED_MAX_ATTEMPTS || !isRetryableError(e)) throw e;
+                  await sleep(retryDelayMs(attempt, e));
+                }
+              }
+              if (!embedding) throw (lastErr instanceof Error ? lastErr : new Error("embedding unavailable"));
+            }
             const g = await groundSearch(query, embedding, caseId);
             for (const ch of g.chunks) emittedResults.push(ch);
             for (const b of g.searchResults) searchResultBlocks.push(b);
@@ -408,18 +518,47 @@ Deno.serve(async (req: Request) => {
           messages.push({ role: "user", content: userBlocks });
         }
 
-        const body: any = {
-          model: MODEL,
-          max_tokens: mode === "transform" ? TRANSFORM_MAX_TOKENS : mode === "insight" ? INSIGHT_MAX_TOKENS : DRAFT_MAX_TOKENS,
-          system,
-          messages,
-          stream: true,
-        };
+        const maxTokens = mode === "transform" ? TRANSFORM_MAX_TOKENS : mode === "insight" ? INSIGHT_MAX_TOKENS : DRAFT_MAX_TOKENS;
 
-        const { citationCount } = await streamAnthropic(body, emittedResults, emit, nextCiteNum);
-        emit({ type: "done", citation_count: citationCount });
+        // ----- Writer with bounded retry + model fallback (v11) -----
+        // Transient upstream failures (429/5xx/529 and mid-stream overloaded/rate-limit SSE
+        // errors) back off and retry; the FINAL attempt falls back to WRITER_FALLBACK_MODEL.
+        // A retry only fires while ZERO answer text has streamed — once any text is visible,
+        // a rerun would duplicate it in the client, so the interruption is surfaced instead.
+        let result: { text: string; citationCount: number } | null = null;
+        let lastErr: unknown = null;
+        for (let attempt = 1; attempt <= WRITER_MAX_ATTEMPTS; attempt++) {
+          const writerModel = attempt === WRITER_MAX_ATTEMPTS ? WRITER_FALLBACK_MODEL : MODEL;
+          const body: any = {
+            model: writerModel,
+            max_tokens: maxTokens,
+            system,
+            messages,
+            stream: true,
+          };
+          let sawText = false;
+          try {
+            result = await streamAnthropic(body, emittedResults, emit, nextCiteNum, () => { sawText = true; });
+            break;
+          } catch (e) {
+            lastErr = e;
+            if (sawText) {
+              throw new Error(`The output stream was interrupted mid-write (${(e as Error).message}). Re-run the request to get a complete result.`);
+            }
+            if (attempt >= WRITER_MAX_ATTEMPTS || !isRetryableError(e)) throw e;
+            await sleep(retryDelayMs(attempt, e));
+          }
+        }
+        if (!result) {
+          throw (lastErr instanceof Error ? lastErr : new Error("Writer produced no output"));
+        }
+        emit({ type: "done", citation_count: result.citationCount });
       } catch (e) {
-        emit({ type: "error", message: (e as Error).message });
+        const msg = (e as Error).message;
+        const friendly = isRetryableError(e)
+          ? `The writer model is temporarily overloaded upstream (${msg}). ${WRITER_MAX_ATTEMPTS} attempts were made, including a fallback model. Re-run the request in a moment.`
+          : msg;
+        emit({ type: "error", message: friendly });
         emit({ type: "done", citation_count: 0 });
       } finally {
         controller.close();
