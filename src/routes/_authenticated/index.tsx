@@ -156,11 +156,11 @@ function Dashboard() {
 
           {/* Strategic posture */}
           <Card className="p-5 bg-secondary/40">
-            <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Context</div>
-            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">{currentMatter.short_name}</h2>
+            <div className="t-eyebrow">Context</div>
+            <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">{currentMatter.short_name}</h2>
             <div className="mt-4 text-sm leading-relaxed text-foreground/85 space-y-3 font-serif">
               <p>{cfg.subtitle ?? currentMatter.name}</p>
-              <p className="text-xs text-muted-foreground font-sans not-italic pt-1 border-t border-border">
+              <p className="t-meta not-italic pt-3 border-t border-border tabular-nums">
                 MDL {currentMatter.mdl_number} · {currentMatter.court} · Hon. {currentMatter.judge}
               </p>
             </div>
