@@ -1061,6 +1061,9 @@ function StepRow({
   active = false,
   done = false,
   delayMs = 0,
+  startedAt,
+  endedAt,
+  now = 0,
 }: {
   kind: Kind;
   name?: string;
@@ -1069,6 +1072,9 @@ function StepRow({
   active?: boolean;
   done?: boolean;
   delayMs?: number;
+  startedAt?: number;
+  endedAt?: number;
+  now?: number;
 }) {
   const m = KIND_META[kind];
   const Icon = m.icon;
@@ -1079,7 +1085,10 @@ function StepRow({
         <div className="flex items-center gap-1.5 leading-[16px]">
           <Icon className={`h-3 w-3 shrink-0 ${m.accent}`} strokeWidth={1.75} />
           <span className="text-[12px] font-semibold tracking-[-0.005em] text-foreground/90">{name ?? m.name}</span>
-          {meta && <span className="ml-auto text-[11px] text-muted-foreground/80 tabular-nums shrink-0">{meta}</span>}
+          <span className="ml-auto inline-flex items-center gap-2 shrink-0">
+            {meta && <span className="text-[11px] text-muted-foreground/80 tabular-nums">{meta}</span>}
+            <StepClock startedAt={startedAt} endedAt={endedAt} now={now} />
+          </span>
         </div>
         <div
           className={
