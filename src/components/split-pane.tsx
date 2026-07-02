@@ -98,17 +98,17 @@ export function SplitPane({
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
   }, []);
 
+  // CSS var drives flex-basis only at lg+ via the Tailwind arbitrary utility
+  // below. On mobile the children stack (flex-col) and the var is ignored.
+  const styleVar = { ['--split-basis' as string]: `${pct}%` } as React.CSSProperties;
+
   return (
     <div
       ref={containerRef}
       className={`flex flex-col lg:flex-row ${className ?? ''}`}
+      style={styleVar}
     >
-      <div
-        className="min-w-0 lg:h-full flex flex-col"
-        style={typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches
-          ? { flexBasis: `${pct}%`, flexGrow: 0, flexShrink: 0 }
-          : undefined}
-      >
+      <div className="min-w-0 lg:h-full flex flex-col lg:[flex-basis:var(--split-basis)] lg:grow-0 lg:shrink-0">
         {left}
       </div>
 
