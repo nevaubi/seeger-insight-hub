@@ -1586,6 +1586,54 @@ Return ONLY JSON: { "unsupported": ["short verbatim quote of each unsupported se
   }
 }
 
+// ---------- FOLLOW-UP SUGGESTER ----------
+// Post-writer: propose 3–4 short, matter-scoped follow-up questions grounded in what was
+// actually retrieved this run. Best-effort — silently no-ops on failure.
+async function runFollowups(
+  question: string,
+  matter: { name: string; short_name: string; mdl_number: string },
+  answer: string,
+  citedRefs: string[],
+): Promise<string[]> {
+  if (!ANTHROPIC_API_KEY || !answer.trim()) return [];
+  const system = `You are a senior plaintiff-side MDL litigator. Given a research question that was just answered from the closed record of ${matter.name} (${matter.mdl_number}), propose 3–4 sharp follow-up questions the attorney is most likely to want next. Rules:
+- Each ≤ 90 characters, plain English, no citations, no numbering.
+- Concrete and specific to the matter, not generic legal-research prompts.
+- Prefer questions that build on evidence already surfaced (deeper on one order, adjacent deadline, opposing side's position, next procedural step, related PTO/CMO).
+- No duplicates of the original question.
+Return ONLY JSON: { "suggestions": ["...", "...", "..."] }`;
+  const user = `Original question:\n${question}\n\nAnswer just written (may include inline citations):\n${answer.slice(0, 8000)}\n\nSource passages cited (${citedRefs.length}): ${citedRefs.slice(0, 40).join(", ")}`;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-haiku-latest",
+        max_tokens: 512,
+        system,
+        messages: [{ role: "user", content: user }],
+      }),
+    });
+    if (!res.ok) return [];
+    const j = await res.json();
+    const text = (j?.content ?? []).map((b: any) => (b?.type === "text" ? b.text : "")).join("");
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return [];
+    const parsed = JSON.parse(m[0]);
+    const arr = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+    return arr
+      .map((s: unknown) => String(s ?? "").trim())
+      .filter((s: string) => s.length > 0 && s.length <= 140)
+      .slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
 // Reranks the record passages (skipping web + caselaw, which have their own scoring),
 // keeps top MAX_WRITER_CHUNKS, and returns the reordered arrays. Also returns a boolean
 // indicating whether rerank ran (false = fallback / not enough items).
@@ -2114,6 +2162,15 @@ Deno.serve(async (req: Request) => {
           const v = await runVerifier(question, answerText, citedRefs);
           emit({ type: "verify", unsupported: v.unsupported, notes: v.notes, model: VERIFIER_MODEL });
         } catch { /* verifier is best-effort */ }
+      }
+
+      // ----- Follow-up suggestions (best-effort). Emitted just before `done`. -----
+      if (answerText.trim() && !finalErr) {
+        try {
+          const citedRefs = emittedResults.map((c: any) => c.ref).filter(Boolean);
+          const suggestions = await runFollowups(question, matter, answerText, citedRefs);
+          if (suggestions.length) emit({ type: "followups", suggestions });
+        } catch { /* best-effort */ }
       }
 
 
