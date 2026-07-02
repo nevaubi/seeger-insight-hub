@@ -1,3 +1,20 @@
+// Supabase Edge Function: legal-synthesis (v30)
+// v30 — MULTI-AGENT GRAPH + WIDER RAG + TAVILY WEB SUB-AGENT:
+//   * PLANNER (Gemini 3.1 Pro): decomposes the question into facets, writes a HyDE
+//     hypothesis per facet, and picks which specialists to run. Emitted as `plan` SSE.
+//   * SPECIALISTS: the existing router loop still dispatches tools in parallel, plus a new
+//     `search_web` tool backed by Tavily, scoped to a reputable-legal + regulatory +
+//     scientific domain allowlist (courtlistener, uscourts, fda.gov, nejm, jamanetwork, ...).
+//   * VOYAGE RERANK-2: after retrieval, all record passages are reranked; top 80 survive.
+//   * CRITIC (Gemini 3.5 Flash): coverage/gap check; may trigger ONE extra router round.
+//     Emitted as `critic` SSE.
+//   * VERIFIER (Gemini 3.5 Flash): post-stream citation-grounding pass. Emitted as `verify`
+//     SSE (advisory; the writer output is NOT rewritten in Phase A).
+//   * Retrieval knobs widened: MAX_ROUNDS 3->5, PER_SEARCH_K 10->15, EXPAND_TOP_N 3->5,
+//     MAX_TOTAL_CHUNKS 60->120 (pre-rerank), MAX_WRITER_CHUNKS 80 (post-rerank ceiling).
+// New SSE event types (additive; the reducer's default case keeps old clients working):
+//   plan, critic, verify, web_result.
+//
 // Supabase Edge Function: legal-synthesis (v29)
 // Multi-agent, multi-matter RAG over a litigation record (controlling orders + filings).
 //   Router = Gemini 3.1 Flash-Lite (OpenAI-compatible endpoint): plans and runs up to
