@@ -1696,6 +1696,42 @@ Deno.serve(async (req: Request) => {
         userText += `\n\n[The user applied these filters in the interface; they are enforced on every search and may not be removed: ${JSON.stringify(initialFilter)}.]`;
       }
 
+      // ----- Phase 0 (v30): PLANNER decomposes the question into facets + HyDE hypotheses.
+      // Non-fatal on failure (falls back to a single-facet plan). Runs in the background of
+      // the first router round — we emit the plan as an SSE event so the UI can render it.
+      let plannedFacets: Facet[] = [];
+      let plannerRationale = "";
+      try {
+        const p = await runPlanner(question, matter);
+        plannedFacets = p.facets;
+        plannerRationale = p.rationale;
+        emit({
+          type: "plan",
+          rationale: plannerRationale,
+          facets: plannedFacets.map((f) => ({
+            id: f.id, question: f.question, hypothesis: f.hypothesis,
+            specialists: f.specialists, keywords: f.keywords ?? [], court: f.court ?? null,
+          })),
+        });
+      } catch { /* planner is best-effort */ }
+
+      // Compose the user turn: original question + planner facets + HyDE hypotheses. The
+      // hypotheses are load-bearing — they double the semantic-search surface via HyDE.
+      let userText = question;
+      if (initialFilter && Object.keys(initialFilter).length) {
+        userText += `\n\n[The user applied these filters in the interface; they are enforced on every search and may not be removed: ${JSON.stringify(initialFilter)}.]`;
+      }
+      if (plannedFacets.length > 1 || (plannedFacets[0]?.hypothesis ?? "").length > 20) {
+        const facetLines = plannedFacets.map((f, i) =>
+          `${i + 1}. [${f.id}] ${f.question}` +
+          (f.specialists?.length ? `\n   specialists: ${f.specialists.join(", ")}` : "") +
+          (f.keywords?.length ? `\n   keywords: ${f.keywords.join(", ")}` : "") +
+          (f.court ? `\n   court: ${f.court}` : "") +
+          (f.hypothesis ? `\n   hypothesis: ${f.hypothesis}` : "")
+        ).join("\n\n");
+        userText += `\n\n[PLANNER decomposed this question into the following facets. Run their specialists in PARALLEL in the first round; each facet's hypothesis is the kind of passage that would answer it — use those as retrieval anchors.]\n\n${facetLines}`;
+      }
+
       // ----- Phase 1: Gemini router gathers the record -----
       // History is plain text (rationale + compact results), never replayed tool-call parts,
       // so Gemini 3's thought_signature requirement never triggers. Router failures are
