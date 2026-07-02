@@ -70,11 +70,11 @@ function MatterSwitcher({ collapsed }: { collapsed: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="mt-3 w-full inline-flex items-center justify-between gap-2 rounded-sm border border-sidebar-border/60 bg-sidebar-accent/30 hover:bg-sidebar-accent/60 px-2.5 py-1.5 text-left text-[11px] font-sans text-sidebar-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-primary/60 transition-colors"
+        className="mt-3 w-full inline-flex items-center justify-between gap-2 rounded-sm bg-transparent hover:bg-sidebar-accent/40 px-2 py-1.5 text-left text-[11px] font-sans text-sidebar-foreground/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-primary/60 transition-colors group"
         aria-label="Switch matter"
       >
-        <span className="truncate font-medium text-white">{currentMatter.short_name}</span>
-        <ChevronsUpDown className="h-3.5 w-3.5 text-sidebar-foreground/60 shrink-0" />
+        <span className="truncate font-medium text-white tracking-[-0.005em]">{currentMatter.short_name}</span>
+        <ChevronsUpDown className="h-3 w-3 text-sidebar-foreground/40 shrink-0 opacity-0 group-hover:opacity-100 group-data-[state=open]:opacity-100 transition-opacity" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">

@@ -82,7 +82,7 @@ function Dashboard() {
       <div className="px-8 py-6 space-y-10">
         {/* Stat cards */}
         <section className="motion-safe:motion-fade-rise">
-          <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground mb-2.5 font-sans">At a glance</div>
+          <div className="t-eyebrow mb-2.5">At a glance</div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <StatCard icon={Gavel} label="Controlling orders" value={data.counts.orders} />
             <StatCard icon={FileText} label="Cases in roster" value={data.counts.cases} />
@@ -95,12 +95,12 @@ function Dashboard() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 motion-safe:motion-fade-rise">
           {/* Upcoming */}
           <Card className="lg:col-span-2 p-0 overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+            <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between bg-card">
               <div>
-                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Calendar</div>
-                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Next critical dates</h2>
+                <div className="t-eyebrow">Calendar</div>
+                <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">Next critical dates</h2>
               </div>
-              <span className="text-[11px] text-muted-foreground font-sans">From the record</span>
+              <span className="t-meta">From the record</span>
             </div>
             {data.upcoming.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">No upcoming events on record.</div>
@@ -156,11 +156,11 @@ function Dashboard() {
 
           {/* Strategic posture */}
           <Card className="p-5 bg-secondary/40">
-            <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Context</div>
-            <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">{currentMatter.short_name}</h2>
+            <div className="t-eyebrow">Context</div>
+            <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">{currentMatter.short_name}</h2>
             <div className="mt-4 text-sm leading-relaxed text-foreground/85 space-y-3 font-serif">
               <p>{cfg.subtitle ?? currentMatter.name}</p>
-              <p className="text-xs text-muted-foreground font-sans not-italic pt-1 border-t border-border">
+              <p className="t-meta not-italic pt-3 border-t border-border tabular-nums">
                 MDL {currentMatter.mdl_number} · {currentMatter.court} · Hon. {currentMatter.judge}
               </p>
             </div>
@@ -171,14 +171,14 @@ function Dashboard() {
         {/* Recent orders */}
         <section className="motion-safe:motion-fade-rise">
           <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+            <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between bg-card">
               <div>
-                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Docket activity</div>
-                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Recent orders</h2>
+                <div className="t-eyebrow">Docket activity</div>
+                <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">Recent orders</h2>
               </div>
               <button
                 onClick={() => navigate({ to: '/orders' })}
-                className="text-xs text-accent hover:underline inline-flex items-center gap-1 font-sans"
+                className="text-[11.5px] text-accent hover:underline inline-flex items-center gap-1 font-sans font-medium"
               >
                 All orders <ArrowRight className="h-3 w-3" />
               </button>
@@ -214,8 +214,8 @@ function StatCard({ icon: Icon, label, value }: { icon: any; label: string; valu
   return (
     <Card className="p-4 hover:border-foreground/15 transition-colors">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans leading-snug">{label}</div>
-        <Icon className="h-4 w-4 text-muted-foreground/60 shrink-0" strokeWidth={1.5} />
+        <div className="t-eyebrow leading-snug">{label}</div>
+        <Icon className="h-4 w-4 text-muted-foreground/50 shrink-0" strokeWidth={1.5} />
       </div>
       <div className="mt-3 font-serif text-3xl font-semibold tabular-nums tracking-[-0.02em]">{value.toLocaleString()}</div>
     </Card>
