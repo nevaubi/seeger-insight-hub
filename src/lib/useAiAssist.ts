@@ -76,17 +76,8 @@ export function useAiAssist() {
     let text = '';
 
     try {
-      // Embed the query only when grounding a draft.
-      let embedding = '';
-      if (req.mode === 'draft' && req.ground) {
-        try {
-          embedding = await embedQuery(
-            instruction + (req.document ? '\n' + req.document.slice(0, 800) : ''),
-          );
-        } catch {
-          /* grounding is best-effort; fall through ungrounded */
-        }
-      }
+      // ai-assist v11 generates the query embedding server-side (voyage-law-2, 1024-dim);
+      // the client no longer computes or sends one.
 
       const body: Record<string, unknown> = {
         mode: req.mode,
@@ -97,9 +88,8 @@ export function useAiAssist() {
         matter: req.matter,
       };
       if (req.messages?.length) body.messages = req.messages;
-      if (req.mode === 'draft' && req.ground && embedding) {
+      if (req.mode === 'draft' && req.ground) {
         body.ground = true;
-        body.embedding = embedding;
       }
 
       const res = await fetch(AI_ASSIST_ENDPOINT, {
