@@ -301,6 +301,7 @@ function reducer(state: SynthState, action: Action): SynthState {
                 keywords: evt.keywords,
                 filter: evt.filter ?? {},
                 k: evt.k,
+                startedAt: performance.now(),
               },
             ],
           };
@@ -314,11 +315,11 @@ function reducer(state: SynthState, action: Action): SynthState {
               additions.push(ch.ref);
             }
           }
-          // attach count to most recent search of this round
+          // attach count + endedAt to most recent search of this round
           const nextSearches = [...state.searches];
           for (let i = nextSearches.length - 1; i >= 0; i--) {
             if (nextSearches[i].round === evt.round && nextSearches[i].count === undefined) {
-              nextSearches[i] = { ...nextSearches[i], count: list.length };
+              nextSearches[i] = { ...nextSearches[i], count: list.length, endedAt: performance.now() };
               break;
             }
           }
