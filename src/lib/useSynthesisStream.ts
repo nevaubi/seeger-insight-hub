@@ -419,6 +419,7 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
         document_ids?: string[];
         review_set_id?: string;
         matter?: {
+          slug?: string;
           name: string;
           short_name: string;
           mdl_number: string;
@@ -436,20 +437,28 @@ export function useSynthesisStream(endpoint: string, anonKey: string) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       try {
-        dispatch({ kind: 'embedding', on: !modelReady() });
-        const emb = await embedQuery(v);
-        dispatch({ kind: 'embedding', on: false });
+        // Best-effort client embedding: since legal-synthesis v28 the server generates the
+        // query embedding itself (voyage-law-2, 1024-dim) and ignores legacy 384-dim vectors,
+        // so a Transformers.js model-load failure must never block the request.
+        let emb = '';
+        try {
+          dispatch({ kind: 'embedding', on: !modelReady() });
+          emb = await embedQuery(v);
+        } catch {
+          emb = '';
+        } finally {
+          dispatch({ kind: 'embedding', on: false });
+        }
 
         const body: Record<string, unknown> = {
           question: v,
-          embedding: emb,
           initial_filter: initialFilter,
         };
+        if (emb) body.embedding = emb;
         if (scope?.case_id) body.case_id = scope.case_id;
         if (scope?.matter) body.matter = scope.matter;
         if (scope?.document_ids?.length) body.document_ids = scope.document_ids;
         if (scope?.review_set_id) body.review_set_id = scope.review_set_id;
-
 
         const res = await fetch(endpoint, {
           method: 'POST',
