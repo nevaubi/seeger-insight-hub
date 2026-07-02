@@ -823,7 +823,7 @@ function SynthesisPanel({
             setFilters={setFilters}
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
-
+          />
         </div>
     </div>
   );
