@@ -151,6 +151,7 @@ type SseExpand = { type: 'expand'; round: number; source: string; count: number 
 type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
 type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
 type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
+type SseFollowups = { type: 'followups'; suggestions: string[] };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -169,6 +170,7 @@ export type SynthEvent =
   | SsePlan
   | SseWebResult
   | SseVerify
+  | SseFollowups
   | SseError
   | SseDone;
 
@@ -194,6 +196,7 @@ export type SynthState = {
   plan: PlanEvt | null;
   webResults: WebResult[];
   verify: VerifyEvt | null;
+  followups: string[];
   // transient tool-start timestamps keyed by `${round}:${tool}` so we can
   // compute per-step durations when the matching `done` frame arrives.
   _toolStarts: Record<string, number>;
@@ -218,6 +221,7 @@ const INITIAL: SynthState = {
   plan: null,
   webResults: [],
   verify: null,
+  followups: [],
   _toolStarts: {},
 };
 
@@ -452,6 +456,11 @@ function reducer(state: SynthState, action: Action): SynthState {
           return {
             ...state,
             verify: { unsupported: evt.unsupported, notes: evt.notes, model: evt.model },
+          };
+        case 'followups':
+          return {
+            ...state,
+            followups: Array.isArray(evt.suggestions) ? evt.suggestions.slice(0, 6) : [],
           };
         case 'expand':
           // Neighbor/sibling expansion: aggregate the adjacent-passage count per round.

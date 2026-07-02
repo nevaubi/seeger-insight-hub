@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   Children,
   cloneElement,
@@ -36,6 +36,8 @@ import {
   Printer,
   Globe,
   ShieldCheck,
+  Shuffle,
+  MessageSquarePlus,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,6 +50,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   supabase,
   tagLabel,
+  fetchQuestionSuggestions,
+  type QuestionSuggestion,
   SUPABASE_ANON_KEY,
   SYNTHESIS_ENDPOINT,
   CORPUS_INGEST_ENDPOINT,
@@ -418,6 +422,158 @@ function FilterControls({ value, onChange }: { value: Filters; onChange: (f: Fil
 
 // ----- synthesis panel -----
 
+// ----- SuggestionDeck: 4-at-a-time chips from the cron-populated pool, with shuffle -----
+
+const CATEGORY_LABEL: Record<string, string> = {
+  orders: 'Orders',
+  deadlines: 'Deadlines',
+  counsel: 'Counsel',
+  science: 'Science',
+  strategy: 'Strategy',
+};
+
+function readOffset(slug: string): number {
+  if (typeof window === 'undefined') return 0;
+  const raw = window.sessionStorage.getItem(`sugg-offset:${slug}`);
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+function writeOffset(slug: string, n: number) {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(`sugg-offset:${slug}`, String(n));
+}
+
+function SuggestionDeck({
+  matterSlug,
+  fallback,
+  onPick,
+}: {
+  matterSlug: string;
+  fallback: string[];
+  onPick: (q: string) => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['question-suggestions', matterSlug],
+    queryFn: () => fetchQuestionSuggestions(matterSlug),
+    staleTime: 5 * 60_000,
+  });
+
+  const pool: QuestionSuggestion[] = useMemo(() => {
+    if (data && data.length > 0) return data;
+    return fallback.map((q) => ({ question: q, category: 'strategy', generated_at: '' }));
+  }, [data, fallback]);
+
+  const [offset, setOffset] = useState(() => readOffset(matterSlug));
+  const [cycle, setCycle] = useState(0);
+
+  useEffect(() => {
+    setOffset(readOffset(matterSlug));
+    setCycle((c) => c + 1);
+  }, [matterSlug]);
+
+  const shown = useMemo(() => {
+    if (!pool.length) return [];
+    const out: QuestionSuggestion[] = [];
+    for (let i = 0; i < Math.min(4, pool.length); i++) {
+      out.push(pool[(offset + i) % pool.length]);
+    }
+    return out;
+  }, [pool, offset]);
+
+  const shuffle = useCallback(() => {
+    setOffset((o) => {
+      const next = pool.length ? (o + 4) % pool.length : 0;
+      writeOffset(matterSlug, next);
+      return next;
+    });
+    setCycle((c) => c + 1);
+  }, [pool.length, matterSlug]);
+
+  const canShuffle = pool.length > 4;
+
+  return (
+    <div className="mt-8 w-full max-w-2xl">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3" /> Try a question
+          {isLoading && <Loader2 className="h-3 w-3 animate-spin opacity-60" />}
+        </div>
+        {canShuffle && (
+          <button
+            type="button"
+            onClick={shuffle}
+            className="group inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors rounded-full px-2 py-1 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label="Shuffle suggestions"
+          >
+            <Shuffle className="h-3 w-3 transition-transform group-hover:rotate-180 duration-500" />
+            <span>Shuffle</span>
+          </button>
+        )}
+      </div>
+      <div key={cycle} className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {shown.map((s, i) => {
+          const Icon = i % 3 === 0 ? Brain : i % 3 === 1 ? PenLine : SearchIcon;
+          const catLabel = s.category ? CATEGORY_LABEL[String(s.category)] ?? String(s.category) : null;
+          return (
+            <button
+              key={`${cycle}-${s.question}`}
+              type="button"
+              onClick={() => onPick(s.question)}
+              className="motion-stream-in group text-left px-4 py-3 rounded-xl border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex flex-col gap-1"
+              style={{
+                animationDelay: `${i * 60}ms`,
+                transitionDuration: 'var(--dur-fast)',
+                transitionTimingFunction: 'var(--ease-out-soft)',
+              }}
+            >
+              {catLabel && (
+                <div className="text-[9.5px] uppercase tracking-[0.14em] text-gold/80 font-sans not-italic">
+                  {catLabel}
+                </div>
+              )}
+              <div className="flex items-start gap-2.5">
+                <Icon className="h-3.5 w-3.5 mt-1 shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
+                <span className="flex-1 text-[13.5px] font-serif italic leading-snug">{s.question}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ----- FollowUpChips: post-answer follow-ups (from `followups` SSE frame) -----
+
+function FollowUpChips({
+  suggestions,
+  onPick,
+}: {
+  suggestions: string[];
+  onPick: (q: string) => void;
+}) {
+  return (
+    <div className="motion-fade-rise">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-2">
+        <MessageSquarePlus className="h-3 w-3" /> Follow up
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {suggestions.map((s, i) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onPick(s)}
+            className="motion-stream-in group text-left text-[12.5px] font-serif italic px-3 py-1.5 rounded-full border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            style={{ animationDelay: `${i * 55}ms` }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SynthesisPanel({
   q,
   setQ,
@@ -451,6 +607,7 @@ function SynthesisPanel({
     plan,
     webResults,
     verify,
+    followups,
   } = state;
 
   const [timelineOpen, setTimelineOpen] = useState(true);
@@ -639,39 +796,15 @@ function SynthesisPanel({
             </div>
           </div>
 
-          <div className="mt-8 w-full max-w-2xl">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-3">
-              <Sparkles className="h-3 w-3" /> Try a question
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {examplesSynth.map((ex: string, i: number) => {
-                const Icon = i % 3 === 0 ? Brain : i % 3 === 1 ? PenLine : SearchIcon;
-                return (
-                  <button
-                    key={ex}
-                    type="button"
-                    onClick={() => {
-                      setQ(ex);
-                      runQuery(ex);
-                    }}
-                    className="motion-stream-in group text-left text-[13.5px] font-serif italic px-4 py-3 rounded-xl border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex items-start gap-2.5"
-                    style={{
-                      animationDelay: `${i * 60}ms`,
-                      transitionDuration: 'var(--dur-fast)',
-                      transitionTimingFunction: 'var(--ease-out-soft)',
-                    }}
-                  >
-                    <Icon className="h-3.5 w-3.5 mt-1 shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
-                    <span className="flex-1">{ex}</span>
-                    <span className="hidden md:inline-flex items-center gap-0.5 mt-0.5 text-[10px] text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity font-sans not-italic">
-                      <CommandIcon className="h-2.5 w-2.5" />
-                      <CornerDownLeft className="h-2.5 w-2.5" />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <SuggestionDeck
+            matterSlug={currentMatter.slug}
+            fallback={examplesSynth}
+            onPick={(q) => {
+              setQ(q);
+              runQuery(q);
+            }}
+          />
+
 
           {embedding && (
             <div className="mt-6 text-xs text-muted-foreground inline-flex items-center gap-2">
@@ -808,6 +941,17 @@ function SynthesisPanel({
                 </div>
               </Card>
             )}
+
+            {!running && finalRound != null && followups.length > 0 && (
+              <FollowUpChips
+                suggestions={followups}
+                onPick={(s) => {
+                  setQ(s);
+                  runQuery(s);
+                }}
+              />
+            )}
+
 
           </div>
         </div>
