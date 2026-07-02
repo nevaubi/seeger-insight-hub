@@ -75,6 +75,8 @@
   --destructive: hsl(2 58% 46%);
   --destructive-foreground: hsl(0 0% 100%);
   --border: hsl(208 26% 88%);
+  --border-soft: hsl(208 26% 92%);
+  --border-strong: hsl(208 26% 82%);
   --input: hsl(208 26% 88%);
   --ring: hsl(204 68% 27%);
   --gold: hsl(38 42% 45%);
