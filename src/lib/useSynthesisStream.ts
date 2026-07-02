@@ -235,6 +235,7 @@ function ensureRound(rounds: Record<number, RoundState>, round: number): RoundSt
       textBlocks: [],
       textOrder: [],
       blockIndex: {},
+      startedAt: performance.now(),
     }
   );
 }
@@ -253,6 +254,8 @@ function describeTool(tool: string, count: number): string {
       return `Read ${count} passage${count === 1 ? '' : 's'} of full order text`;
     case 'search_caselaw':
       return `Searched case law — ${count} opinion${count === 1 ? '' : 's'}`;
+    case 'search_web':
+      return `Searched reputable web — ${count} source${count === 1 ? '' : 's'}`;
     default:
       return `${tool} returned ${count} result${count === 1 ? '' : 's'}`;
   }
