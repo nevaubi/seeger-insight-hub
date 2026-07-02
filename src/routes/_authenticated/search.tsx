@@ -790,6 +790,17 @@ function SynthesisPanel({
               </Card>
             )}
 
+            {!running && finalRound != null && followups.length > 0 && (
+              <FollowUpChips
+                suggestions={followups}
+                onPick={(s) => {
+                  setQ(s);
+                  runQuery(s);
+                }}
+              />
+            )}
+
+
           </div>
         </div>
 
