@@ -48,8 +48,8 @@ import {
   tagLabel,
   SUPABASE_ANON_KEY,
   SYNTHESIS_ENDPOINT,
+  CORPUS_INGEST_ENDPOINT,
 } from '@/lib/supabase';
-import { embedQuery, modelReady } from '@/lib/embed';
 import {
   useSynthesisStream,
   type Chunk,
@@ -1924,12 +1924,26 @@ function BrowsePanel({
     mutationFn: async (query) => {
       const filter = { ...buildFilter(filters), case_id: currentMatter.master_case_id };
       try {
-        setEmbedding(!modelReady());
-        const emb = await embedQuery(query);
+        // Server-side query embedding (voyage-law-2, 1024-dim) via corpus-ingest — the same
+        // vector space as chunks.embedding_v2. Replaces the in-browser bge model, which
+        // produced 384-dim vectors the v2 corpus cannot use.
+        setEmbedding(true);
+        const embRes = await fetch(CORPUS_INGEST_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ action: 'embed_query', query }),
+        });
+        if (!embRes.ok) throw new Error(`embed_query failed (${embRes.status})`);
+        const embJson = (await embRes.json()) as { ok?: boolean; embedding?: string };
+        if (!embJson?.ok || !embJson.embedding) throw new Error('embed_query returned no embedding');
         setEmbedding(false);
-        const { data, error } = await supabase.rpc('hybrid_search', {
+        const { data, error } = await supabase.rpc('hybrid_search_v2' as never, {
           q: query,
-          query_embedding: emb,
+          query_embedding: embJson.embedding,
           filter,
           k: 20,
         });
