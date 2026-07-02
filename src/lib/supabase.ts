@@ -15,8 +15,35 @@ export const REVIEW_FILES_BUCKET = 'review-files';
 export const DEPO_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ingest`;
 export const DEPO_ANALYZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-analyze`;
 export const DEPO_ASK_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ask`;
+export const SUGGEST_QUESTIONS_ENDPOINT = `${SUPABASE_URL}/functions/v1/suggest-questions`;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+export type QuestionCategory = 'orders' | 'deadlines' | 'counsel' | 'science' | 'strategy';
+
+export interface QuestionSuggestion {
+  question: string;
+  category: QuestionCategory | string | null;
+  generated_at: string;
+}
+
+// Reads the latest 20 curated starter questions for a matter from the
+// cron-populated view. Returns [] if the view doesn't exist yet or the pool
+// is empty — callers should fall back to hardcoded seeds in that case.
+export async function fetchQuestionSuggestions(matterSlug: string): Promise<QuestionSuggestion[]> {
+  try {
+    const { data, error } = await supabase
+      .from('v_question_suggestions')
+      .select('question, category, generated_at')
+      .eq('matter_slug', matterSlug)
+      .order('generated_at', { ascending: false })
+      .limit(20);
+    if (error) return [];
+    return (data ?? []) as QuestionSuggestion[];
+  } catch {
+    return [];
+  }
+}
 
 export type OrderType = 'PTO' | 'CMO' | 'CBO' | 'JPML';
 
