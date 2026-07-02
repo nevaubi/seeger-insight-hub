@@ -366,7 +366,8 @@ function reducer(state: SynthState, action: Action): SynthState {
         }
         case 'round_end': {
           const cur = ensureRound(state.rounds, evt.round);
-          const updated: RoundState = { ...cur, stop_reason: evt.stop_reason };
+          const now = performance.now();
+          const updated: RoundState = { ...cur, stop_reason: evt.stop_reason, endedAt: now };
           if (evt.stop_reason === 'end_turn') {
             return {
               ...state,
@@ -387,37 +388,66 @@ function reducer(state: SynthState, action: Action): SynthState {
             rounds: nextRounds,
             currentRound: null,
             notes: interim
-              ? [...state.notes, { round: evt.round, text: interim }]
+              ? [...state.notes, { round: evt.round, text: interim, startedAt: cur.startedAt, endedAt: now }]
               : state.notes,
           };
         }
         case 'tool': {
-          // Structured router tool (list_orders / lookup_counsel / list_deadlines).
-          // The done frame carries the result count; surface it as a research
-          // note. The start frame only advances the active round.
+          // Start frame: stamp start time for this (round,tool) pair.
+          // Done frame: push a note with duration.
+          const key = `${evt.round}:${evt.tool}`;
           if (evt.done) {
+            const startedAt = state._toolStarts[key];
+            const endedAt = performance.now();
+            const nextStarts = { ...state._toolStarts };
+            delete nextStarts[key];
             return {
               ...state,
+              _toolStarts: nextStarts,
               notes: [
                 ...state.notes,
-                { round: evt.round, text: describeTool(evt.tool, evt.count ?? 0) },
+                { round: evt.round, text: describeTool(evt.tool, evt.count ?? 0), startedAt, endedAt },
               ],
             };
           }
           return {
             ...state,
             currentRound: Math.max(state.currentRound ?? -1, evt.round),
+            _toolStarts: { ...state._toolStarts, [key]: performance.now() },
           };
         }
-        case 'tool_error':
-          // Non-fatal: the backend continues with whatever else it gathered, so
-          // record this as a note rather than a fatal error.
+        case 'tool_error': {
+          const key = `${evt.round}:${evt.tool}`;
+          const startedAt = state._toolStarts[key];
+          const endedAt = performance.now();
+          const nextStarts = { ...state._toolStarts };
+          delete nextStarts[key];
           return {
             ...state,
+            _toolStarts: nextStarts,
             notes: [
               ...state.notes,
-              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}` },
+              { round: evt.round, text: `${evt.tool} lookup error: ${evt.message}`, startedAt, endedAt },
             ],
+          };
+        }
+        case 'plan':
+          return {
+            ...state,
+            plan: { rationale: evt.rationale ?? '', facets: evt.facets ?? [] },
+          };
+        case 'web_result':
+          return {
+            ...state,
+            webResults: [
+              ...state.webResults,
+              { round: evt.round, title: evt.title ?? null, url: evt.url ?? null, published: evt.published ?? null },
+            ],
+          };
+        case 'verify':
+          return {
+            ...state,
+            verify: { unsupported: evt.unsupported, notes: evt.notes, model: evt.model },
           };
         case 'expand':
           // Neighbor/sibling expansion: aggregate the adjacent-passage count per round.
