@@ -1853,7 +1853,6 @@ Deno.serve(async (req: Request) => {
                   : `search_caselaw returned no opinions for that query; try a broader query or remove the court restriction.`,
               );
             }
-            }
           } else if (s.kind === "web") {
             if (s.wb.unavailable) {
               emit({ type: "tool", round, tool: "search_web", count: 0, done: true });
