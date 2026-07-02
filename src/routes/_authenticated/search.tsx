@@ -420,6 +420,9 @@ function SynthesisPanel({
     chunks,
     chunkOrder,
     expansions,
+    plan,
+    webResults,
+    verify,
   } = state;
 
   const [timelineOpen, setTimelineOpen] = useState(true);
