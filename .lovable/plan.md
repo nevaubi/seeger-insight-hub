@@ -1,80 +1,74 @@
-# Suggestions: post-answer follow-ups + cron-generated starter pool
+# Surgical Frontend Polish
 
-Two related features, one shared surface (chips in the Ask-the-Record UI).
+No structural rewrites, no new features — just tightening what already exists so the app reads as one coherent editorial law-firm surface. Scope is limited to `src/styles.css`, `src/components/app-shell.tsx`, `src/routes/_authenticated/index.tsx`, `src/routes/_authenticated/search.tsx`, and small touch-ups in `src/components/case-ui.tsx`.
 
-## 1. Post-answer follow-up suggestions (per-run, live)
+## 1. Global tokens & typography
 
-When a run finishes (`writer` phase hits `end_turn`), the `legal-synthesis` edge function emits one final SSE frame:
+Goal: one visual voice, no drift between pages.
 
-```
-event: data
-{ "type": "followups", "suggestions": ["...", "...", "..."] }
-```
+- **Type scale**: define a small utility set (`.t-eyebrow`, `.t-h1`, `.t-h2`, `.t-body`, `.t-meta`, `.t-num`) in `styles.css` so every page pulls from the same ramp instead of ad-hoc `text-[13px]`. Serif reserved for h1/h2 + numeric hero figures; Inter everywhere else.
+- **Eyebrow labels**: standardize the tracked uppercase eyebrow (`text-[10.5px] tracking-[0.14em] uppercase text-muted-foreground`) — currently spelled 5 different ways.
+- **Border/divider tone**: audit `border-border` vs raw hairlines; introduce `--border-strong` for section separators and `--border-soft` (currently borders read a hair too heavy on parchment).
+- **Radius**: unify to `rounded-sm` for chips/badges, `rounded-md` for controls, `rounded-lg` for cards. Remove stray `rounded-xl` on the sidebar and evidence rail.
+- **Focus ring**: single token (`ring-1 ring-ring/60 ring-offset-2 ring-offset-background`) applied via a `.focus-ring` utility; today several components override with mismatched colors.
+- **Motion**: consolidate remaining `transition-all` into `transition-colors` / `transition-[background,border]` with `--dur-fast` so hovers feel uniform.
+- **Numerals**: ensure `tabular-nums` on every date/number cell (a few slipped through in Dashboard KPIs and timeline elapsed times).
 
-3–4 short, matter-scoped follow-ups grounded in what was actually retrieved this run (order labels, tags, parties that showed up in citations). Generated cheaply by Haiku with a tight prompt + the run's citation list — no extra RAG round.
+## 2. Shell + Dashboard
 
-UI: render as a row of chips under the final answer labeled "Follow up". Click = prefill composer + auto-submit. Chips animate in with the same fade the timeline uses.
+Goal: quieter chrome, sharper hierarchy, better rhythm.
 
-Wiring:
-- `src/lib/useSynthesisStream.ts`: add `SseFollowups` to the event union, store `followups: string[]` in state.
-- `src/routes/_authenticated/search.tsx`: render `FollowUpChips` in the Resting state, below the citations block.
-- `supabase/functions/legal-synthesis/index.ts`: after Verifier, one Haiku call taking `{ question, matter, citedRefs[], finalAnswerSnippet }` → JSON array of 3–4 strings. Emit `followups` frame before `done`. Non-fatal if it fails (skip silently).
+Sidebar (`app-shell.tsx`):
+- Tighten vertical rhythm: nav rows to `h-8`, group labels to the standard eyebrow, 12px gap between groups.
+- Logo lockup: align optical size, add 1px hairline under lockup only when expanded, remove the current soft divider.
+- Matter switcher: reduce visual weight (borderless, hover-only chevron), align baseline with nav.
+- Active state: swap current filled pill for a 2px accent bar on the left + `bg-sidebar-accent/40`, keeps the navy chrome calmer.
+- Collapsed rail: center icons on a 44px grid, tooltip on hover with the same eyebrow style.
+- Footer: single-line user block, remove duplicated separators.
 
-## 2. Cron-generated "Try a question" pool (starter suggestions)
+Dashboard (`_authenticated/index.tsx`):
+- KPI cards: unify to same height, serif number + eyebrow label + delta meta; drop mixed `Card` paddings.
+- Section headers: eyebrow + serif h2 + right-aligned action link (currently inconsistent per section).
+- "Next up" and "Recent orders" lists: shared row component look — same left rule, same spacing, same date column width.
+- Remove the double-bordered container around the docket watcher card; sit it on the parchment with only an internal hairline.
 
-A rotating pool of 20 curated starter questions per matter, refreshed every 6 hours, exposed on the Launcher state and refreshable client-side.
+## 3. Ask the Record (`_authenticated/search.tsx`)
 
-### Backend
+Goal: calmer canvas, more editorial timeline, tighter composer. No behavior change.
 
-New table `question_suggestions` (external Supabase, read-only from app; the cron writes via service role):
+Launcher (resting state):
+- Center column max-width 640px; serif prompt (`t-h1`), muted subhead.
+- Suggestion deck: 2×2 grid of quiet cards (hairline border, no shadow), category eyebrow on top, question in serif. Shuffle as a ghost icon-button aligned right of the eyebrow row.
 
-```
-matter_slug text, question text, rationale text?, generated_at timestamptz,
-category text  -- 'orders' | 'deadlines' | 'counsel' | 'science' | 'strategy'
-```
+Composer:
+- Single hairline border, subtle inner shadow removed; focus adds accent hairline (not glow).
+- Submit button: square 36px, `bg-primary` only when input has content, otherwise ghost.
+- Halo animation: dial opacity to 0.25 max and only render on focus (currently always on).
 
-Read view `v_question_suggestions` exposes `matter_slug, question, category, generated_at`, ordered by `generated_at desc`. Client only ever reads the latest 20 per matter.
+Timeline (active state):
+- Rail: 1px `border-l` in `--border-soft`, nodes are 8px circles flush to the rail (currently mixed 6/10px).
+- Node color = tool accent (retrieval=primary, web=gold, verify=accent, plan=muted). Consolidate into one `stepAccent()` helper instead of per-branch classnames.
+- Row layout: `grid-cols-[16px_1fr_auto]` — dot / content / elapsed. Elapsed time uses `.t-num text-muted-foreground` and animates in with `motion-stream-in`.
+- Reasoning text: reduce to `text-[13.5px] leading-[1.55]`, ivory background swapped for transparent so it sits on the canvas.
+- Shimmer: only on the currently-running node's label, not on completed ones (a couple stay shimmering today).
+- Collapse animation into the answer: keep, but ease with `--ease-out-soft` at `--dur-slow` and fade the rail out at 60%.
 
-New edge function `suggest-questions`:
-- Input: `{ matter_slug }` (loops all active matters when called by cron).
-- Pulls a compact matter brief: recent orders (last 20 by `order_date`), upcoming deadlines (next 30), tag histogram, and a handful of party names.
-- One Haiku call: "Generate 20 high-value questions a plaintiff-side litigator would actually ask about this matter right now, spread across categories, no duplicates, ≤ 90 chars each." Returns JSON `[{question, category}]`.
-- Inserts the 20 rows, deletes anything older than 48h for that matter.
+Answer (resting/final):
+- Serif h2 header "Answer", ivory removed, hairline above sources block.
+- Citations: inline superscripts styled with `.t-num` + underline on hover, matching evidence rail numbering.
+- Follow-up chips: same chip style as suggestion deck for continuity (currently a different pill).
 
-Cron: `pg_cron` every 6h calls the function via `pg_net` with the shared secret. Backfill: run once immediately after deploy.
+Evidence rail:
+- Sticky header becomes a two-line block (eyebrow + count), hairline bottom only.
+- Cards: remove inner shadow, use hairline + `hover:bg-muted/40`. Passage number in serif, matter/doc meta in `.t-meta`.
 
-### Frontend
+## Technical notes
 
-- `src/lib/supabase.ts`: `fetchQuestionSuggestions(matterSlug)` — SELECT top 20 from `v_question_suggestions`, ordered newest first.
-- `src/routes/_authenticated/search.tsx` Launcher state:
-  - Replace the current static examples with a `SuggestionDeck` component.
-  - Load 20 on mount (React Query, matter-scoped key, `staleTime: 5min`).
-  - Show 4 at a time as chips. **Shuffle** button (ghost icon-only, ↻) picks the next 4 via a rotating cursor (`(offset + 4) % 20`) with a subtle crossfade. Cursor persists in `sessionStorage` per matter so shuffle feels stateful within a session.
-  - Empty state (cron hasn't run yet): fall back to the current hardcoded seeds.
-  - Category shown as a tiny uppercase label above each chip in the muted brass tone.
-
-Same `SuggestionDeck` (without shuffle, 3–4 chips only) renders the run-scoped follow-ups from feature #1 in the Resting state.
-
-## Files touched
-
-- `supabase/functions/legal-synthesis/index.ts` — emit `followups` frame at end of writer.
-- `supabase/functions/suggest-questions/index.ts` — NEW, cron-invoked generator.
-- Migration — `question_suggestions` table + `v_question_suggestions` view + GRANTs + `pg_cron` schedule.
-- `src/lib/useSynthesisStream.ts` — new event type + state field.
-- `src/lib/supabase.ts` — `fetchQuestionSuggestions`.
-- `src/routes/_authenticated/search.tsx` — `SuggestionDeck`, shuffle, follow-up chips.
+- All work in the listed files plus small additions to `styles.css` (new utilities, no token color changes beyond adding `--border-soft`).
+- No changes to routing, data hooks, edge functions, or the streaming state machine.
+- No new dependencies.
+- Verify with a quick Playwright screenshot pass on `/`, `/search`, sidebar collapsed + expanded, and the active-run state, in both empty and populated forms.
 
 ## Out of scope
 
-- Personalization by user history (matter-scoped only for now).
-- Editing / pinning suggestions.
-- Suggestions on other pages (Deadlines, Roster). Ask-the-Record only.
-
-## Open question before I build
-
-The external Supabase project is currently used **read-only** from the app. This feature needs a **write path** (cron inserts into `question_suggestions`). Two options:
-
-1. **Add the table + cron to the external Supabase project** you already query — I'll produce the SQL + edge function code and you run them there. Cleanest, keeps everything in one DB.
-2. **Use Lovable Cloud** for `question_suggestions` only (writes here, reads from the app), while all other data stays in the external project. Adds a second data source to the app.
-
-Option 1 is what I'd recommend. Confirm and I'll proceed.
+Data pages (Orders/Deadlines/Roster/Docket), Depositions, Review, Drafting, auth pages, and any backend/edge changes.
