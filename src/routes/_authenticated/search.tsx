@@ -1269,6 +1269,31 @@ function RunCard({
           />
 
           <div className="space-y-6">
+            {plan && plan.facets.length > 0 && (
+              <div className="flex items-start gap-3 motion-fade-rise">
+                <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+                  <div className="relative z-10 grid h-[14px] w-[14px] place-items-center rounded-full bg-gold">
+                    <Sparkles className="h-[8px] w-[8px] text-primary-foreground" strokeWidth={3} />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 leading-[16px]">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">Plan</span>
+                    <span className="text-[11px] text-muted-foreground tabular-nums">{plan.facets.length} facet{plan.facets.length === 1 ? '' : 's'}</span>
+                    {webResults.length > 0 && (
+                      <span className="text-[11px] text-muted-foreground/70">· {webResults.length} web source{webResults.length === 1 ? '' : 's'}</span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {plan.facets.slice(0, 6).map((f) => (
+                      <span key={f.id} className="rounded-full border border-border/70 bg-secondary/40 px-2 py-0.5 text-[10.5px] font-medium text-foreground/75">
+                        {f.id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             {researchRounds.map((r) => {
               const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
               const rTools = toolNotes.filter((n) => n.round === r);
