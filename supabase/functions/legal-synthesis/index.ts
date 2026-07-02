@@ -2101,6 +2101,19 @@ Deno.serve(async (req: Request) => {
         emit({ type: "error", message: friendly });
       }
 
+      // ----- Phase 3 (v30): VERIFIER post-stream citation-grounding pass. Advisory only —
+      // the writer output is NOT rewritten; unsupported sentences are surfaced as a
+      // `verify` SSE event so the UI can flag them. Non-fatal on failure.
+      if (answerText.trim() && !finalErr) {
+        try {
+          const citedRefs = emittedResults.map((c: any) => c.ref).filter(Boolean);
+          const v = await runVerifier(question, answerText, citedRefs);
+          emit({ type: "verify", unsupported: v.unsupported, notes: v.notes, model: VERIFIER_MODEL });
+        } catch { /* verifier is best-effort */ }
+      }
+
+
+
       emit({ type: "done", rounds, chunk_count: emittedResults.length, citation_count: citationCount });
       controller.close();
 
