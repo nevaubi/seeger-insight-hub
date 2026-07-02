@@ -567,6 +567,21 @@ const GEMINI_TOOLS = [
       parameters: DEADLINES_TOOL_SCHEMA,
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "search_web",
+      description:
+        "Targeted web search over REPUTABLE legal, regulatory, and scientific sources ONLY " +
+        "(CourtListener, uscourts.gov, Cornell LII, Justia, FDA/EMA/WHO, NIH/PubMed, NEJM, " +
+        "JAMA, Lancet, BMJ, Law360, Bloomberg Law, SSRN). Use SPARINGLY, and ONLY when the " +
+        "matter record and search_caselaw are insufficient — e.g. very recent regulatory " +
+        "actions or agency guidance, secondary commentary on a doctrine, or a peer-reviewed " +
+        "study the corpus does not include. Results are provisional context, not a substitute " +
+        "for the matter record or published case law. Any non-allowlisted domain is dropped.",
+      parameters: WEB_TOOL_SCHEMA,
+    },
+  },
 ];
 
 const STRUCTURED_TOOLS = new Set(["list_orders", "lookup_counsel", "list_deadlines"]);
