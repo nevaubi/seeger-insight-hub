@@ -1820,6 +1820,28 @@ Deno.serve(async (req: Request) => {
                   : `search_caselaw returned no opinions for that query; try a broader query or remove the court restriction.`,
               );
             }
+            }
+          } else if (s.kind === "web") {
+            if (s.wb.unavailable) {
+              emit({ type: "tool", round, tool: "search_web", count: 0, done: true });
+              emit({ type: "tool_error", round, tool: "search_web", message: `Web search unavailable: ${s.wb.unavailable}.` });
+              resultBlocks.push(`search_web is unavailable (${s.wb.unavailable}); proceed without web sources.`);
+            } else {
+              for (const ch of s.wb.chunks) emittedResults.push(ch);
+              for (const b of s.wb.searchResults) allSearchResults.push(b);
+              searchesLog.push({ round, tool: "search_web", args: s.c.input, returned: s.wb.count });
+              emit({ type: "chunks", round, chunks: s.wb.chunks });
+              emit({ type: "tool", round, tool: "search_web", count: s.wb.count, done: true });
+              for (const ch of s.wb.chunks) {
+                emit({ type: "web_result", round, title: ch.case_name ?? ch.order_label, url: ch.pdf_url, published: ch.case_date });
+              }
+              const lines = s.wb.chunks.map((c: any) => `- ${c.full_citation}`);
+              resultBlocks.push(
+                s.wb.count
+                  ? `search_web found ${s.wb.count} reputable web source(s):\n${lines.join("\n")}`
+                  : `search_web returned no allowlisted results for that query; either the reputable sources didn't surface it, or the domain filter dropped everything.`,
+              );
+            }
           } else if (s.kind === "search") {
             for (const ch of s.sr.chunks) emittedResults.push(ch);
             for (const b of s.sr.searchResults) allSearchResults.push(b);
