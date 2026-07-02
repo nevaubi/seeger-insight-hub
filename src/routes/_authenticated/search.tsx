@@ -560,7 +560,7 @@ function FollowUpChips({
 }) {
   return (
     <div className="motion-fade-rise">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5 mb-2">
+      <div className="t-eyebrow inline-flex items-center gap-1.5 mb-2">
         <MessageSquarePlus className="h-3 w-3" /> Follow up
       </div>
       <div className="flex flex-wrap gap-2">
@@ -569,7 +569,7 @@ function FollowUpChips({
             key={s}
             type="button"
             onClick={() => onPick(s)}
-            className="motion-stream-in group text-left text-[12.5px] font-serif italic px-3 py-1.5 rounded-full border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="motion-stream-in text-left text-[12.5px] font-serif italic px-3 py-1.5 rounded-md border border-border bg-card text-foreground/85 hover:border-accent/50 hover:bg-secondary/30 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70"
             style={{ animationDelay: `${i * 55}ms` }}
           >
             {s}
