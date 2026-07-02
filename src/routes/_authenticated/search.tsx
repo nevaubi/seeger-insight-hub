@@ -688,10 +688,9 @@ function SynthesisPanel({
   }
 
   // ----- ACTIVE / RESTING STATE -----
-  return (
-    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:flex lg:gap-6 lg:overflow-hidden">
-      {/* LEFT: chat pane (conversation scrolls, composer pinned at bottom) */}
-      <div className="lg:flex-[3] min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0">
+  const leftPane = (
+    <div className="min-w-0 flex flex-col lg:h-full min-h-[calc(100vh-3.5rem)] lg:min-h-0 lg:pr-3">
+
         <div
           ref={conversationScrollRef}
           onScroll={handleConversationScroll}
