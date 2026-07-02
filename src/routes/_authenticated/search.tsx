@@ -193,6 +193,31 @@ function fmtElapsed(ms: number): string {
   return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
 }
 
+// Shared 250 ms ticker — one interval per RunCard, not per row. Reduced-motion
+// slows to 1 s.
+function useTicker(active: boolean): number {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const id = window.setInterval(() => setTick((n) => (n + 1) & 0xffff), prefersReduced ? 1000 : 250);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return active ? performance.now() : 0;
+}
+
+// Small elapsed pill for one step. Ticks while endedAt is undefined and
+// startedAt exists; freezes to endedAt-startedAt otherwise.
+function StepClock({ startedAt, endedAt, now }: { startedAt?: number; endedAt?: number; now: number }) {
+  if (startedAt == null) return null;
+  const ms = endedAt != null ? endedAt - startedAt : Math.max(0, now - startedAt);
+  return (
+    <span className="text-[10.5px] text-muted-foreground/60 tabular-nums shrink-0" aria-label={endedAt != null ? 'elapsed' : 'running'}>
+      {fmtElapsed(ms)}
+    </span>
+  );
+}
+
 function ModeButton({
   active,
   onClick,
