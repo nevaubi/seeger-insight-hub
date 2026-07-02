@@ -147,6 +147,10 @@ type SseToolError = {
 // Neighbor/sibling expansion: the edge function pulled `count` adjacent passages around the
 // round's best hits for surrounding context. Aggregated per round in the UI.
 type SseExpand = { type: 'expand'; round: number; source: string; count: number };
+// v30 additive frames (planner/web/verify) — safe to ignore if absent.
+type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
+type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
+type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -162,6 +166,9 @@ export type SynthEvent =
   | SseTool
   | SseToolError
   | SseExpand
+  | SsePlan
+  | SseWebResult
+  | SseVerify
   | SseError
   | SseDone;
 
@@ -178,11 +185,18 @@ export type SynthState = {
   rounds: Record<number, RoundState>;
   currentRound: number | null;
   finalRound: number | null;
-  writerRound: number | null; // the round the Opus writer runs in (carries its extended thinking)
+  writerRound: number | null;
   citations: CitationEvt[];
   chunks: Record<string, Chunk>;
   chunkOrder: string[];
-  expansions: Record<number, number>; // round -> count of adjacent passages auto-pulled
+  expansions: Record<number, number>;
+  // v30 additive
+  plan: PlanEvt | null;
+  webResults: WebResult[];
+  verify: VerifyEvt | null;
+  // transient tool-start timestamps keyed by `${round}:${tool}` so we can
+  // compute per-step durations when the matching `done` frame arrives.
+  _toolStarts: Record<string, number>;
 };
 
 const INITIAL: SynthState = {
@@ -201,6 +215,10 @@ const INITIAL: SynthState = {
   chunks: {},
   chunkOrder: [],
   expansions: {},
+  plan: null,
+  webResults: [],
+  verify: null,
+  _toolStarts: {},
 };
 
 type Action =
