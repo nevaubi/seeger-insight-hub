@@ -95,12 +95,12 @@ function Dashboard() {
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 motion-safe:motion-fade-rise">
           {/* Upcoming */}
           <Card className="lg:col-span-2 p-0 overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+            <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between bg-card">
               <div>
-                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Calendar</div>
-                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Next critical dates</h2>
+                <div className="t-eyebrow">Calendar</div>
+                <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">Next critical dates</h2>
               </div>
-              <span className="text-[11px] text-muted-foreground font-sans">From the record</span>
+              <span className="t-meta">From the record</span>
             </div>
             {data.upcoming.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">No upcoming events on record.</div>
