@@ -500,7 +500,7 @@ function SuggestionDeck({
   return (
     <div className="mt-8 w-full max-w-2xl">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
+        <div className="t-eyebrow inline-flex items-center gap-1.5">
           <Sparkles className="h-3 w-3" /> Try a question
           {isLoading && <Loader2 className="h-3 w-3 animate-spin opacity-60" />}
         </div>
@@ -508,7 +508,7 @@ function SuggestionDeck({
           <button
             type="button"
             onClick={shuffle}
-            className="group inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors rounded-full px-2 py-1 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="group inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors rounded-sm px-1.5 py-1 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
             aria-label="Shuffle suggestions"
           >
             <Shuffle className="h-3 w-3 transition-transform group-hover:rotate-180 duration-500" />
@@ -525,7 +525,7 @@ function SuggestionDeck({
               key={`${cycle}-${s.question}`}
               type="button"
               onClick={() => onPick(s.question)}
-              className="motion-stream-in group text-left px-4 py-3 rounded-xl border border-border bg-card/70 text-foreground/85 hover:border-accent/50 hover:text-foreground hover:-translate-y-px hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex flex-col gap-1"
+              className="motion-stream-in group text-left px-4 py-3 rounded-md border border-border bg-card hover:border-accent/50 hover:bg-secondary/30 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/70 flex flex-col gap-1.5"
               style={{
                 animationDelay: `${i * 60}ms`,
                 transitionDuration: 'var(--dur-fast)',
@@ -539,7 +539,7 @@ function SuggestionDeck({
               )}
               <div className="flex items-start gap-2.5">
                 <Icon className="h-3.5 w-3.5 mt-1 shrink-0 text-muted-foreground group-hover:text-accent transition-colors" />
-                <span className="flex-1 text-[13.5px] font-serif italic leading-snug">{s.question}</span>
+                <span className="flex-1 text-[13.5px] font-serif italic leading-snug text-foreground/85">{s.question}</span>
               </div>
             </button>
           );
