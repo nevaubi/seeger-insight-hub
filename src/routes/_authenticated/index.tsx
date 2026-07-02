@@ -171,14 +171,14 @@ function Dashboard() {
         {/* Recent orders */}
         <section className="motion-safe:motion-fade-rise">
           <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-baseline justify-between bg-card">
+            <div className="px-5 py-3.5 border-b border-border flex items-baseline justify-between bg-card">
               <div>
-                <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground font-sans">Docket activity</div>
-                <h2 className="font-serif text-lg font-semibold mt-0.5 tracking-[-0.01em]">Recent orders</h2>
+                <div className="t-eyebrow">Docket activity</div>
+                <h2 className="font-serif text-lg font-semibold mt-1 tracking-[-0.01em]">Recent orders</h2>
               </div>
               <button
                 onClick={() => navigate({ to: '/orders' })}
-                className="text-xs text-accent hover:underline inline-flex items-center gap-1 font-sans"
+                className="text-[11.5px] text-accent hover:underline inline-flex items-center gap-1 font-sans font-medium"
               >
                 All orders <ArrowRight className="h-3 w-3" />
               </button>
