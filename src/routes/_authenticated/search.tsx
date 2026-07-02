@@ -296,7 +296,7 @@ function Composer({
         className="relative"
       >
         <div
-          className="relative flex items-center bg-card rounded-lg border border-border shadow-[0_1px_2px_rgba(15,30,55,0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--accent)_18%,transparent)] transition-shadow"
+          className="relative flex items-center bg-card rounded-lg border border-border focus-within:border-accent/70 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_45%,transparent)] transition-[box-shadow,border-color]"
           style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
         >
           <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -312,7 +312,7 @@ function Composer({
               <button
                 type="button"
                 onClick={onStop}
-                className="h-9 px-3 text-xs rounded-full text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="h-9 px-3 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
               >
                 Stop
               </button>
@@ -321,7 +321,12 @@ function Composer({
               type="submit"
               disabled={!q.trim() || running}
               aria-label="Ask the record"
-              className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-accent text-accent-foreground hover:brightness-110 disabled:opacity-40 disabled:hover:brightness-100 transition"
+              className={cn(
+                'h-9 w-9 inline-flex items-center justify-center rounded-md transition-colors',
+                q.trim() && !running
+                  ? 'bg-accent text-accent-foreground hover:brightness-110'
+                  : 'bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-60',
+              )}
             >
               {running ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
