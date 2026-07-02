@@ -257,7 +257,7 @@
     color-mix(in oklab, var(--accent) 0%, transparent)
   );
   filter: blur(28px);
-  opacity: 0.55;
+  opacity: 0.22;
   animation: halo-spin 14s linear infinite;
   mask-image: radial-gradient(ellipse at center, black 50%, transparent 75%);
 }
