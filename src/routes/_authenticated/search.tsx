@@ -455,6 +455,7 @@ function SynthesisPanel({
     plan,
     webResults,
     verify,
+    followups,
   } = state;
 
   const [timelineOpen, setTimelineOpen] = useState(true);
