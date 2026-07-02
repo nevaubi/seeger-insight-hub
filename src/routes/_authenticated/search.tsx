@@ -949,17 +949,25 @@ function EvidenceColumn({
 
 
 // ----- run card with step timeline -----
+//
+// Single-rail editorial timeline. Each round has a numbered header on a hairline
+// vertical rail; each retrieval step sits on the same rail as a small status
+// node (rotating ring while running, filled navy check when done). Only the
+// active step shimmers. Everything else is quiet muted text.
 
-// Each retrieval kind gets a color so the timeline reads at a glance.
-const FACET_STYLE: Record<string, { name: string; text: string; dot: string }> = {
-  search:  { name: 'Record search',  text: 'text-accent',            dot: 'bg-accent' },
-  read:    { name: 'Read full text',  text: 'text-gold',             dot: 'bg-gold' },
-  index:   { name: 'Record index',    text: 'text-muted-foreground', dot: 'bg-muted-foreground' },
-  caselaw: { name: 'Case law',        text: 'text-teal-700',         dot: 'bg-teal-600' },
-  error:   { name: 'Lookup failed',   text: 'text-destructive',      dot: 'bg-destructive' },
+const RAIL_LEFT = 11; // px — hairline connector x-position
+const NODE_COL = 24;  // px — column reserved for node + rail
+
+type Kind = 'search' | 'read' | 'index' | 'caselaw' | 'error';
+const KIND_META: Record<Kind, { name: string; icon: typeof SearchIcon; accent: string }> = {
+  search:  { name: 'Record search',  icon: SearchIcon, accent: 'text-accent' },
+  read:    { name: 'Read full text', icon: BookOpen,   accent: 'text-gold' },
+  index:   { name: 'Record index',   icon: Layers,     accent: 'text-muted-foreground' },
+  caselaw: { name: 'Case law',       icon: BookOpen,   accent: 'text-primary' },
+  error:   { name: 'Lookup failed',  icon: SlidersHorizontal, accent: 'text-destructive' },
 };
 
-function classifyTool(text: string): { kind: keyof typeof FACET_STYLE; name: string; label: string } {
+function classifyTool(text: string): { kind: Kind; name: string; label: string } {
   const num = (text.match(/\d+/) ?? [''])[0];
   const plural = num === '1' ? '' : 's';
   if (/ lookup error:/.test(text)) return { kind: 'error', name: 'Lookup failed', label: text.replace(/^.*lookup error:\s*/, '') };
@@ -971,78 +979,135 @@ function classifyTool(text: string): { kind: keyof typeof FACET_STYLE; name: str
   return { kind: 'index', name: 'Record index', label: text };
 }
 
-function TimelineNode({ children, tone = 'primary', active = false }: { children: ReactNode; tone?: 'primary' | 'accent' | 'gold'; active?: boolean }) {
-  const bg = tone === 'accent' ? 'bg-accent' : tone === 'gold' ? 'bg-gold' : 'bg-primary';
+// Round header: numbered circle on the rail + eyebrow + one-line reasoning.
+function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
   return (
-    <span className="relative z-10 flex h-[22px] w-[22px] items-center justify-center">
-      {active && <span className={`absolute inset-[-3px] rounded-full ${bg} opacity-25 motion-pulse-soft`} aria-hidden />}
-      <span className={`relative flex h-[22px] w-[22px] items-center justify-center rounded-full ${bg} text-[11px] font-semibold text-white shadow-sm`}>
-        {children}
-      </span>
-    </span>
-  );
-}
-
-function FacetRow({ kind, name, label, meta, active = false, done = false }: { kind: keyof typeof FACET_STYLE; name?: string; label: string; meta?: string; active?: boolean; done?: boolean }) {
-  const style = FACET_STYLE[kind];
-  return (
-    <div className="flex items-start gap-2.5 motion-stream-in">
-      <span className={`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${active ? `${style.dot} motion-pulse-soft` : done ? style.dot : 'bg-muted-foreground/40'}`} aria-hidden />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className={`text-[13px] font-semibold tracking-[-0.005em] ${active ? 'shimmer-text' : style.text}`}>{name ?? style.name}</span>
-          {done && !active && <Check className={`h-3 w-3 ${style.text} opacity-70`} strokeWidth={2.5} />}
-          {meta && <span className="ml-auto text-[11px] text-muted-foreground tabular-nums shrink-0">{meta}</span>}
+    <div className="flex items-start gap-3 motion-stream-in">
+      <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
+        <div className="relative z-10 grid h-5 w-5 place-items-center rounded-full bg-background border border-border text-[9.5px] font-semibold text-muted-foreground/80 tabular-nums">
+          {round}
         </div>
-        <div className="text-[12.5px] leading-snug text-foreground/70 mt-0.5 font-serif">{label}</div>
+      </div>
+      <div className="min-w-0 flex-1 pt-[2px]">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1">
+          Round {round} phase
+        </div>
+        {reasoning ? (
+          <p className="font-serif text-[13.5px] leading-[1.55] text-foreground/85">
+            {reasoning}
+            {streaming && <span className="motion-stream-caret" aria-hidden />}
+          </p>
+        ) : streaming ? (
+          <span className="font-serif italic text-[13px] shimmer-text">planning retrieval…</span>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function RoundReasoning({ text, streaming }: { text: string; streaming: boolean }) {
-  if (!text && !streaming) return null;
-  return text ? (
-    <p className="font-serif text-[13.5px] leading-[1.6] text-foreground/80">
-      {text}
-      {streaming && <span className="motion-stream-caret" aria-hidden />}
-    </p>
-  ) : (
-    <span className="text-[13px] font-serif italic shimmer-text">planning retrieval…</span>
+// Status node — 14px, done = filled navy check, running = thin rotating ring.
+function StatusNode({ done, tone = 'primary' }: { done: boolean; tone?: 'primary' | 'accent' }) {
+  const bg = tone === 'accent' ? 'bg-accent' : 'bg-primary';
+  return (
+    <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+      <div className="relative grid h-[14px] w-[14px] place-items-center bg-background">
+        {done ? (
+          <div className={`z-10 grid h-[14px] w-[14px] place-items-center rounded-full ${bg} motion-fade-rise`}>
+            <Check className="h-[8px] w-[8px] text-primary-foreground" strokeWidth={3.5} />
+          </div>
+        ) : (
+          <div className="h-[14px] w-[14px] agent-spinner" />
+        )}
+      </div>
+    </div>
   );
 }
 
-function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(true);
+// One step (search / tool result / caselaw / web etc.).
+function StepRow({
+  kind,
+  name,
+  label,
+  meta,
+  active = false,
+  done = false,
+  delayMs = 0,
+}: {
+  kind: Kind;
+  name?: string;
+  label: string;
+  meta?: string;
+  active?: boolean;
+  done?: boolean;
+  delayMs?: number;
+}) {
+  const m = KIND_META[kind];
+  const Icon = m.icon;
   return (
-    <div className="mt-2">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors">
-        <Brain className="h-3 w-3" />
-        <span>Writer reasoning</span>
-        {streaming && <span className="normal-case tracking-normal text-accent/80">· thinking</span>}
-        {open ? <ChevronDown className="h-3 w-3 opacity-60 group-hover:opacity-100" /> : <ChevronRight className="h-3 w-3 opacity-60 group-hover:opacity-100" />}
-      </button>
-      {open && (
-        <div className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/65 pr-1">
-          {text}
-          {streaming && <span className="motion-stream-caret" aria-hidden />}
+    <div className="flex items-start gap-3 motion-stream-in" style={{ animationDelay: `${delayMs}ms` }}>
+      <StatusNode done={done && !active} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 leading-[16px]">
+          <Icon className={`h-3 w-3 shrink-0 ${m.accent}`} strokeWidth={1.75} />
+          <span className="text-[12px] font-semibold tracking-[-0.005em] text-foreground/90">{name ?? m.name}</span>
+          {meta && <span className="ml-auto text-[11px] text-muted-foreground/80 tabular-nums shrink-0">{meta}</span>}
         </div>
-      )}
+        <div
+          className={
+            active
+              ? 'mt-0.5 text-[12px] leading-relaxed shimmer-text font-medium font-serif'
+              : 'mt-0.5 text-[12px] leading-relaxed text-muted-foreground font-serif'
+          }
+        >
+          {label}
+        </div>
+      </div>
     </div>
   );
 }
 
 function ExpandRow({ count }: { count: number }) {
   return (
-    <div className="flex items-center gap-2.5 text-[11.5px] text-muted-foreground/80">
-      <GitBranch className="h-3 w-3 text-accent/70 shrink-0" />
-      <span>+{count} adjacent passage{count === 1 ? '' : 's'} pulled for surrounding context</span>
+    <div className="flex items-start gap-3">
+      <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+        <GitBranch className="h-3 w-3 text-accent/70" strokeWidth={1.75} />
+      </div>
+      <div className="text-[11.5px] text-muted-foreground/80 leading-relaxed">
+        +{count} adjacent passage{count === 1 ? '' : 's'} pulled for surrounding context
+      </div>
     </div>
   );
 }
 
 function InterimNoteRow({ text }: { text: string }) {
-  return <div className="font-serif italic text-[13px] text-foreground/70 leading-relaxed">{text}</div>;
+  return (
+    <div className="flex items-start gap-3 motion-stream-in">
+      <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+        <span className="h-1 w-1 rounded-full bg-muted-foreground/40 mt-[5px]" aria-hidden />
+      </div>
+      <div className="font-serif italic text-[12.5px] text-muted-foreground leading-relaxed">{text}</div>
+    </div>
+  );
+}
+
+function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
+        <Brain className="h-3 w-3" />
+        <span>Writer reasoning</span>
+        {streaming && <span className="normal-case tracking-normal text-accent/80">· thinking</span>}
+        {open ? <ChevronDown className="h-3 w-3 opacity-60" /> : <ChevronRight className="h-3 w-3 opacity-60" />}
+      </button>
+      {open && (
+        <div className="mt-1.5 max-h-56 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.55] text-foreground/60 pr-1">
+          {text}
+          {streaming && <span className="motion-stream-caret" aria-hidden />}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // The single shimmering phrase shown the instant the writer is called, until the first answer token streams.
@@ -1060,11 +1125,16 @@ function WritingIndicator() {
 // Post-completion re-expander for the research trace.
 function TraceToggle({ open, onToggle, steps, elapsedMs }: { open: boolean; onToggle: () => void; steps: number; elapsedMs: number }) {
   return (
-    <button type="button" onClick={onToggle} className="group inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
-      {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-      <Brain className="h-3 w-3" />
-      <span className="uppercase tracking-wider">{open ? 'Hide research trace' : 'Show research trace'}</span>
-      {!open && <span className="text-muted-foreground/60 tabular-nums normal-case tracking-normal">· {steps} step{steps === 1 ? '' : 's'} · {fmtElapsed(elapsedMs)}</span>}
+    <button
+      type="button"
+      onClick={onToggle}
+      className="group inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+    >
+      <Sparkles className="h-3 w-3 text-accent" strokeWidth={1.75} />
+      <span>
+        Analyzed {steps} step{steps === 1 ? '' : 's'} · {fmtElapsed(elapsedMs)}
+      </span>
+      <ChevronDown className={`h-3 w-3 text-muted-foreground/60 transition-transform duration-300 ${open ? 'rotate-180' : ''}`} />
     </button>
   );
 }
@@ -1116,7 +1186,7 @@ function RunCard({
   const writerReasoning = writerRound != null ? (reasoningRounds.find((t) => t.round === writerRound)?.text ?? '').trim() : '';
   const writerDone = writerRound != null && finalRound === writerRound;
   const showWorking = running && !writerActive;
-  const workingLabel = searches.length === 0 && toolNotes.length === 0 ? 'Routing your question…' : 'Working…';
+  const workingLabel = searches.length === 0 && toolNotes.length === 0 ? 'Routing your question…' : 'Processing…';
 
   return (
     <div
@@ -1125,82 +1195,101 @@ function RunCard({
       aria-hidden={!timelineOpen}
     >
       <div className="overflow-hidden" ref={reasoningScrollRef}>
-        <ol className="py-1">
-          {researchRounds.map((r, ri) => {
-            const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
-            const rTools = toolNotes.filter((n) => n.round === r);
-            const rSearches = searches.filter((s) => s.round === r);
-            const rInterim = interimNotes.filter((n) => n.round === r);
-            const exp = expansions[r] ?? 0;
-            const reasoningStreaming = running && currentRound === r && !writerActive;
-            const roundActive = running && !writerActive && (currentRound === r || lastSearch?.round === r);
-            const isLast = ri === researchRounds.length - 1;
-            return (
-              <li key={`round-${r}`} className="relative flex gap-3 motion-stream-in" style={{ animationDelay: `${Math.min(ri, 8) * 35}ms` }}>
-                <div className="relative flex flex-col items-center">
-                  <TimelineNode tone="primary" active={roundActive}>{r}</TimelineNode>
-                  {(!isLast || showWorking || writerRound != null) && <div className="w-px flex-1 min-h-[12px] bg-border mt-1" aria-hidden />}
-                </div>
-                <div className="flex-1 min-w-0 pb-5">
-                  <div className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/70 font-sans mb-1.5 leading-[22px]">Round {r}</div>
-                  <RoundReasoning text={reasoning} streaming={reasoningStreaming} />
-                  <div className="mt-2.5 space-y-2.5">
-                    {rSearches.map((s, i) => (
-                      <FacetRow
-                        key={`s-${r}-${i}`}
-                        kind="search"
-                        label={s.keywords ? `“${s.keywords}”` : 'Semantic search of the record'}
-                        active={running && !writerActive && s === lastSearch && s.count === undefined}
-                        done={s.count !== undefined}
-                        meta={s.count === undefined ? undefined : s.count === 0 ? 'no matches' : `${s.count}/${s.k}`}
-                      />
-                    ))}
+        <div className="relative py-2">
+          {/* Hairline vertical rail */}
+          <div
+            className="pointer-events-none absolute w-px bg-border"
+            style={{ left: `${RAIL_LEFT}px`, top: '16px', bottom: '16px' }}
+            aria-hidden
+          />
+
+          <div className="space-y-6">
+            {researchRounds.map((r) => {
+              const reasoning = (reasoningRounds.find((t) => t.round === r)?.text ?? '').trim();
+              const rTools = toolNotes.filter((n) => n.round === r);
+              const rSearches = searches.filter((s) => s.round === r);
+              const rInterim = interimNotes.filter((n) => n.round === r);
+              const exp = expansions[r] ?? 0;
+              const reasoningStreaming = running && currentRound === r && !writerActive;
+
+              return (
+                <div key={`round-${r}`} className="relative">
+                  <RoundHeader round={r} reasoning={reasoning} streaming={reasoningStreaming} />
+
+                  <div className="mt-3 space-y-3">
+                    {rSearches.map((s, i) => {
+                      const isActive = running && !writerActive && s === lastSearch && s.count === undefined;
+                      const isDone = s.count !== undefined;
+                      return (
+                        <StepRow
+                          key={`s-${r}-${i}`}
+                          kind="search"
+                          label={s.keywords ? `“${s.keywords}”` : 'Semantic search of the record'}
+                          active={isActive}
+                          done={isDone}
+                          delayMs={i * 40}
+                          meta={s.count === undefined ? undefined : s.count === 0 ? 'no matches' : `${s.count}/${s.k}`}
+                        />
+                      );
+                    })}
                     {rTools.map((n, i) => {
                       const c = classifyTool(n.text);
-                      return <FacetRow key={`t-${r}-${i}`} kind={c.kind} name={c.name} label={c.label} done />;
+                      return <StepRow key={`t-${r}-${i}`} kind={c.kind} name={c.name} label={c.label} done delayMs={(rSearches.length + i) * 40} />;
                     })}
                     {exp > 0 && <ExpandRow count={exp} />}
-                    {rInterim.map((n, i) => (<InterimNoteRow key={`i-${r}-${i}`} text={n.text} />))}
+                    {rInterim.map((n, i) => (
+                      <InterimNoteRow key={`i-${r}-${i}`} text={n.text} />
+                    ))}
                   </div>
                 </div>
-              </li>
-            );
-          })}
+              );
+            })}
 
-          {writerRound != null && (
-            <li className="relative flex gap-3 motion-stream-in">
-              <div className="relative flex flex-col items-center">
-                <TimelineNode tone="accent" active={writerActive}><PenLine className="h-3 w-3" strokeWidth={2} /></TimelineNode>
-              </div>
-              <div className="flex-1 min-w-0 pb-1">
-                <div className="flex items-center gap-1.5 leading-[22px]">
-                  <span className="text-[13px] font-semibold text-accent">Synthesis</span>
-                  {writerDone && <Check className="h-3 w-3 text-accent opacity-70" strokeWidth={2.5} />}
-                  <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{citations.length} citation{citations.length === 1 ? '' : 's'}</span>
+            {writerRound != null && (
+              <div className="relative motion-stream-in">
+                <div className="flex items-start gap-3">
+                  <div className="flex shrink-0 justify-center pt-[1px]" style={{ width: NODE_COL }}>
+                    <div className={`relative z-10 grid h-5 w-5 place-items-center rounded-full ${writerDone ? 'bg-accent' : 'bg-background border border-accent/40'}`}>
+                      {writerDone ? (
+                        <Check className="h-2.5 w-2.5 text-accent-foreground" strokeWidth={3.5} />
+                      ) : (
+                        <PenLine className="h-2.5 w-2.5 text-accent" strokeWidth={2} />
+                      )}
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1 pt-[2px]">
+                    <div className="flex items-center gap-1.5 leading-[16px]">
+                      <span className="text-[12px] font-semibold text-foreground/90">Synthesis</span>
+                      <span className="ml-auto text-[11px] text-muted-foreground/80 tabular-nums">
+                        {citations.length} citation{citations.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <div className={writerDone ? 'mt-0.5 text-[12px] text-muted-foreground font-serif' : 'mt-0.5 text-[12px] shimmer-text font-medium font-serif'}>
+                      {writerDone ? 'Answer written from the gathered record.' : 'Drafting the answer…'}
+                    </div>
+                    {writerReasoning && <WriterReasoning text={writerReasoning} streaming={writerActive} />}
+                  </div>
                 </div>
-                <div className="text-[12.5px] text-foreground/70 mt-0.5 font-serif">{writerDone ? 'Answer written from the gathered record.' : 'Writing the answer…'}</div>
-                {writerReasoning && <WriterReasoning text={writerReasoning} streaming={writerActive} />}
               </div>
-            </li>
-          )}
+            )}
 
-          {showWorking && (
-            <li className="relative flex gap-3">
-              <div className="relative flex flex-col items-center">
-                <span className="relative z-10 flex h-[22px] w-[22px] items-center justify-center">
-                  <span className="h-2.5 w-2.5 rounded-full bg-gold motion-pulse-soft" aria-hidden />
+            {showWorking && (
+              <div className="flex items-center gap-3 pt-1">
+                <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 motion-pulse-soft" aria-hidden />
+                </div>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
+                  {workingLabel}
                 </span>
               </div>
-              <div className="flex-1 min-w-0 leading-[22px]">
-                <span className="text-[13px] font-serif shimmer-text">{workingLabel}</span>
-              </div>
-            </li>
-          )}
-        </ol>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
 
 
 function truncate(s: string, n: number) {

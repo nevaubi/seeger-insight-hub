@@ -1,108 +1,50 @@
 
-# Multi-agent overhaul of `legal-synthesis` (Phases A + B)
+## Goal
 
-Goal: turn the current single-router / 6-tool loop into an intelligent multi-agent graph with wider, reranked RAG and a Tavily web-search specialist scoped to reputable legal + regulatory + scientific sources. Backend-only; frontend gets new SSE event types and degrades gracefully until Pass 2.
+Replace the current `RunCard` / `TimelineNode` / `ThoughtStepRow` visuals in `src/routes/_authenticated/search.tsx` with a refined, single-rail timeline modeled on the attached HTML — cleaner spacing, hairline connector, shimmer only on the active step, smooth spring/layout transitions, and a compact collapsed pill when the run finishes. No backend, no state-shape, no SSE, no reducer changes.
 
-## Target architecture
+## Scope (frontend-only, one file + one CSS token)
 
-```text
-                 ┌──────────────────────────────┐
-   question ──▶  │ PLANNER  (gemini-3.1-pro)    │  ← decomposes into facets,
-                 │  emits research plan JSON    │    picks specialists per facet,
-                 └──────────────┬───────────────┘    writes HyDE hypotheses
-                                │
-        ┌───────────────┬───────┼────────────┬─────────────────┐
-        ▼               ▼       ▼            ▼                 ▼
-   RecordAgent    CaselawAgent StructuredAgent  WebAgent    (parallel)
-   (search_       (search_     (list_orders/    (Tavily,
-   the_record,    caselaw)     counsel/         allow-listed
-   read_order,                  deadlines)      domains)
-   HyDE + multi-
-   query fanout,
-   Voyage rerank)
-        │               │            │             │
-        └───────────────┴─────┬──────┴─────────────┘
-                              ▼
-                 ┌──────────────────────────────┐
-                 │ CRITIC   (gemini-3.5-flash)  │  ← coverage/gap analysis,
-                 │  approves or requests more   │    can trigger one more round
-                 └──────────────┬───────────────┘
-                                ▼
-                 ┌──────────────────────────────┐
-                 │ WRITER   (claude-opus-4-8)   │  ← streams answer + citations
-                 └──────────────┬───────────────┘
-                                ▼
-                 ┌──────────────────────────────┐
-                 │ VERIFIER (gemini-3.5-flash)  │  ← post-stream: flag any
-                 │  citation-grounding pass     │    unsupported sentence
-                 └──────────────────────────────┘
-```
+Touch only:
+- `src/routes/_authenticated/search.tsx` — rewrite the timeline sub-tree (nodes, rail, round headers, "processing…" pulse, collapsed pill). Keep data derivation (`traceSteps`, `rounds`, `writerActive`, `finalRound`, notes, expansions, citations) exactly as-is.
+- `src/styles.css` — add a scoped `text-shimmer` utility (sweeping gradient on text) and a subtle `agent-spinner` ring. Reuse existing navy/parchment/oxblood tokens; no palette additions.
 
-Router models (all via Lovable AI Gateway where possible; Claude/Voyage/Tavily direct):
-- Planner: `google/gemini-3.1-pro-preview` (JSON structured output).
-- Specialists: no LLM, deterministic tool calls dispatched by Planner output.
-- Critic: `google/gemini-3.5-flash`.
-- Writer: `claude-opus-4-8` (unchanged) → fallback `claude-sonnet-4-6`.
-- Verifier: `google/gemini-3.5-flash`.
+Do NOT touch: `useSynthesisStream.ts`, edge functions, matter context, evidence column, composer, answer renderer, or any other route.
 
-## Phase A — Planner + wider RAG + Tavily (this pass)
+## Visual spec (matches reference, translated to our palette)
 
-### 1. New shared helpers (`supabase/functions/legal-synthesis/index.ts`, v30)
-- `runPlanner(question, matter)` → JSON `{ facets: [{ id, question, hypothesis, specialists: [...], keywords: [...], filter, court? }], stop_when: "all_facets_covered" }`. Hypothesis is a 1–3 sentence HyDE passage used as an additional embedding query.
-- `runCritic(question, plan, gathered)` → `{ done: bool, missing: [facet_ids], followup_queries: [...] }`. Runs at most once (adds up to +1 round).
-- `runVerifier(answer, citations, chunks)` → `{ unsupported: [sentenceIdx], notes }`. Emitted as new SSE `verify` event; writer output is not rewritten in Phase A.
+- Single vertical hairline rail at ~11px left, `border-color`, not a card. Kill the current bordered `RunCard` container so the timeline breathes on the parchment surface.
+- Round header: 20px circled numeral (ivory bg, hairline border, muted numeral) + tiny uppercase "Round N · <facet>" eyebrow + one-line phase reasoning in serif.
+- Step row: 14px status node on the rail (filled navy check when done, thin rotating ring while running), agent/tool name in Inter semibold 12px, thought/summary line beneath at 12px. Active thought uses `text-shimmer` (slate→navy→slate sweep); completed thought is muted foreground.
+- Tool-specific icon + accent color per kind (record=navy, caselaw=gold, web=oxblood, structured=muted) reused from existing `TOOL_META`, rendered inline next to the name — not as a separate node.
+- Bottom "Processing…" row: 6px pulsing dot on the rail + uppercase micro-label, only while `running && !writerActive`.
+- Writer phase: same rail, node swaps to a pen glyph with shimmer label "Drafting answer…" until first token, then collapses.
+- Collapsed state (after `finalRound` set): the whole timeline morphs into a single pill — "Analyzed N phases · M steps · Xs" — with a chevron that expands the full trace inline. Uses `AnimatePresence` height/opacity, no modal.
 
-### 2. Retrieval upgrades
-- **HyDE**: for each facet, embed both the raw question and Planner's hypothesis; union results.
-- **Multi-query fanout**: Planner emits up to 3 paraphrases per facet; run in parallel through `hybrid_search_v2`.
-- **Voyage rerank-2**: new call to `https://api.voyageai.com/v1/rerank` with `model: rerank-2`, up to 150 candidates → keep top 80 (raise `MAX_TOTAL_CHUNKS` 60→100 hard ceiling for safety).
-- Knob changes: `MAX_ROUNDS` 3→5, `PER_SEARCH_K` 10→15, `EXPAND_TOP_N` 3→5, `MIN_SIM` retuned per rerank score distribution.
+## Motion
 
-### 3. Tavily WebAgent (new tool `search_web`)
-- Direct call to `https://api.tavily.com/search` with `TAVILY_API_KEY` (already in secrets).
-- Request: `{ query, search_depth: "advanced", max_results: 8, include_answer: false, include_domains: [...ALLOWLIST] }`.
-- Allowlist constant `WEB_ALLOWED_DOMAINS`: `courtlistener.com, law.cornell.edu, justia.com, casetext.com, supremecourt.gov, uscourts.gov, ca11.uscourts.gov, flnd.uscourts.gov, jpml.uscourts.gov, reuters.com, law360.com, bloomberglaw.com, ssrn.com, fda.gov, ema.europa.eu, who.int, nih.gov, ncbi.nlm.nih.gov, nejm.org, jamanetwork.com, thelancet.com, bmj.com`. Any result outside the list is dropped server-side (defense-in-depth even though `include_domains` filters upstream).
-- Results normalized into `Chunk` shape with `kind: 'web'`, `source_url`, `snippet`, `title`, `published_date`. Bounded per-result excerpt (2000 chars) so the writer window stays sane.
-- Emitted through existing `chunks` SSE stream + a new `web_result` note so the UI trace shows web hits distinctly.
+- Use existing `motion/react` (already imported in the file) with a shared `SPRING = { type: 'spring', stiffness: 500, damping: 40 }` and `EASE = { duration: 0.3, ease: [0.16, 1, 0.3, 1] }` constant defined at top of file.
+- `LayoutGroup` around the rail so new rounds/steps slide in without jank.
+- Per-step stagger via `transition={{ ...SPRING, delay: idx * 0.04 }}`.
+- Respect `prefersReducedMotion()` from `src/lib/motion.ts` — fall back to opacity-only fades and disable shimmer keyframes.
 
-### 4. Planner-driven dispatch loop
-- Replace the single Gemini router loop with: one Planner call → parallel specialist fan-out → Critic → optional second fan-out → Writer → Verifier.
-- Preserve existing SSE contract; add new event types: `plan` (facets), `critic` (gap notes), `web_result`, `verify` (post-stream grounding).
-- Structured tools (`list_orders`, `lookup_counsel`, `list_deadlines`, `read_order`) unchanged; matter scoping still forced.
+## Data mapping (no shape changes)
 
-### 5. Prompts
-- New `SYSTEM_PLANNER`, `SYSTEM_CRITIC`, `SYSTEM_VERIFIER` prompts colocated with existing `WRITER_SYSTEM`.
-- Writer system prompt updated to describe the new `kind: 'web'` sources and how to cite them (source URL + publisher + date; never converted into a court holding).
+The reference's `rounds[].agents` maps to our existing derivation:
+- `rounds` = grouped `traceSteps` by round number (already computed).
+- Per round, `agents` = the tool/search/thinking steps in that round, keyed by their existing id.
+- `status: 'running' | 'done'` derived from `currentRound === round && !step.finished` (already tracked).
+- `thought` = existing step summary text (searches → keywords/count, tools → `describeTool`, thinking → smoothed thinking text, web → domain + title).
 
-### 6. Frontend (minimal, non-breaking)
-- `src/lib/useSynthesisStream.ts`: add discriminated `plan | critic | web_result | verify` event handlers; each just appends to `notes` / a new `webResults[]` / `verifyFlags[]` so old UI still renders.
-- No visual redesign this pass — Phase A ships behind the same trace timeline; Phase B adds a proper Planner/Critic pane.
+## Acceptance
 
-## Phase B — Verifier-driven rewrite loop + UI (next pass, deferred)
-- Verifier returns unsupported sentences → Writer gets a second pass to revise or drop them.
-- Full trace UI: Planner facets, per-agent panels, Critic gaps, Verifier flags, web-source chips.
-- Optional: swap Voyage rerank for Cohere rerank-3 if quality warrants.
-- Optional: cache Planner outputs per (question hash, matter) for cheap re-runs.
+- No new deps, no bundler config changes.
+- Timeline renders identically for: idle → planning → parallel tools (record + caselaw + web) → critic → rerank → writer → done → collapsed pill → re-expand.
+- Only one step shimmers at a time (the active one in the active round); everything else is static muted text.
+- Collapsed pill appears within ~300ms of the writer emitting its first token; expanding it restores the exact trace.
+- No layout shift in the answer column, evidence rail, or composer.
+- Reduced-motion users see no shimmer and no spring — just fades.
 
-## Files touched (Phase A)
+## Out of scope
 
-Backend:
-- `supabase/functions/legal-synthesis/index.ts` — full rewrite of orchestration section; helpers, prompts, Tavily client, rerank, constants.
-
-Frontend (additive only):
-- `src/lib/useSynthesisStream.ts` — new event types + `webResults` / `verifyFlags` state.
-
-## Secrets
-
-Already present: `LOVABLE_API_KEY` (Planner/Critic/Verifier via gateway), `SUPABASE_SERVICE_ROLE_KEY`, `VOYAGE_API_KEY` (assumed — needed for embeddings today and for rerank; if missing, prompt user), `TAVILY_API_KEY` (confirmed), `COURTLISTENER_API_KEY` (optional). I'll verify with `fetch_secrets` at build time before writing code; if `VOYAGE_API_KEY` is absent for rerank use, I'll surface it.
-
-## Risks / mitigations
-- **Latency**: Planner + rerank + Critic add ~4–6s. Mitigated by parallel specialist dispatch and streaming `plan`/`critic` events immediately.
-- **Cost per query**: +1 Gemini Pro call, +1 Flash call, +1 Voyage rerank, +N Tavily. Cheap versus Opus writer; net multiplier ≈ 1.15×.
-- **Prompt-injection via web results**: allowlist + strip HTML + bounded excerpts + writer system prompt explicitly says web content is untrusted context, never a legal holding.
-- **Backward compat**: all new SSE events are additive; the reducer already has a default-case fallback added earlier.
-
-## Success criteria
-- Ask "What Daubert standard governs the Rule 702 hearing and what recent 11th Circuit precedent applies?" → Planner emits ≥2 facets (record 702 schedule + ca11 case law + optional Tavily law-review supplement); Writer answer cites both a PTO/CMO passage and a courtlistener opinion; Verifier flags none.
-- Ask a scientific-causation question → WebAgent surfaces FDA/NEJM sources; writer cites them with URLs and publisher, not as holdings.
-- No regression in current single-facet questions (Planner falls through to a one-facet plan = today's behavior).
+Backend behavior, SSE event names, retrieval, citations panel, answer typography, composer, matter switcher.
