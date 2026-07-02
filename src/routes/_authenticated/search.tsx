@@ -824,20 +824,33 @@ function SynthesisPanel({
             filtersOpen={filtersOpen}
             setFiltersOpen={setFiltersOpen}
 
-          />
         </div>
-      </div>
+    </div>
+  );
 
-      {/* RIGHT: persistent evidence column */}
-      <EvidenceColumn
-        chunks={chunks}
-        sortedChunkRefs={sortedChunkRefs}
-        citationsByRef={citationsByRef}
-        chunkOrder={chunkOrder}
-        running={running}
-        flashRef={flashRef}
-        caseId={currentMatter.master_case_id}
-        matter={insightMatter}
+  const rightPane = (
+    <EvidenceColumn
+      chunks={chunks}
+      sortedChunkRefs={sortedChunkRefs}
+      citationsByRef={citationsByRef}
+      chunkOrder={chunkOrder}
+      running={running}
+      flashRef={flashRef}
+      caseId={currentMatter.master_case_id}
+      matter={insightMatter}
+    />
+  );
+
+  return (
+    <div className="px-6 lg:px-10 pb-4 lg:h-[calc(100vh-3.5rem)] lg:overflow-hidden">
+      <SplitPane
+        left={leftPane}
+        right={rightPane}
+        defaultPercent={62}
+        min={38}
+        max={78}
+        storageKey="ask-record-split"
+        className="lg:h-full lg:gap-0"
       />
     </div>
   );
