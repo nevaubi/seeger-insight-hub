@@ -214,8 +214,8 @@ function StatCard({ icon: Icon, label, value }: { icon: any; label: string; valu
   return (
     <Card className="p-4 hover:border-foreground/15 transition-colors">
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans leading-snug">{label}</div>
-        <Icon className="h-4 w-4 text-muted-foreground/60 shrink-0" strokeWidth={1.5} />
+        <div className="t-eyebrow leading-snug">{label}</div>
+        <Icon className="h-4 w-4 text-muted-foreground/50 shrink-0" strokeWidth={1.5} />
       </div>
       <div className="mt-3 font-serif text-3xl font-semibold tabular-nums tracking-[-0.02em]">{value.toLocaleString()}</div>
     </Card>
