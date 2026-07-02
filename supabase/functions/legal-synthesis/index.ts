@@ -1921,6 +1921,89 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // ----- Phase 1b (v30): CRITIC — coverage/gap check. Runs at most once; if it says
+      // retrieval is incomplete AND we still have router budget, do one more router round
+      // with the critic's followup injected into the prompt. Non-fatal on failure.
+      let critic = { done: true, missing: [] as string[], followup: "" };
+      const canDoExtraRound = rounds < MAX_ROUNDS && seen.size < MAX_TOTAL_CHUNKS;
+      const haveEvidenceForCritic = allSearchResults.length > 0 || recordIndexBlocks.length > 0;
+      if (haveEvidenceForCritic && canDoExtraRound) {
+        try {
+          const summary = emittedResults.slice(0, 40).map((c: any) => {
+            const label = c.order_label ?? c.case_name ?? c.kind ?? "chunk";
+            const page = c.page_start != null ? ` p.${c.page_start}` : "";
+            const snip = (Array.isArray(c.sentences) ? c.sentences.join(" ") : "").slice(0, 180);
+            return `- [${label}${page}] ${snip}`;
+          }).join("\n") + (recordIndexBlocks.length ? `\n\n[Structured index blocks: ${recordIndexBlocks.length}]` : "");
+          critic = await runCritic(question, plannedFacets, summary);
+          emit({ type: "critic", done: critic.done, missing: critic.missing, followup: critic.followup });
+          if (!critic.done && critic.followup) {
+            const round = rounds + 1;
+            emit({ type: "round", round });
+            routerMessages.push({
+              role: "user",
+              content: `CRITIC coverage check: the answer set is incomplete. Fill this specific gap and do not repeat searches you already ran:\n\n${critic.followup}${critic.missing.length ? `\n\nMissing facets: ${critic.missing.join(", ")}` : ""}`,
+            });
+            try {
+              const r = await geminiRouterRound(routerMessages, round, emit);
+              rounds = round;
+              if (r?.toolCalls?.length) {
+                // Reuse the same dispatch pipeline (single mini-round). Announce + run.
+                const calls = r.toolCalls.map((t) => ({ name: t.name as string, input: (t.args && typeof t.args === "object") ? t.args : {} }));
+                for (const c of calls) {
+                  if (STRUCTURED_TOOLS.has(c.name)) emit({ type: "tool", round, tool: c.name, args: c.input });
+                  else if (c.name === "read_order") emit({ type: "tool", round, tool: "read_order", args: c.input });
+                  else if (c.name === "search_caselaw") emit({ type: "tool", round, tool: "search_caselaw", args: c.input });
+                  else if (c.name === "search_web") emit({ type: "tool", round, tool: "search_web", args: c.input });
+                  else emit({ type: "search", round, keywords: c.input.keywords ?? null, filter: mergeFilters(initialFilter, c.input.filter), k: PER_SEARCH_K });
+                }
+                const settled = await Promise.all(calls.map(async (c) => {
+                  try {
+                    if (STRUCTURED_TOOLS.has(c.name)) return { kind: "structured" as const, c, sr: await runStructuredTool(c.name, c.input, caseId) };
+                    if (c.name === "read_order") return { kind: "read_order" as const, c, ro: await runReadOrder(c.input, caseId, seen) };
+                    if (c.name === "search_caselaw") return { kind: "caselaw" as const, c, cl: await runCaselawSearch(c.input, question, seen) };
+                    if (c.name === "search_web") return { kind: "web" as const, c, wb: await runWebSearch(c.input, question, seen) };
+                    const sr = await runSearch(c.input, embedding, question, initialFilter, caseId, seen);
+                    let exp: { searchResults: any[]; chunks: any[] } = { searchResults: [], chunks: [] };
+                    if (c.input.expand !== false && sr.hitIds.length) {
+                      try { exp = await expandNeighbors(caseId, sr.hitIds.slice(0, EXPAND_TOP_N), seen); } catch { /* best effort */ }
+                    }
+                    return { kind: "search" as const, c, sr, exp };
+                  } catch (e) { return { kind: "error" as const, c, message: (e as Error).message }; }
+                }));
+                for (const s of settled) {
+                  if (s.kind === "structured") { recordIndexBlocks.push(s.sr.writerText); emit({ type: "tool", round, tool: s.c.name, count: s.sr.count, done: true }); }
+                  else if (s.kind === "read_order") { for (const ch of s.ro.chunks) emittedResults.push(ch); for (const b of s.ro.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.ro.chunks }); emit({ type: "tool", round, tool: "read_order", count: s.ro.count, done: true }); }
+                  else if (s.kind === "caselaw" && !s.cl.unavailable) { for (const ch of s.cl.chunks) emittedResults.push(ch); for (const b of s.cl.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.cl.chunks }); emit({ type: "tool", round, tool: "search_caselaw", count: s.cl.count, done: true }); }
+                  else if (s.kind === "web" && !s.wb.unavailable) { for (const ch of s.wb.chunks) emittedResults.push(ch); for (const b of s.wb.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.wb.chunks }); emit({ type: "tool", round, tool: "search_web", count: s.wb.count, done: true }); for (const ch of s.wb.chunks) emit({ type: "web_result", round, title: ch.case_name ?? ch.order_label, url: ch.pdf_url, published: ch.case_date }); }
+                  else if (s.kind === "search") {
+                    for (const ch of s.sr.chunks) emittedResults.push(ch);
+                    for (const b of s.sr.searchResults) allSearchResults.push(b);
+                    emit({ type: "chunks", round, chunks: s.sr.chunks });
+                    if (s.exp.chunks.length) { for (const ch of s.exp.chunks) emittedResults.push(ch); for (const b of s.exp.searchResults) allSearchResults.push(b); emit({ type: "chunks", round, chunks: s.exp.chunks }); emit({ type: "expand", round, source: "neighbors", count: s.exp.chunks.length }); }
+                  }
+                }
+                emit({ type: "round_end", round, stop_reason: "tool_use" });
+              }
+            } catch { /* critic follow-up is best-effort */ }
+          }
+        } catch { /* critic failure is non-fatal */ }
+      }
+
+      // ----- Phase 1c (v30): Voyage rerank-2 across gathered record passages. Web +
+      // caselaw pass through unchanged. Keeps top MAX_WRITER_CHUNKS.
+      const preRerank = emittedResults.length;
+      const rr = await rerankAndTrim(question, emittedResults, allSearchResults);
+      if (rr.ran || rr.dropped > 0) {
+        // Replace the arrays' contents in-place so downstream code (which references the
+        // outer bindings) sees the trimmed set.
+        emittedResults.length = 0; allSearchResults.length = 0;
+        emittedResults.push(...rr.chunks); allSearchResults.push(...rr.results);
+        emit({ type: "rerank", model: RERANK_MODEL, before: preRerank, after: rr.kept, dropped: rr.dropped });
+      }
+
+
+
       // ----- Phase 2: Opus 4.8 writer synthesizes with citations (extended thinking ON) -----
       // v29: wrapped in a bounded retry loop. Transient upstream failures (429/5xx/529 and
       // mid-stream overloaded/rate-limit SSE errors) back off and retry; the FINAL attempt
