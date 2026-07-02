@@ -260,6 +260,17 @@
   animation: shimmer-text 2.4s linear infinite;
 }
 
+@keyframes agent-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@utility agent-spinner {
+  border: 1.5px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-top-color: color-mix(in oklab, var(--accent) 85%, transparent);
+  border-radius: 9999px;
+  animation: agent-spin 0.85s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .motion-fade-rise,
   .motion-stream-in,
@@ -269,7 +280,8 @@
   .motion-accent-bar,
   .motion-shimmer,
   .motion-stream-caret,
-  .composer-halo {
+  .composer-halo,
+  .agent-spinner {
     animation: none !important;
   }
   .motion-fade-rise,
