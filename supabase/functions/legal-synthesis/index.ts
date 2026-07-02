@@ -456,6 +456,10 @@ const READ_ORDER_TOOL_SCHEMA = {
         "(read_order PTO 22 returns PTO 22 and PTO 22A). Omit to read every order of the given type.",
     },
   },
+  anyOf: [
+    { required: ["order_type"] },
+    { required: ["order_number"] },
+  ],
 };
 
 const CASELAW_TOOL_SCHEMA = {
