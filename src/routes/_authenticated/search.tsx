@@ -34,6 +34,8 @@ import {
   Download,
   FileText,
   Printer,
+  Globe,
+  ShieldCheck,
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
