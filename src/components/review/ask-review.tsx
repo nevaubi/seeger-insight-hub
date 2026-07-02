@@ -48,6 +48,14 @@ export function AskReview({ reviewSetId, files }: Props) {
       case_id: currentMatter.master_case_id,
       review_set_id: reviewSetId,
       document_ids: fileIds,
+      matter: {
+        slug: currentMatter.slug,
+        name: currentMatter.name,
+        short_name: currentMatter.short_name,
+        mdl_number: currentMatter.mdl_number,
+        court: currentMatter.court,
+        judge: currentMatter.judge,
+      },
     });
     const next = [v, ...recents.filter((r) => r !== v)].slice(0, 5);
     setRecents(next);

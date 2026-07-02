@@ -496,6 +496,7 @@ function SynthesisPanel({
       ask(query, buildFilter(filters), {
         case_id: currentMatter.master_case_id,
         matter: {
+          slug: currentMatter.slug,
           name: currentMatter.name,
           short_name: currentMatter.short_name,
           mdl_number: currentMatter.mdl_number,
