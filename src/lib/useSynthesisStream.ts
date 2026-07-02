@@ -170,6 +170,7 @@ export type SynthEvent =
   | SsePlan
   | SseWebResult
   | SseVerify
+  | SseFollowups
   | SseError
   | SseDone;
 
@@ -195,6 +196,7 @@ export type SynthState = {
   plan: PlanEvt | null;
   webResults: WebResult[];
   verify: VerifyEvt | null;
+  followups: string[];
   // transient tool-start timestamps keyed by `${round}:${tool}` so we can
   // compute per-step durations when the matching `done` frame arrives.
   _toolStarts: Record<string, number>;
@@ -219,6 +221,7 @@ const INITIAL: SynthState = {
   plan: null,
   webResults: [],
   verify: null,
+  followups: [],
   _toolStarts: {},
 };
 
@@ -453,6 +456,11 @@ function reducer(state: SynthState, action: Action): SynthState {
           return {
             ...state,
             verify: { unsupported: evt.unsupported, notes: evt.notes, model: evt.model },
+          };
+        case 'followups':
+          return {
+            ...state,
+            followups: Array.isArray(evt.suggestions) ? evt.suggestions.slice(0, 6) : [],
           };
         case 'expand':
           // Neighbor/sibling expansion: aggregate the adjacent-passage count per round.
