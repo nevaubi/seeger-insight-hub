@@ -1388,6 +1388,29 @@ function RunCard({
                 </span>
               </div>
             )}
+
+            {verify && (
+              <div className="flex items-start gap-3 motion-fade-rise">
+                <div className="flex shrink-0 justify-center pt-[3px]" style={{ width: NODE_COL }}>
+                  <div className={`relative z-10 grid h-[14px] w-[14px] place-items-center rounded-full ${verify.unsupported === 0 ? 'bg-primary' : 'bg-destructive'}`}>
+                    <ShieldCheck className="h-[8px] w-[8px] text-primary-foreground" strokeWidth={3} />
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 leading-[16px]">
+                    <span className="text-[12px] font-semibold text-foreground/90">Grounding check</span>
+                    <span className={`text-[11px] tabular-nums ${verify.unsupported === 0 ? 'text-muted-foreground/80' : 'text-destructive'}`}>
+                      {verify.unsupported === 0 ? 'all sentences grounded' : `${verify.unsupported} unsupported`}
+                    </span>
+                  </div>
+                  {verify.notes && (
+                    <div className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground font-serif">
+                      {verify.notes}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
