@@ -1,39 +1,80 @@
-Two small, targeted fixes — one frontend, one edge function.
+# Suggestions: post-answer follow-ups + cron-generated starter pool
 
-## 1. Slow the reasoning stream
+Two related features, one shared surface (chips in the Ask-the-Record UI).
 
-Right now only the final answer runs through `useSmoothText` (550 cps). The per-round reasoning ("planning retrieval…", "The record contains …") is rendered raw as tokens arrive from the model, so it feels like a data dump.
+## 1. Post-answer follow-up suggestions (per-run, live)
 
-Change `RoundHeader` in `src/routes/_authenticated/search.tsx`:
+When a run finishes (`writer` phase hits `end_turn`), the `legal-synthesis` edge function emits one final SSE frame:
 
-- Feed `reasoning` through `useSmoothText(reasoning, streaming, 55)` before rendering. 55 cps ≈ a fast reader; matches the editorial tone and lets the eye track it. Non-streaming rounds already pass `streaming=false`, so `useSmoothText` snap-flushes and completed rounds render instantly (no regressions for scroll-back).
-- Same treatment for the writer-phase reasoning line at line 1251 (`writerReasoning`) so the pre-answer "Composing the answer…" text also glides.
-- Keep the final markdown at 550 cps — it's paragraphs, not a live thought.
+```
+event: data
+{ "type": "followups", "suggestions": ["...", "...", "..."] }
+```
 
-Not touching the tool-note rows or the "planning retrieval…" shimmer placeholder — those are single short strings and already feel calm.
+3–4 short, matter-scoped follow-ups grounded in what was actually retrieved this run (order labels, tags, parties that showed up in citations). Generated cheaply by Haiku with a tight prompt + the run's citation list — no extra RAG round.
 
-## 2. Fix the "Lookup failed — read_order needs an order_type and/or order_number" round
+UI: render as a row of chips under the final answer labeled "Follow up". Click = prefill composer + auto-submit. Chips animate in with the same fade the timeline uses.
 
-What's happening: the planner/router occasionally emits a `read_order` tool call with an empty input (no `order_type`, no `order_number`). The server throws, the round shows an oxblood "Lookup failed" node, and a full round is wasted. Root cause is model behavior — the tool schema currently marks both fields optional, so nothing stops the model from calling it bare.
+Wiring:
+- `src/lib/useSynthesisStream.ts`: add `SseFollowups` to the event union, store `followups: string[]` in state.
+- `src/routes/_authenticated/search.tsx`: render `FollowUpChips` in the Resting state, below the citations block.
+- `supabase/functions/legal-synthesis/index.ts`: after Verifier, one Haiku call taking `{ question, matter, citedRefs[], finalAnswerSnippet }` → JSON array of 3–4 strings. Emit `followups` frame before `done`. Non-fatal if it fails (skip silently).
 
-Three-part fix in `supabase/functions/legal-synthesis/index.ts`:
+## 2. Cron-generated "Try a question" pool (starter suggestions)
 
-1. **Tighten the tool schema.** On the `read_order` tool definition (~line 531), add `anyOf: [{ required: ["order_type"] }, { required: ["order_number"] }]` to the input schema. Anthropic honors JSON-schema `anyOf` for tool inputs, so the model can no longer emit an empty call. Keep both fields individually optional so `PTO 22`, `order_type: PTO`, and `order_number: 22` all still work.
+A rotating pool of 20 curated starter questions per matter, refreshed every 6 hours, exposed on the Launcher state and refreshable client-side.
 
-2. **Graceful server fallback.** In `runReadOrder` (~line 780), instead of `throw new Error("read_order needs …")`, return `{ count: 0, chunks: [], searchResults: [], skipped: true, reason: "no_target" }`. The orchestrator already handles zero-return tools; this stops burning a research round on a validation error.
+### Backend
 
-3. **Prompt nudge.** In the router/specialist instructions (~line 320 and ~line 1505), add one line: *"Never call `read_order` without at least one of `order_type` or `order_number`. If you don't know the order yet, call `list_orders` first, then `read_order` with the specific number."*
+New table `question_suggestions` (external Supabase, read-only from app; the cron writes via service role):
 
-Frontend cosmetic touch-up in the same edit: when a tool row arrives with `skipped: true` (or `count: 0` on a read_order), render it as a muted gray "Skipped — no target order" instead of the oxblood "Lookup failed" node. Keeps the timeline honest without alarming red.
+```
+matter_slug text, question text, rationale text?, generated_at timestamptz,
+category text  -- 'orders' | 'deadlines' | 'counsel' | 'science' | 'strategy'
+```
 
-## Files
+Read view `v_question_suggestions` exposes `matter_slug, question, category, generated_at`, ordered by `generated_at desc`. Client only ever reads the latest 20 per matter.
 
-- `src/routes/_authenticated/search.tsx` — reasoning smoothing + skipped-tool styling
-- `src/lib/useSynthesisStream.ts` — carry `skipped`/`reason` through the tool event
-- `supabase/functions/legal-synthesis/index.ts` — schema `anyOf`, soft fallback, prompt line
+New edge function `suggest-questions`:
+- Input: `{ matter_slug }` (loops all active matters when called by cron).
+- Pulls a compact matter brief: recent orders (last 20 by `order_date`), upcoming deadlines (next 30), tag histogram, and a handful of party names.
+- One Haiku call: "Generate 20 high-value questions a plaintiff-side litigator would actually ask about this matter right now, spread across categories, no duplicates, ≤ 90 chars each." Returns JSON `[{question, category}]`.
+- Inserts the 20 rows, deletes anything older than 48h for that matter.
+
+Cron: `pg_cron` every 6h calls the function via `pg_net` with the shared secret. Backfill: run once immediately after deploy.
+
+### Frontend
+
+- `src/lib/supabase.ts`: `fetchQuestionSuggestions(matterSlug)` — SELECT top 20 from `v_question_suggestions`, ordered newest first.
+- `src/routes/_authenticated/search.tsx` Launcher state:
+  - Replace the current static examples with a `SuggestionDeck` component.
+  - Load 20 on mount (React Query, matter-scoped key, `staleTime: 5min`).
+  - Show 4 at a time as chips. **Shuffle** button (ghost icon-only, ↻) picks the next 4 via a rotating cursor (`(offset + 4) % 20`) with a subtle crossfade. Cursor persists in `sessionStorage` per matter so shuffle feels stateful within a session.
+  - Empty state (cron hasn't run yet): fall back to the current hardcoded seeds.
+  - Category shown as a tiny uppercase label above each chip in the muted brass tone.
+
+Same `SuggestionDeck` (without shuffle, 3–4 chips only) renders the run-scoped follow-ups from feature #1 in the Resting state.
+
+## Files touched
+
+- `supabase/functions/legal-synthesis/index.ts` — emit `followups` frame at end of writer.
+- `supabase/functions/suggest-questions/index.ts` — NEW, cron-invoked generator.
+- Migration — `question_suggestions` table + `v_question_suggestions` view + GRANTs + `pg_cron` schedule.
+- `src/lib/useSynthesisStream.ts` — new event type + state field.
+- `src/lib/supabase.ts` — `fetchQuestionSuggestions`.
+- `src/routes/_authenticated/search.tsx` — `SuggestionDeck`, shuffle, follow-up chips.
 
 ## Out of scope
 
-- Changing the overall multi-agent flow, budgets, or Planner logic
-- Any other tool's error handling (only `read_order` shows this pattern in the logs you shared)
-- Touching motion/reduced-motion behavior — `useSmoothText` already respects `prefersReducedMotion`
+- Personalization by user history (matter-scoped only for now).
+- Editing / pinning suggestions.
+- Suggestions on other pages (Deadlines, Roster). Ask-the-Record only.
+
+## Open question before I build
+
+The external Supabase project is currently used **read-only** from the app. This feature needs a **write path** (cron inserts into `question_suggestions`). Two options:
+
+1. **Add the table + cron to the external Supabase project** you already query — I'll produce the SQL + edge function code and you run them there. Cleanest, keeps everything in one DB.
+2. **Use Lovable Cloud** for `question_suggestions` only (writes here, reads from the app), while all other data stays in the external project. Adds a second data source to the app.
+
+Option 1 is what I'd recommend. Confirm and I'll proceed.
