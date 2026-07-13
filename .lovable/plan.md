@@ -1,45 +1,60 @@
-# Drafting page — vertical fit, collapsible rail, editorial paper polish
 
-Four surgical fixes. Frontend only. Files touched: `src/routes/_authenticated/draft.tsx`, `src/components/editor/legal-editor.tsx`, `src/styles.css`.
+# Drafting fixes — inline transforms land in place, no auto-scroll, cleaner Claude column
 
-## 1. Panels cleanly touch the bottom of the screen
+Frontend only. Three files: `src/components/editor/legal-editor.tsx`, `src/routes/_authenticated/draft.tsx`, `src/components/editor/proposal-card.tsx` (+ tiny `src/styles.css` tweak for the wider column measure).
 
-Current: `<div className="lg:h-[calc(100vh-6.75rem)] lg:flex lg:overflow-hidden">` reserves 108px but the `DocumentBar` is only 54px, so the rail / editor / sidecar stop ~54px short of the viewport.
+## 1. Refined text now lands where the selection is (not at the bottom)
 
-Change to `lg:h-[calc(100vh-54px)]` (matches the actual `h-[54px]` bar). Add `overflow-hidden` on the AppShell's `<main>` container path only where needed so the page itself does not scroll — inner panels own their scroll.
+Root cause: `runInlineTransform` calls `content.indexOf(selected)` on the markdown source. The selection comes from the rendered Tiptap document (plain text of a list item, an inline-formatted run, a bullet, etc.). It rarely matches the raw markdown string byte-for-byte — bullets, `**bold**` markers, list numbers, hard line breaks all differ — so `indexOf` returns `-1` and the code falls into the "append to end of document" fallback. That is the "output appears at the bottom" bug.
 
-Also:
-- Editor column: add `min-h-0` and make `<LegalEditor className="flex-1 min-h-0">` so its internal `overflow-y-auto` kicks in.
-- `DocumentRail` and `ClaudeSidecar` are already `flex-col` with `flex-1 overflow-y-auto` inside — verify their outer `<aside>` also has `h-full min-h-0` so they visually reach the bottom edge (no dead band under the last item).
-- `.legal-editor-shell` gets `display: flex; flex-direction: column; min-height: 0; height: 100%;` so `.legal-editor-content` (already `height: 100%; overflow-y: auto`) actually scrolls instead of expanding the page.
+Fix by carrying the ProseMirror positions across the boundary instead of doing a fragile string search:
 
-## 2. Left document rail — collapsible from its own edge
+- Extend `LegalEditor`'s `onVoiceAction` payload to include the actual editor range: `onVoiceAction({ instruction, selectionText, from, to })`.
+- Also expose the editor instance via a ref (`editorRef`) from `LegalEditor` so `DraftPage` can call Tiptap commands directly. (Ref forwarded through a new `onReady?: (editor: Editor) => void` prop — simpler and avoids `useImperativeHandle` boilerplate.)
+- Rewrite `runInlineTransform` in `draft.tsx` to operate on the editor range, not on markdown:
+  - Capture `{ from, to }` at click time (already stable because the BubbleMenu still has focus).
+  - Stream deltas into a scratch buffer.
+  - On each flush (rAF-throttled), call `editor.chain().insertContentAt({ from, to: from + prevInsertedLen }, markdownToHtml(buffer), { updateSelection: false }).run()` — replaces only the previously-inserted span, never the whole doc.
+  - Do NOT call `.focus()` or pass `scrollIntoView`. `insertContentAt` alone does not scroll when `updateSelection: false`.
+  - After completion, do one final replace with the sanitized final text; sync markdown back via the editor's normal `onUpdate` path (already wired), so the persisted markdown stays authoritative without us doing `setContent` on the whole document.
+- Remove the "fallback: append at end" branch entirely. If the range is somehow invalid (empty selection), just no-op with a toast — never dump refined text at the document bottom.
 
-Today the rail only toggles via the `Layers` icon in the top bar. Add a slim edge affordance so it feels native:
+## 2. No more auto-scroll after highlight + Claude improve
 
-- Add a 12px hover strip on the rail's right edge with a chevron button (`ChevronsLeft` when open, `ChevronsRight` when closed).
-- When collapsed, render a 32px-wide vertical rail (not fully hidden) with just the chevron + a stacked "Docs" label rotated -90°, so the user can expand from the edge without hunting the top bar.
-- Persist `railOpen` in `localStorage` under `draft.railOpen` so reloads remember it.
-- Keep the top-bar `Layers` button as an alternate toggle for parity with the sidecar toggle.
+Two things drive the jump today:
+1. `setContent(before + acc + after)` on every delta reflows the entire ProseMirror doc; Tiptap resets viewport in some paths.
+2. Toast + focus stealing.
 
-## 3. Editorial paper polish (`.legal-prose` + editor frame)
+Fixes:
+- The new range-based `insertContentAt` above is local, so ProseMirror does not reflow the whole doc.
+- Wrap the streaming updates in a scroll-preservation guard on `.legal-editor-content`: capture `scrollTop` before each flush, restore it after (belt-and-suspenders for any residual jump).
+- In `LegalEditor`, when a voice action fires, do NOT call `editor.commands.focus()` afterwards. Keep the BubbleMenu closed by clearing the selection to a collapsed cursor at `to` only after the final flush, with `{ scrollIntoView: false }`.
+- Sidecar auto-scroll: `ClaudeSidecar` currently scrolls its own panel to the newest proposal on every append. That is fine for chat, but should NOT run for the inline-transform path (which does not create a proposal card). No change needed there since inline transforms don't touch `proposals`, but confirm by leaving the sidecar untouched in this path.
 
-Small changes tuned for a Claude-for-Legal feel:
+## 3. Claude column — wider, denser, better aligned
 
-- Widen measure to `72ch` and center; increase top/bottom padding to `3rem 4rem 8rem` so the first line breathes below the 54px bar.
-- Body: `font-size: 16px; line-height: 1.75; letter-spacing: 0.005em;` (Source Serif 4). Enable `font-feature-settings: "onum" 1, "liga" 1, "kern" 1;` and `hanging-punctuation: first last;`.
-- Headings: tighten leading, add subtle top-border on `h2` (`border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); padding-top: 1rem;`) for section separators typical of briefs.
-- First paragraph after each heading: `margin-top: 0.35rem;` and `text-indent: 0` (kill the default extra space). Optional small caps on the first 3 words of the first paragraph after `h1` via `.legal-prose h1 + p::first-line { font-variant: small-caps; letter-spacing: 0.04em; }`.
-- Numbered lists: tabular-num markers already set — add `padding-left: 1.75rem` and `li { padding-left: 0.35rem; }` for a firmer indent hierarchy (I / A / i mirrors brief style).
-- Blockquote: bump left border to 3px and add a faint left bg tint (`background: color-mix(in oklab, var(--accent) 4%, transparent);`), remove italic (real brief blockquotes are upright).
-- `hr` becomes a centered fleuron `···` (via `::before` on a bordered `hr`) for section breaks.
-- Add a subtle vertical rule between rail / editor / sidecar (already borders) and a `bg-[color-mix(in_oklab,var(--card)_35%,transparent)]` paper tint behind the editor column so the "page" reads as a document surface, not raw background.
+Sidecar column and proposal cards are cramped at `w-[440px]` with `text-[13.5px]` inside a narrow measure.
 
-## 4. Small correctness bits picked up along the way
+- Widen the sidecar: `lg:w-[520px] xl:w-[560px]` (still comfortably fits at 1280 with rail open; sidecar remains user-collapsible via the top-bar toggle).
+- Proposal card body:
+  - Bump content padding to `px-4 pb-3.5`, header to `px-4 py-3`.
+  - Prose: `text-[14px] leading-[1.7]`, `max-w-none`, `hyphens-auto`, `text-pretty` for balanced wrapping.
+  - Tables inside answers: `w-full text-[12.5px]` with `th` uppercase tracking, zebra rows via `tbody tr:nth-child(even)`.
+  - Citation chips: allow wrapping to a second row cleanly (`gap-y-1.5`), tighten chip radius to `rounded-md`, and align the `[n]` marker + label + pin on a single baseline (`items-baseline` instead of `items-center`) so numbers don't look like they float above the text.
+  - Header row: replace the truncated `line-clamp-2` first line with a two-line summary and drop the `truncate` on the scope label so long scopes wrap instead of getting cut.
+- Add a subtle 1px hairline between stacked cards (`.proposal-card + .proposal-card { border-top: 1px solid var(--border); }` in `styles.css`) rather than the current gap-only rhythm — reads more like a document.
+- Sidecar header: keep 40-ish px height but move the Beta pill + Ground switch onto a single baseline with the title; today the switch pushes to the right edge and the title feels off-center at wider widths.
 
-- `.legal-editor-content .ProseMirror` currently uses `max-width: 78ch` — align to the new `72ch` and use `padding-inline: clamp(1.5rem, 6vw, 4rem)` so the paper doesn't hit the rail edge on narrower laptops.
-- `.legal-gutter-mark` uses `left: max(1rem, calc((100% - 78ch) / 2 - 2.25rem))` — update the `78ch` here to match the new measure or the gutter marker drifts off the paragraph on wide screens.
+## 4. Template cards — better click feedback and hit target
+
+The cards work, but the interaction feels dead because the whole panel keeps its idle state until the first stream delta arrives (2–4s on cold requests).
+
+- On click, immediately swap the picked card into a compact "Preparing <template title>…" state with a spinner and disable the other cards, so the user sees the click registered.
+- Increase card hit area padding (`py-3`) and give the icon a small circular badge (`h-6 w-6 rounded-full bg-accent/8`) for a firmer press target and clearer visual hierarchy.
+- Category pill row: switch from horizontal scroll to a wrapping row (`flex-wrap gap-1.5`) so all six categories are visible without scrolling in the wider column.
+- Keep the same prompts and template list unchanged.
 
 ## Out of scope
 
-No changes to `ProposalCard`, `ai-assist` function, templates, save/export logic, or matter/routing wiring.
+- No changes to `useAiAssist`, `ai-assist` edge function, matter/routing wiring, exports, autosave, or the document rail behavior.
+- No change to how proposals are created in the sidecar chat — only visual polish inside `ProposalCard`.
