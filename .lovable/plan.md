@@ -1,52 +1,45 @@
-# Ask the Record — UI polish pass
+## Fix Ask-the-Record timeline: smoother streaming + graceful collapse
 
-Frontend-only refinement of `src/routes/_authenticated/search.tsx` (+ small tweaks to `useSmoothText.ts` and `src/styles.css`). No orchestration or edge-function changes.
+Frontend-only polish in `src/routes/_authenticated/search.tsx`, `src/lib/useSmoothText.ts`, and `src/styles.css`. No changes to the edge function, stream protocol, or reducers.
 
-## Goals
-- Cleaner, more modern "enterprise-legal" feel — rectangular chat surfaces, hairline borders, more breathing room, less ornament.
-- Smoother, faster-feeling streaming timeline.
-- Tighter composer + message rhythm.
+### 1. Faster, more "alive" reasoning stream
 
-## Changes
+`useSmoothText` currently paces at 140 cps (reasoning) / 180 cps (interim text) / 1100 cps (writer). The RAF loop only advances by whole characters, so short bursts feel choppy.
 
-### 1. Chat surface (message column)
-- Replace the current soft/rounded card treatment with **rectangular message blocks**: `rounded-none` (or `rounded-sm` max), single hairline `border-b border-border/40` between turns, generous vertical padding (`py-6`), max content width ~720px, centered.
-- User turn: right-aligned label ("You · timestamp") in tabular-nums small-caps, body in Source Serif at 15/24.
-- Assistant turn: left rail with a 2px navy accent bar next to the answer; markdown body at 15.5/26 for editorial density.
-- Remove nested card shadows; rely on border + spacing.
+- Raise defaults: reasoning 140 → **220 cps**, interim text 180 → **260 cps**, writer 1100 → **1600 cps**.
+- Rework the RAF loop to a **fractional accumulator** (keep `progress` as a float, reveal `floor(progress)` chars) so slow rates still animate smoothly frame-to-frame instead of stalling then leaping.
+- Softer catch-up curve: `rate + max(0, behind-40) * 12` so a big buffer doesn't dump instantly (feels like thinking, not paste).
 
-### 2. Timeline (RunCard / ThoughtStepRow)
-- Collapse the rail into a **single 1px vertical hairline** with small square (not circular) nodes — 6px, filled with tool accent color, hollow when pending.
-- Replace per-row cards with flat rows: `[node] [tool label · monospaced tabular time] [reasoning line]`, no borders, `gap-3`, `py-1.5`.
-- Active row: thin left accent + `shimmer-text` on the reasoning line only (kill background shimmers on the row itself).
-- Add a subtle **layout transition** (`transition-all duration-200 ease-out`) so newly appended rows fade+slide 4px, not pop.
-- Elapsed time: right-aligned, `tabular-nums text-[11px] text-muted-foreground/70`, updates via existing 250ms ticker.
-- Collapsed "Writing…" state: single centered shimmer line, no card chrome.
+### 2. Per-word "shimmer as it types" reveal
 
-### 3. Composer
-- Make it a true rectangular bar: `rounded-lg` (down from current), 1px border, `bg-background`, soft `shadow-[0_1px_0_rgba(0,0,0,0.02)]` only.
-- Softer `composer-halo` (drop opacity further, tighter radius match).
-- Submit button: square-ish 36×36, oxblood fill only when input non-empty; otherwise ghost.
-- Placeholder copy simplified to "Ask the record…".
-- Keep bottom-pinned with backdrop blur; reduce blur strength for a crisper edge.
+Right now only the active retrieval label uses `shimmer-text` (a full-width gradient sweep). Streamed reasoning text is plain foreground.
 
-### 4. Faster-feeling streaming
-- `useSmoothText`: raise default chars/tick and reduce interval so tokens reveal ~1.6× faster (tune constants; keep the smoothing curve).
-- Writer markdown smoothing: drop the 550ms cadence closer to ~180–220ms so paragraphs appear promptly.
-- Reasoning lines: bump from 55 → ~90 chars/tick for snappier feel.
-- Keep `prefers-reduced-motion` short-circuit intact.
+- Add a new `motion-word-reveal` utility: each newly appended word wrapped in a `<span>` with a short `word-shimmer` keyframe (opacity 0.35 → 1 + subtle 90deg gradient sweep across the word, 420ms, once). Words that finished animating stay solid foreground — no perpetual shimmer noise.
+- Small helper in the file: `useRevealedWords(shownText)` that diffs the last render and marks only *new* words as animating. Applied to `RoundHeader` reasoning and `InterimNoteRow`.
+- Tighten the global `shimmer-text` sweep to **1.4s** (from 1.9s) so the active retrieval label reads as clearly "in progress".
 
-### 5. Micro-polish
-- Unify all timestamps/counts to `tabular-nums`.
-- Replace remaining emoji-ish or heavier iconography in the trace with 14px lucide icons at `stroke-[1.5]`.
-- Empty launcher: tighten SuggestionDeck card padding and use the same rectangular border language.
-- Ensure light/dark parity for new borders (`border-border/40` tokens only, no hardcoded colors).
+### 3. Graceful collapse into the writer
 
-## Files touched
-- `src/routes/_authenticated/search.tsx` — Composer, RunCard, ThoughtStepRow, message rendering, writer smoothing constants.
-- `src/lib/useSmoothText.ts` — default speed constants.
-- `src/styles.css` — refine `composer-halo`, add optional `.msg-rail` accent + row transition utility.
+Today `setTimelineOpen(false)` fires the instant `writerActive` flips true, so `RunCard` unmounts hard and the `WritingIndicator` pops in.
 
-## Out of scope
-- No changes to `useSynthesisStream`, edge functions, retrieval, or tool set.
-- No changes to sidebar, other routes, or evidence panel logic (only visual token alignment if trivially adjacent).
+- Convert the timeline container to an animated collapse:
+  - Wrap `RunCard` in a `<div class="timeline-collapse" data-open={timelineOpen}>` that transitions `grid-template-rows: 1fr → 0fr` + opacity + slight translateY, 520ms `--ease-out-soft`. (grid-rows trick keeps content measurable without JS height calc.)
+  - Keep `RunCard` mounted through the transition; only unmount ~600ms after `writerActive` (local `showTimeline` state driven by a timeout).
+- Delay collapse trigger by **~350ms** after `writerActive` so the last retrieval check-mark visibly settles before the fold.
+- `WritingIndicator` cross-fades in with `motion-fade-rise` staggered 250ms after collapse begins (add `animation-delay`), so the two motions overlap instead of snapping.
+- Cross-fade to answer body: when the first writer token arrives, fade `WritingIndicator` out (150ms) as the answer prose fades in.
+
+### 4. Small polish touches
+
+- Round header caret: switch `motion-stream-caret` to a softer 1.2s cadence so it doesn't compete with the word reveal.
+- Step check-in animation: when a `StatusNode` flips `done`, add a one-shot `motion-ring-pulse` on the node (already exists) so completion is felt, not just seen.
+
+### Files touched
+
+- `src/lib/useSmoothText.ts` — fractional accumulator, softer catch-up, higher default.
+- `src/styles.css` — add `@keyframes word-shimmer`, `.motion-word-reveal`, `.timeline-collapse` grid-row transition; tune `shimmer-text` duration.
+- `src/routes/_authenticated/search.tsx` — new `useRevealedWords` helper, apply to `RoundHeader` / `InterimNoteRow` / `WriterReasoning`; wrap `RunCard` in collapse container with delayed unmount; stagger `WritingIndicator` entrance and answer cross-fade; bump `useSmoothText` cps args.
+
+### Out of scope
+
+Reducer/state shape, SSE events, edge function pacing, evidence column, composer.
