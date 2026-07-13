@@ -1180,9 +1180,35 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
   return { kind: 'index', name: 'Record index', label: text };
 }
 
+// Split streamed text into stable "seen" words and freshly appended "new" words,
+// so newly arrived words can play a one-shot shimmer while old words stay solid.
+function useRevealedWords(text: string): Array<{ key: string; text: string; fresh: boolean }> {
+  const prevLenRef = useRef(0);
+  const freshUntilRef = useRef(0);
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const grewBy = Math.max(0, text.length - prevLenRef.current);
+  if (grewBy > 0) freshUntilRef.current = now + 420; // one word-shimmer duration
+  prevLenRef.current = text.length;
+  const stableCut = Math.max(0, text.length - grewBy);
+  // walk backward to snap to whitespace boundary so we don't split a word mid-token
+  let cut = stableCut;
+  while (cut > 0 && cut < text.length && !/\s/.test(text[cut - 1] ?? '')) cut--;
+  const stable = text.slice(0, cut);
+  const fresh = text.slice(cut);
+  const chunks: Array<{ key: string; text: string; fresh: boolean }> = [];
+  if (stable) chunks.push({ key: 's', text: stable, fresh: false });
+  // Split fresh tail into word tokens so each new word animates individually.
+  if (fresh) {
+    const tokens = fresh.match(/\S+\s*|\s+/g) ?? [fresh];
+    tokens.forEach((t, i) => chunks.push({ key: `f-${cut}-${i}`, text: t, fresh: true }));
+  }
+  return chunks;
+}
+
 // Round header: numbered circle on the rail + eyebrow + one-line reasoning.
 function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
-  const shown = useSmoothText(reasoning, streaming, 140);
+  const shown = useSmoothText(reasoning, streaming, 220);
+  const words = useRevealedWords(shown);
   return (
     <div className="flex items-start gap-3 motion-stream-in">
       <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
@@ -1196,7 +1222,13 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
         </div>
         {shown ? (
           <p className="font-serif text-[13.5px] leading-[1.55] text-foreground/85">
-            {shown}
+            {words.map((w) =>
+              w.fresh ? (
+                <span key={w.key} className="word-reveal word-sheen">{w.text}</span>
+              ) : (
+                <span key={w.key}>{w.text}</span>
+              ),
+            )}
             {streaming && <span className="motion-stream-caret" aria-hidden />}
           </p>
         ) : streaming ? (
@@ -1206,6 +1238,7 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
     </div>
   );
 }
+
 
 // Status node — 14px, done = filled navy check, running = thin rotating ring.
 function StatusNode({ done, tone = 'primary' }: { done: boolean; tone?: 'primary' | 'accent' }) {
