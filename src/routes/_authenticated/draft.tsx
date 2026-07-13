@@ -447,12 +447,6 @@ function DraftPage() {
     toast.success('Selection updated');
   }
 }
-      });
-    }
-    setDirty(true);
-    toast.success('Selection updated');
-  }
-}
 
 // ------- module-local runner so inline transform doesn't need its own hook instance --------
 
