@@ -193,7 +193,7 @@ function CitationChip({
   void expandLabel;
   return (
     <span
-      className="group/chip inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
+      className="group/chip inline-flex items-baseline gap-1 text-[11.5px] rounded-md border border-border bg-card hover:border-accent/50 transition overflow-hidden"
       title={c.cited_text ? `"${c.cited_text}"` : undefined}
     >
       {c.pdf_url ? (
@@ -201,17 +201,17 @@ function CitationChip({
           href={c.pdf_url}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground"
+          className="inline-flex items-baseline gap-1 pl-2 pr-1 py-0.5 text-foreground/80 hover:text-foreground"
         >
           <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
           <span>{label}</span>
           {c.page && (
             <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>
           )}
-          <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+          <ExternalLink className="h-2.5 w-2.5 opacity-60 self-center" />
         </a>
       ) : (
-        <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
+        <span className="inline-flex items-baseline gap-1 pl-2 pr-1 py-0.5 text-foreground/80">
           <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
           <span>{label}</span>
           {c.page && (

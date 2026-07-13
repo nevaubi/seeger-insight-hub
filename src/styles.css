@@ -580,3 +580,25 @@
 .proposal-card:hover {
   border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
 }
+.proposal-card + .proposal-card { margin-top: 0; }
+
+/* Denser answer prose inside the Claude sidecar */
+.answer-prose h1,
+.answer-prose h2,
+.answer-prose h3 { font-family: var(--font-serif, "Source Serif 4", serif); font-weight: 600; margin: 0.75rem 0 0.35rem; line-height: 1.25; }
+.answer-prose h1 { font-size: 1.05rem; }
+.answer-prose h2 { font-size: 0.98rem; }
+.answer-prose h3 { font-size: 0.92rem; color: var(--muted-foreground); }
+.answer-prose p { margin: 0.4rem 0; }
+.answer-prose ul,
+.answer-prose ol { margin: 0.35rem 0 0.35rem 1.1rem; padding-left: 0.4rem; }
+.answer-prose ol { list-style: decimal; }
+.answer-prose ul { list-style: disc; }
+.answer-prose li { margin: 0.15rem 0; }
+.answer-prose blockquote { border-left: 2px solid color-mix(in oklab, var(--accent) 40%, var(--border)); padding: 0.15rem 0.6rem; margin: 0.4rem 0; color: var(--foreground); background: color-mix(in oklab, var(--accent) 3%, transparent); }
+.answer-prose table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 0.6rem 0; }
+.answer-prose th, .answer-prose td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; vertical-align: top; }
+.answer-prose th { background: color-mix(in oklab, var(--muted) 60%, transparent); font-family: var(--font-sans); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
+.answer-prose tbody tr:nth-child(even) td { background: color-mix(in oklab, var(--muted) 25%, transparent); }
+.answer-prose code { background: color-mix(in oklab, var(--muted) 60%, transparent); padding: 0 4px; border-radius: 3px; font-size: 12px; }
+
