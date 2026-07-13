@@ -646,13 +646,24 @@ function SynthesisPanel({
   const showAnswer = answerStarted || finalRound != null;
   const traceSteps = searches.length + notes.length + Object.keys(expansions).length;
 
-  // Collapse the timeline the moment the writer is called; keep it open while researching.
+  // Collapse the timeline shortly after the writer is called; keep it mounted
+  // long enough for the grid-row transition to finish so the fold reads as motion,
+  // not a snap. Delay the trigger so the final check-mark visibly settles first.
+  const [showTimeline, setShowTimeline] = useState(true);
   useEffect(() => {
-    if (writerActive) setTimelineOpen(false);
+    if (writerActive) {
+      const closeT = setTimeout(() => setTimelineOpen(false), 350);
+      const unmountT = setTimeout(() => setShowTimeline(false), 350 + 620);
+      return () => { clearTimeout(closeT); clearTimeout(unmountT); };
+    }
   }, [writerActive]);
   useEffect(() => {
-    if (running && !writerActive) setTimelineOpen(true);
+    if (running && !writerActive) {
+      setTimelineOpen(true);
+      setShowTimeline(true);
+    }
   }, [submitted, running, writerActive]);
+
 
 
   // auto-scroll reasoning panel as new thinking streams
