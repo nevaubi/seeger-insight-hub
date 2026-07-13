@@ -1523,6 +1523,8 @@ function useRelativeTime(ts: number | null): string {
 function DocumentRail({
   open,
   onToggle,
+  mode = 'docs',
+  onModeChange,
   docs,
   activeId,
   isLoading,
@@ -1530,9 +1532,12 @@ function DocumentRail({
   setQuery,
   onPick,
   onNew,
+  editor,
 }: {
   open: boolean;
   onToggle: () => void;
+  mode?: 'docs' | 'outline';
+  onModeChange?: (m: 'docs' | 'outline') => void;
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
@@ -1540,7 +1545,9 @@ function DocumentRail({
   setQuery: (s: string) => void;
   onPick: (d: WorkspaceDocument) => void;
   onNew: () => void;
+  editor?: Editor | null;
 }) {
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return docs;
