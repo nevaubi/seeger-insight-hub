@@ -393,32 +393,36 @@ function DraftPage() {
 
     const t = toast.loading('Refining selection…');
     let acc = '';
-    let insertedLen = to - from; // length of currently-inserted span (starts as selection)
-    let pending = false;
+    // Track the doc's size *outside* the currently-inserted range, so we can
+    // derive the end of the inserted span from the live doc size.
+    // baseSize = doc.size at start with the selection already removed.
+    const initialDocSize = editor.state.doc.content.size;
+    const baseSize = initialDocSize - (to - from);
+    let insertedLen = to - from;
 
-    const flush = () => {
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(() => {
-        pending = false;
-        if (!editorRef.current) return;
-        const ed = editorRef.current;
-        const html = markdownToHtml(acc);
-        preserveScroll(() => {
-          ed.chain()
-            .insertContentAt(
-              { from, to: from + insertedLen },
-              html,
-              { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-            )
-            .run();
-        });
-        // Track the size of the range we just inserted so the next replace
-        // targets the same span. Use document positions after the insert.
-        insertedLen = editorRef.current.state.doc.content.size - (ed.state.doc.content.size - (from + insertedLen));
-        // Simpler: recompute by re-encoding to plain text length of the buffer's html output;
-        // ProseMirror doesn't expose this directly, but we can approximate with the acc length.
-        // Fall back to using acc.length as an insertion cursor via a fresh selection scan below.
+    const applyBuffer = (buf: string) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+      const top = scrollEl?.scrollTop ?? 0;
+      const html = markdownToHtml(buf);
+      ed.chain()
+        .insertContentAt(
+          { from, to: from + insertedLen },
+          html,
+          { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+        )
+        .run();
+      insertedLen = ed.state.doc.content.size - baseSize;
+      if (scrollEl) scrollEl.scrollTop = top;
+    };
+
+    let raf = 0;
+    const scheduleFlush = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        applyBuffer(acc);
       });
     };
 
@@ -431,43 +435,18 @@ function DraftPage() {
       matter: matterScope,
       onText: (delta) => {
         acc += delta;
-        // After each delta, use a simple strategy: replace the range from `from`
-        // to the end of the previously inserted content. We track the end via a
-        // marker: re-derive by inserting the whole buffer each tick.
-        if (editorRef.current) {
-          const ed = editorRef.current;
-          const html = markdownToHtml(acc);
-          preserveScroll(() => {
-            ed.chain()
-              .insertContentAt(
-                { from, to: from + insertedLen },
-                html,
-                { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-              )
-              .run();
-          });
-          insertedLen = ed.state.doc.content.size - (content.length ? 0 : 0);
-          // Recompute insertedLen by measuring the doc delta relative to the initial size.
-          insertedLen = ed.state.selection.$anchor.pos > from
-            ? ed.state.selection.$anchor.pos - from
-            : insertedLen;
-        }
+        scheduleFlush();
       },
     });
-    void flush;
+
+    if (raf) cancelAnimationFrame(raf);
     toast.dismiss(t);
     const finalText = (res?.text ?? acc).trim() || selectionText;
-    if (editorRef.current) {
-      const ed = editorRef.current;
-      const html = markdownToHtml(finalText);
-      preserveScroll(() => {
-        ed.chain()
-          .insertContentAt(
-            { from, to: from + insertedLen },
-            html,
-            { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-          )
-          .run();
+    applyBuffer(finalText);
+    setDirty(true);
+    toast.success('Selection updated');
+  }
+}
       });
     }
     setDirty(true);
