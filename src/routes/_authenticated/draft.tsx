@@ -22,6 +22,8 @@ import {
   Sparkles,
   MoreHorizontal,
   Layers,
+  ChevronsLeft,
+  ChevronsRight,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -1160,6 +1162,8 @@ function useRelativeTime(ts: number | null): string {
 }
 
 function DocumentRail({
+  open,
+  onToggle,
   docs,
   activeId,
   isLoading,
@@ -1168,6 +1172,8 @@ function DocumentRail({
   onPick,
   onNew,
 }: {
+  open: boolean;
+  onToggle: () => void;
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
@@ -1202,8 +1208,30 @@ function DocumentRail({
     ].filter((g) => g.items.length);
   }, [filtered]);
 
+  if (!open) {
+    return (
+      <aside className="hidden lg:flex lg:w-8 shrink-0 flex-col items-center h-full min-h-0 border-r border-border bg-card/40">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="mt-2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary"
+          title="Expand documents"
+          aria-label="Expand documents"
+        >
+          <ChevronsRight className="h-3.5 w-3.5" />
+        </button>
+        <div
+          className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70 font-sans select-none"
+          style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+        >
+          Documents · {docs.length}
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col border-r border-border bg-card/40">
+    <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col h-full min-h-0 border-r border-border bg-card/40 relative">
       <div className="px-3 py-2 border-b border-border flex items-center gap-2 shrink-0">
         <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
           {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
@@ -1223,6 +1251,16 @@ function DocumentRail({
           />
         </div>
       </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="absolute top-2 right-1 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/60 hover:text-foreground hover:bg-secondary opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        title="Collapse documents"
+        aria-label="Collapse documents"
+      >
+        <ChevronsLeft className="h-3.5 w-3.5" />
+      </button>
+
       <div className="flex-1 overflow-y-auto min-h-0">
         {groups.length === 0 && !isLoading && (
           <div className="p-4 text-[12px] text-muted-foreground">
