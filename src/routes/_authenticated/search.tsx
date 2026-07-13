@@ -792,7 +792,7 @@ function SynthesisPanel({
                 setQ={setQ}
                 onSubmit={() => runQuery(q)}
                 variant="hero"
-                placeholder="Ask the record in plain English…"
+                placeholder="Ask the record…"
                 filters={filters}
                 setFilters={setFilters}
                 filtersOpen={filtersOpen}
