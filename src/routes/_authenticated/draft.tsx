@@ -786,7 +786,7 @@ function ClaudeSidecar({
   };
 
   return (
-    <aside className="hidden lg:flex lg:w-[440px] shrink-0 flex-col h-full min-h-0 border-l border-border bg-card">
+    <aside className="hidden lg:flex lg:w-[520px] xl:w-[560px] shrink-0 flex-col h-full min-h-0 border-l border-border bg-card">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card/60 shrink-0">
         <ClaudeLogo className="h-4 w-4" />
         <span className="text-[13px] font-sans font-medium">Claude</span>
