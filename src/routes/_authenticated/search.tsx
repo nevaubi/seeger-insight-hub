@@ -909,24 +909,31 @@ function SynthesisPanel({
               <TraceToggle open={timelineOpen} onToggle={() => setTimelineOpen((o) => !o)} steps={traceSteps} elapsedMs={elapsedMs} />
             )}
 
-            <RunCard
-              running={running}
-              searches={searches}
-              notes={notes}
-              currentRound={currentRound}
-              finalRound={finalRound}
-              citations={citations}
-              timelineOpen={timelineOpen}
-              reasoningRounds={reasoningRounds}
-              reasoningScrollRef={reasoningScrollRef}
-              expansions={expansions}
-              writerRound={writerRound}
-              plan={plan}
-              webResults={webResults}
-              verify={verify}
-            />
+            {showTimeline && (
+              <div className="timeline-collapse" data-open={timelineOpen}>
+                <div className="timeline-collapse-inner">
+                  <RunCard
+                    running={running}
+                    searches={searches}
+                    notes={notes}
+                    currentRound={currentRound}
+                    finalRound={finalRound}
+                    citations={citations}
+                    timelineOpen={timelineOpen}
+                    reasoningRounds={reasoningRounds}
+                    reasoningScrollRef={reasoningScrollRef}
+                    expansions={expansions}
+                    writerRound={writerRound}
+                    plan={plan}
+                    webResults={webResults}
+                    verify={verify}
+                  />
+                </div>
+              </div>
+            )}
 
             {showWriting && <WritingIndicator />}
+
 
             {showAnswer && (
               <div className="motion-fade-rise relative pl-5 pr-1 py-2">
