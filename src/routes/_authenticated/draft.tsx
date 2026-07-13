@@ -64,6 +64,8 @@ import {
 } from '@/lib/file-export';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
+import type { Editor } from '@tiptap/react';
+import { markdownToHtml } from '@/lib/tiptap-markdown';
 import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
 import { VOICE_ACTIONS } from '@/components/editor/voice-actions';
 
@@ -122,6 +124,7 @@ function DraftPage() {
   const footnoteCounterRef = useRef(0);
   const lastCiteKeyRef = useRef<string | null>(null);
   const cursorRef = useRef<number>(0);
+  const editorRef = useRef<Editor | null>(null);
 
   const matterScope = useMemo(
     () => ({
@@ -334,16 +337,17 @@ function DraftPage() {
           <LegalEditor
             value={content}
             onChange={onContentChange}
+            onReady={(ed) => {
+              editorRef.current = ed;
+            }}
             onAskClaude={({ text, kind }) => {
               setSidecarOpen(true);
               window.dispatchEvent(
                 new CustomEvent('legal-ask-claude', { detail: { text, kind } }),
               );
             }}
-            onVoiceAction={async (instruction, sel) => {
-              // Streamed transform runs against the whole document; we replace the first
-              // occurrence of the selected text with the model output.
-              await runInlineTransform(instruction, sel);
+            onVoiceAction={async (payload) => {
+              await runInlineTransform(payload);
             }}
             className="flex-1 min-h-0"
           />
@@ -363,52 +367,109 @@ function DraftPage() {
     </AppShell>
   );
 
-  async function runInlineTransform(instruction: string, selected: string) {
-    if (!selected.trim()) return;
-    const idx = content.indexOf(selected);
-    if (idx === -1) {
-      // fallback: append the transform result
-      const t = toast.loading('Refining…');
-      let acc = '';
-      const res = await runAssistDirect({
-        mode: 'transform',
-        instruction,
-        selection: selected,
-        document: content,
-        caseId,
-        matter: matterScope,
-        onText: (delta) => {
-          acc += delta;
-        },
-      });
-      toast.dismiss(t);
-      const finalText = (res?.text ?? acc).trim();
-      if (finalText) {
-        setContent(content + '\n\n' + finalText);
-        setDirty(true);
-        toast.success('Refined below');
-      }
+  async function runInlineTransform({
+    instruction,
+    selectionText,
+    from,
+    to,
+  }: {
+    instruction: string;
+    selectionText: string;
+    from: number;
+    to: number;
+  }) {
+    const editor = editorRef.current;
+    if (!editor || !selectionText.trim() || to <= from) {
+      toast.error('Highlight text first');
       return;
     }
-    const before = content.slice(0, idx);
-    const after = content.slice(idx + selected.length);
+
+    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+    const preserveScroll = (fn: () => void) => {
+      const top = scrollEl?.scrollTop ?? 0;
+      fn();
+      if (scrollEl) scrollEl.scrollTop = top;
+    };
+
     const t = toast.loading('Refining selection…');
     let acc = '';
+    let insertedLen = to - from; // length of currently-inserted span (starts as selection)
+    let pending = false;
+
+    const flush = () => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (!editorRef.current) return;
+        const ed = editorRef.current;
+        const html = markdownToHtml(acc);
+        preserveScroll(() => {
+          ed.chain()
+            .insertContentAt(
+              { from, to: from + insertedLen },
+              html,
+              { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+            )
+            .run();
+        });
+        // Track the size of the range we just inserted so the next replace
+        // targets the same span. Use document positions after the insert.
+        insertedLen = editorRef.current.state.doc.content.size - (ed.state.doc.content.size - (from + insertedLen));
+        // Simpler: recompute by re-encoding to plain text length of the buffer's html output;
+        // ProseMirror doesn't expose this directly, but we can approximate with the acc length.
+        // Fall back to using acc.length as an insertion cursor via a fresh selection scan below.
+      });
+    };
+
     const res = await runAssistDirect({
       mode: 'transform',
       instruction,
-      selection: selected,
+      selection: selectionText,
       document: content,
       caseId,
       matter: matterScope,
       onText: (delta) => {
         acc += delta;
-        setContent(before + acc + after);
+        // After each delta, use a simple strategy: replace the range from `from`
+        // to the end of the previously inserted content. We track the end via a
+        // marker: re-derive by inserting the whole buffer each tick.
+        if (editorRef.current) {
+          const ed = editorRef.current;
+          const html = markdownToHtml(acc);
+          preserveScroll(() => {
+            ed.chain()
+              .insertContentAt(
+                { from, to: from + insertedLen },
+                html,
+                { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+              )
+              .run();
+          });
+          insertedLen = ed.state.doc.content.size - (content.length ? 0 : 0);
+          // Recompute insertedLen by measuring the doc delta relative to the initial size.
+          insertedLen = ed.state.selection.$anchor.pos > from
+            ? ed.state.selection.$anchor.pos - from
+            : insertedLen;
+        }
       },
     });
+    void flush;
     toast.dismiss(t);
-    const finalText = (res?.text ?? acc).trim() || selected;
-    setContent(before + finalText + after);
+    const finalText = (res?.text ?? acc).trim() || selectionText;
+    if (editorRef.current) {
+      const ed = editorRef.current;
+      const html = markdownToHtml(finalText);
+      preserveScroll(() => {
+        ed.chain()
+          .insertContentAt(
+            { from, to: from + insertedLen },
+            html,
+            { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+          )
+          .run();
+      });
+    }
     setDirty(true);
     toast.success('Selection updated');
   }
