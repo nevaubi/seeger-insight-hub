@@ -64,6 +64,8 @@ import {
 } from '@/lib/file-export';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
+import type { Editor } from '@tiptap/react';
+import { markdownToHtml } from '@/lib/tiptap-markdown';
 import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
 import { VOICE_ACTIONS } from '@/components/editor/voice-actions';
 
@@ -122,6 +124,7 @@ function DraftPage() {
   const footnoteCounterRef = useRef(0);
   const lastCiteKeyRef = useRef<string | null>(null);
   const cursorRef = useRef<number>(0);
+  const editorRef = useRef<Editor | null>(null);
 
   const matterScope = useMemo(
     () => ({
@@ -334,16 +337,17 @@ function DraftPage() {
           <LegalEditor
             value={content}
             onChange={onContentChange}
+            onReady={(ed) => {
+              editorRef.current = ed;
+            }}
             onAskClaude={({ text, kind }) => {
               setSidecarOpen(true);
               window.dispatchEvent(
                 new CustomEvent('legal-ask-claude', { detail: { text, kind } }),
               );
             }}
-            onVoiceAction={async (instruction, sel) => {
-              // Streamed transform runs against the whole document; we replace the first
-              // occurrence of the selected text with the model output.
-              await runInlineTransform(instruction, sel);
+            onVoiceAction={async (payload) => {
+              await runInlineTransform(payload);
             }}
             className="flex-1 min-h-0"
           />
@@ -363,52 +367,82 @@ function DraftPage() {
     </AppShell>
   );
 
-  async function runInlineTransform(instruction: string, selected: string) {
-    if (!selected.trim()) return;
-    const idx = content.indexOf(selected);
-    if (idx === -1) {
-      // fallback: append the transform result
-      const t = toast.loading('Refining…');
-      let acc = '';
-      const res = await runAssistDirect({
-        mode: 'transform',
-        instruction,
-        selection: selected,
-        document: content,
-        caseId,
-        matter: matterScope,
-        onText: (delta) => {
-          acc += delta;
-        },
-      });
-      toast.dismiss(t);
-      const finalText = (res?.text ?? acc).trim();
-      if (finalText) {
-        setContent(content + '\n\n' + finalText);
-        setDirty(true);
-        toast.success('Refined below');
-      }
+  async function runInlineTransform({
+    instruction,
+    selectionText,
+    from,
+    to,
+  }: {
+    instruction: string;
+    selectionText: string;
+    from: number;
+    to: number;
+  }) {
+    const editor = editorRef.current;
+    if (!editor || !selectionText.trim() || to <= from) {
+      toast.error('Highlight text first');
       return;
     }
-    const before = content.slice(0, idx);
-    const after = content.slice(idx + selected.length);
+
+    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+    const preserveScroll = (fn: () => void) => {
+      const top = scrollEl?.scrollTop ?? 0;
+      fn();
+      if (scrollEl) scrollEl.scrollTop = top;
+    };
+
     const t = toast.loading('Refining selection…');
     let acc = '';
+    // Track the doc's size *outside* the currently-inserted range, so we can
+    // derive the end of the inserted span from the live doc size.
+    // baseSize = doc.size at start with the selection already removed.
+    const initialDocSize = editor.state.doc.content.size;
+    const baseSize = initialDocSize - (to - from);
+    let insertedLen = to - from;
+
+    const applyBuffer = (buf: string) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+      const top = scrollEl?.scrollTop ?? 0;
+      const html = markdownToHtml(buf);
+      ed.chain()
+        .insertContentAt(
+          { from, to: from + insertedLen },
+          html,
+          { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+        )
+        .run();
+      insertedLen = ed.state.doc.content.size - baseSize;
+      if (scrollEl) scrollEl.scrollTop = top;
+    };
+
+    let raf = 0;
+    const scheduleFlush = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        applyBuffer(acc);
+      });
+    };
+
     const res = await runAssistDirect({
       mode: 'transform',
       instruction,
-      selection: selected,
+      selection: selectionText,
       document: content,
       caseId,
       matter: matterScope,
       onText: (delta) => {
         acc += delta;
-        setContent(before + acc + after);
+        scheduleFlush();
       },
     });
+
+    if (raf) cancelAnimationFrame(raf);
     toast.dismiss(t);
-    const finalText = (res?.text ?? acc).trim() || selected;
-    setContent(before + finalText + after);
+    const finalText = (res?.text ?? acc).trim() || selectionText;
+    applyBuffer(finalText);
     setDirty(true);
     toast.success('Selection updated');
   }
@@ -752,7 +786,7 @@ function ClaudeSidecar({
   };
 
   return (
-    <aside className="hidden lg:flex lg:w-[440px] shrink-0 flex-col h-full min-h-0 border-l border-border bg-card">
+    <aside className="hidden lg:flex lg:w-[520px] xl:w-[560px] shrink-0 flex-col h-full min-h-0 border-l border-border bg-card">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card/60 shrink-0">
         <ClaudeLogo className="h-4 w-4" />
         <span className="text-[13px] font-sans font-medium">Claude</span>
@@ -1030,7 +1064,13 @@ function TemplateLauncher({
   disabled: boolean;
 }) {
   const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
   const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
+  const handlePick = (t: DraftTemplate) => {
+    if (disabled || pickedKey) return;
+    setPickedKey(t.title);
+    onPick(t);
+  };
   return (
     <div className="py-2 px-1">
       <div className="text-center mb-4 px-2">
@@ -1044,15 +1084,15 @@ function TemplateLauncher({
         </p>
       </div>
 
-      <div className="-mx-1 mb-2.5 overflow-x-auto">
-        <div className="flex gap-1 px-1 min-w-min">
+      <div className="mb-3">
+        <div className="flex flex-wrap gap-1.5">
           {TEMPLATE_CATEGORIES.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => setCat(c)}
               className={cn(
-                'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
+                'rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
                 cat === c
                   ? 'bg-accent/10 border-accent/40 text-accent'
                   : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
@@ -1067,26 +1107,39 @@ function TemplateLauncher({
       <div className="space-y-1.5">
         {items.map((t) => {
           const Icon = t.icon;
+          const isPicked = pickedKey === t.title;
+          const isDim = !!pickedKey && !isPicked;
           return (
             <button
               key={t.title}
               type="button"
-              onClick={() => onPick(t)}
-              disabled={disabled}
-              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50"
+              onClick={() => handlePick(t)}
+              disabled={disabled || !!pickedKey}
+              className={cn(
+                'group w-full flex items-start gap-3 rounded-md border bg-card px-3 py-3 text-left transition',
+                'hover:border-accent/50 hover:bg-accent/5 disabled:cursor-default',
+                isPicked ? 'border-accent/60 bg-accent/5' : 'border-border',
+                isDim && 'opacity-45',
+              )}
             >
-              <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
+              <span className="h-6 w-6 rounded-full bg-accent/10 grid place-items-center shrink-0 mt-0.5">
+                {isPicked ? (
+                  <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
+                ) : (
+                  <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
+                )}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">
+                  <span className="text-[13px] font-sans font-medium text-foreground/90 leading-snug">
                     {t.title}
                   </span>
                   <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">
                     {t.docType}
                   </span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                  {t.summary}
+                <p className="text-[11.5px] text-muted-foreground leading-snug mt-0.5">
+                  {isPicked ? `Preparing ${t.title.toLowerCase()}…` : t.summary}
                 </p>
               </div>
             </button>

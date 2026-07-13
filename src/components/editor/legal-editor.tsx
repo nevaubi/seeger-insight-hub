@@ -20,11 +20,19 @@ import { VOICE_ACTIONS } from './voice-actions';
  * - onChange: markdown string (debounced serialisation)
  * - onAskClaude: user asked Claude about a specific selection or paragraph
  */
+export type VoiceActionPayload = {
+  instruction: string;
+  selectionText: string;
+  from: number;
+  to: number;
+};
+
 export type LegalEditorProps = {
   value: string;
   onChange: (markdown: string) => void;
   onAskClaude: (payload: { text: string; kind: 'selection' | 'paragraph' }) => void;
-  onVoiceAction: (instruction: string, selection: string) => void | Promise<void>;
+  onVoiceAction: (payload: VoiceActionPayload) => void | Promise<void>;
+  onReady?: (editor: Editor) => void;
   running?: boolean;
   className?: string;
 };
@@ -84,6 +92,7 @@ export function LegalEditor({
   onChange,
   onAskClaude,
   onVoiceAction,
+  onReady,
   running,
   className,
 }: LegalEditorProps) {
@@ -126,7 +135,10 @@ export function LegalEditor({
     immediatelyRender: false,
   });
 
-  useEffect(() => setEditor(instance), [instance]);
+  useEffect(() => {
+    setEditor(instance);
+    if (instance && onReady) onReady(instance);
+  }, [instance, onReady]);
 
   // Reconcile external value changes (e.g. picking a different document).
   useEffect(() => {
@@ -171,8 +183,11 @@ export function LegalEditor({
                     key={a.key}
                     type="button"
                     onClick={() => {
-                      const sel = selectionText();
-                      if (sel) onVoiceAction(a.instruction, sel);
+                      if (!editor) return;
+                      const { from, to } = editor.state.selection;
+                      const sel = editor.state.doc.textBetween(from, to, '\n').trim();
+                      if (!sel || to <= from) return;
+                      onVoiceAction({ instruction: a.instruction, selectionText: sel, from, to });
                     }}
                     title={`${a.label} — ${a.hint}`}
                     className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11.5px] font-sans text-foreground/80 hover:bg-secondary hover:text-foreground transition-colors"
