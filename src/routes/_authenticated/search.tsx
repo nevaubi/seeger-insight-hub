@@ -1426,6 +1426,9 @@ function RunCard({
   expansions,
   writerRound,
   plan,
+  planReasoning,
+  planModel,
+  planStreaming,
   webResults,
   verify,
 }: {
@@ -1441,6 +1444,9 @@ function RunCard({
   expansions: Record<number, number>;
   writerRound: number | null;
   plan: { rationale: string; facets: { id: string; question: string; specialists: string[] }[] } | null;
+  planReasoning: string;
+  planModel: string | null;
+  planStreaming: boolean;
   webResults: { round: number; title?: string | null; url?: string | null }[];
   verify: { unsupported: number; notes: string } | null;
 }) {
