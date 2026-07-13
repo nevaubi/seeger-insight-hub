@@ -457,16 +457,31 @@ function DraftPage() {
     if (!ok) toast.error('Allow pop-ups to print / save as PDF');
   };
 
-  // ---- chat helpers ----
+  // ---- chat helpers: real inserts into the Word canvas ----
   const appendToDoc = (text: string) => {
+    if (wordApi?.insertMarkdown) {
+      const ok = wordApi.insertMarkdown(text, 'cursor');
+      if (ok) {
+        toast.success('Inserted at cursor', { description: 'Placed in the document at the current caret.' });
+        return;
+      }
+      toast.error('Editor rejected the insertion — copied to clipboard instead.');
+    }
     navigator.clipboard?.writeText(text).then(() => {
       toast.message('Copied to clipboard', { description: 'Paste into the document where you need it.' });
     });
   };
 
   const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
-    const text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-    navigator.clipboard?.writeText(text.trim()).then(() => {
+    const text = (variant === 'full' ? formatFullCite(c) : formatShortCite(c)).trim();
+    if (wordApi?.insertPlain) {
+      const ok = wordApi.insertPlain(text, 'cursor');
+      if (ok) {
+        toast.success('Citation inserted at cursor');
+        return;
+      }
+    }
+    navigator.clipboard?.writeText(text).then(() => {
       toast.success('Citation copied — paste at the cursor');
     });
   };
