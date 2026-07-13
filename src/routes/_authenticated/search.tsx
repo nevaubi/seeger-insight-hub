@@ -462,7 +462,10 @@ function SuggestionDeck({
     queryKey: ['question-suggestions', matterSlug],
     queryFn: () => fetchQuestionSuggestions(matterSlug),
     staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
+
 
   const pool: QuestionSuggestion[] = useMemo(() => {
     if (data && data.length > 0) return data;
