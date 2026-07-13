@@ -2,8 +2,8 @@ import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import { useQuery, queryOptions } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import { AppShell } from '@/components/app-shell';
-import { fmtDate, fmtDateRange, isRule702, tagLabel } from '@/components/case-ui';
-import { supabase, type Order, type KeyDate } from '@/lib/supabase';
+import { fmtDate, fmtDateRange, isRule702 } from '@/components/case-ui';
+import { supabase, tagLabel, type Order, type KeyDate } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
 import { cn } from '@/lib/utils';
 
@@ -158,8 +158,8 @@ function Dashboard() {
                 mdl={currentMatter.mdl_number}
                 court={currentMatter.court}
                 judge={currentMatter.judge}
-                magistrate={cfg.magistrate as string | undefined}
-                posture={cfg.posture as string | undefined}
+                magistrate={(cfg as Record<string, unknown>).magistrate as string | undefined}
+                posture={(cfg as Record<string, unknown>).posture as string | undefined}
               />
             </section>
 
