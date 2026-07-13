@@ -22,6 +22,8 @@ import {
   Sparkles,
   MoreHorizontal,
   Layers,
+  ChevronsLeft,
+  ChevronsRight,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -105,7 +107,16 @@ function DraftPage() {
   const [dirty, setDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const raw = window.localStorage.getItem('draft.railOpen');
+    return raw == null ? true : raw === '1';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.railOpen', railOpen ? '1' : '0');
+    }
+  }, [railOpen]);
   const [railQuery, setRailQuery] = useState('');
   const [sidecarOpen, setSidecarOpen] = useState(true);
   const footnoteCounterRef = useRef(0);
@@ -305,21 +316,21 @@ function DraftPage() {
         onNewDoc={newDocument}
       />
 
-      <div className="lg:h-[calc(100vh-6.75rem)] lg:flex lg:overflow-hidden">
-        {railOpen && (
-          <DocumentRail
-            docs={docs}
-            activeId={activeId}
-            isLoading={isLoading}
-            query={railQuery}
-            setQuery={setRailQuery}
-            onPick={loadDoc}
-            onNew={newDocument}
-          />
-        )}
+      <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
+        <DocumentRail
+          open={railOpen}
+          onToggle={() => setRailOpen((v) => !v)}
+          docs={docs}
+          activeId={activeId}
+          isLoading={isLoading}
+          query={railQuery}
+          setQuery={setRailQuery}
+          onPick={loadDoc}
+          onNew={newDocument}
+        />
 
         {/* Editor */}
-        <div className="lg:flex-1 min-w-0 flex flex-col bg-background">
+        <div className="lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)]">
           <LegalEditor
             value={content}
             onChange={onContentChange}
@@ -334,7 +345,7 @@ function DraftPage() {
               // occurrence of the selected text with the model output.
               await runInlineTransform(instruction, sel);
             }}
-            className="flex-1"
+            className="flex-1 min-h-0"
           />
         </div>
 
@@ -741,7 +752,7 @@ function ClaudeSidecar({
   };
 
   return (
-    <aside className="hidden lg:flex lg:w-[440px] shrink-0 flex-col border-l border-border bg-card">
+    <aside className="hidden lg:flex lg:w-[440px] shrink-0 flex-col h-full min-h-0 border-l border-border bg-card">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card/60 shrink-0">
         <ClaudeLogo className="h-4 w-4" />
         <span className="text-[13px] font-sans font-medium">Claude</span>
@@ -1151,6 +1162,8 @@ function useRelativeTime(ts: number | null): string {
 }
 
 function DocumentRail({
+  open,
+  onToggle,
   docs,
   activeId,
   isLoading,
@@ -1159,6 +1172,8 @@ function DocumentRail({
   onPick,
   onNew,
 }: {
+  open: boolean;
+  onToggle: () => void;
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
@@ -1193,8 +1208,30 @@ function DocumentRail({
     ].filter((g) => g.items.length);
   }, [filtered]);
 
+  if (!open) {
+    return (
+      <aside className="hidden lg:flex lg:w-8 shrink-0 flex-col items-center h-full min-h-0 border-r border-border bg-card/40">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="mt-2 inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-secondary"
+          title="Expand documents"
+          aria-label="Expand documents"
+        >
+          <ChevronsRight className="h-3.5 w-3.5" />
+        </button>
+        <div
+          className="mt-4 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70 font-sans select-none"
+          style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+        >
+          Documents · {docs.length}
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col border-r border-border bg-card/40">
+    <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col h-full min-h-0 border-r border-border bg-card/40 relative">
       <div className="px-3 py-2 border-b border-border flex items-center gap-2 shrink-0">
         <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
           {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
@@ -1214,6 +1251,16 @@ function DocumentRail({
           />
         </div>
       </div>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="absolute top-2 right-1 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/60 hover:text-foreground hover:bg-secondary opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        title="Collapse documents"
+        aria-label="Collapse documents"
+      >
+        <ChevronsLeft className="h-3.5 w-3.5" />
+      </button>
+
       <div className="flex-1 overflow-y-auto min-h-0">
         {groups.length === 0 && !isLoading && (
           <div className="p-4 text-[12px] text-muted-foreground">
