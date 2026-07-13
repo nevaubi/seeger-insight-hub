@@ -874,14 +874,10 @@ function SynthesisPanel({
 
             {/* User turn */}
             {submitted && (
-              <div className="motion-fade-rise">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 h-6 px-2 shrink-0 rounded-full border border-border bg-secondary/50 text-foreground/70 inline-flex items-center justify-center text-[10.5px] uppercase tracking-wider">
-                    You
-                  </div>
-                  <div className="font-serif text-[18px] leading-snug text-foreground">
-                    {submitted}
-                  </div>
+              <div className="motion-fade-rise pt-1">
+                <div className="t-eyebrow mb-1.5">You asked</div>
+                <div className="font-serif text-[19px] leading-[1.35] tracking-[-0.005em] text-foreground">
+                  {submitted}
                 </div>
               </div>
             )}
