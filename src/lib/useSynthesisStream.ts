@@ -169,6 +169,8 @@ export type SynthEvent =
   | SseTool
   | SseToolError
   | SseExpand
+  | SsePlanStart
+  | SsePlanReasoning
   | SsePlan
   | SseWebResult
   | SseVerify
