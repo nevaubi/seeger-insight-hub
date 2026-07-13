@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SuperDocEditor, type SuperDocRef, type Editor } from '@superdoc-dev/react';
 import { superdocFonts } from '@superdoc-dev/fonts';
 import '@superdoc-dev/react/style.css';
 import {
   AlertTriangle,
   ChevronDown,
+  Copy,
   FileSignature,
   Landmark,
   Loader2,
   Mail,
+  MessageSquarePlus,
+  PenLine,
   ScrollText,
   Type,
 } from 'lucide-react';
@@ -26,18 +30,12 @@ import { supabase, WORKSPACE_DOCX_BUCKET } from '@/lib/supabase';
 import { useAiAssist, type AiAssistMatter } from '@/lib/useAiAssist';
 import type { Suggestion } from '@/lib/redline';
 import { ClaudeMark } from '@/components/claude-mark';
+import seegerLogo from '@/assets/seeger-weiss-logo.png.asset.json';
 import { ClaudePopover, type PopoverAnchor } from './claude-popover';
 
 // Word mode: the SuperDoc canvas (OOXML-native, real pagination, native tracked changes
 // and comments) — now the workspace's only editor. This module is heavy (embedded editor
 // runtime) and is ONLY reached through React.lazy from the draft route.
-//
-// AI attribution: the SuperDoc instance user is "Claude — Insight Hub". Humans edit
-// directly (untracked, as in Word's normal mode); every *tracked change* in the canvas
-// comes from the verified redline pipeline, so in-canvas attribution is honest.
-//
-// The document round-trips losslessly: download from storage → edit → debounced
-// export({triggerDownload:false}) → upsert back to storage.
 
 export const CLAUDE_AUTHOR = { name: 'Claude — Insight Hub', email: 'claude@insight-hub.ai' };
 
@@ -48,21 +46,20 @@ export interface WordApplyResult {
   commentId?: string | null;
 }
 
+export type InsertWhere = 'cursor' | 'end';
+
 export interface WordEditorApi {
-  /** Full-fidelity .docx export via SuperDoc (native download). */
   exportDocx: (name: string) => Promise<void>;
-  /** Plain text of the document body (chat grounding context / checks / redline). */
   extractText: () => string;
-  /** Apply one verified redline suggestion into the canvas as a native tracked change. */
   applyRedlineEdit: (s: Suggestion) => WordApplyResult;
-  /** Accept or reject the tracked changes belonging to a suggestion. */
   decideTracked: (changeIds: string[], decision: 'accept' | 'reject') => void;
-  /** Remove a Claude comment (used when a comment suggestion is dismissed). */
   removeComment: (commentId: string) => void;
-  /** Insert a document block (letterhead, caption, signature…) built from markdown. */
   insertBlock: (kind: InsertBlockKind) => void;
-  /** Apply a document-wide default font. */
   applyFont: (family: string) => boolean;
+  /** Insert markdown-like text into the doc as HTML. Renders paragraphs, bold, italic, lists, headings. */
+  insertMarkdown: (markdown: string, where?: InsertWhere) => boolean;
+  /** Insert a plain-text run at the cursor (or end of doc). */
+  insertPlain: (text: string, where?: InsertWhere) => boolean;
 }
 
 export type InsertBlockKind = 'letterhead' | 'caption' | 'signature' | 'certificate';
@@ -79,7 +76,12 @@ function htmlToText(htmlSections: string[]): string {
     .trim();
 }
 
-// Law-appropriate document fonts available from the bundled metric-compatible pack.
+// Absolute URL for images injected into the docx (SuperDoc/OOXML needs an absolute src).
+function absoluteAssetUrl(url: string): string {
+  if (typeof window === 'undefined') return url;
+  return url.startsWith('http') ? url : `${window.location.origin}${url}`;
+}
+
 const FONT_SUGGESTIONS = [
   { family: 'Century Schoolbook', why: 'the appellate standard — used by the Supreme Court' },
   { family: 'Garamond', why: 'elegant, compact; strong for long briefs' },
@@ -89,65 +91,142 @@ const FONT_SUGGESTIONS = [
   { family: 'Times New Roman', why: 'the conservative default many local rules expect' },
 ];
 
-function insertBlockMarkdown(kind: InsertBlockKind, matter: AiAssistMatter): string {
-  switch (kind) {
-    case 'letterhead':
-      return [
-        '**SEEGER WEISS LLP**',
-        '',
-        'ATTORNEYS AT LAW',
-        '',
-        '55 Challenger Road, Ridgefield Park, NJ 07660 · (973) 639-9100 · seegerweiss.com',
-        '',
-        '---',
-        '',
-      ].join('\n');
-    case 'caption':
-      return [
-        `**UNITED STATES DISTRICT COURT**`,
-        '',
-        `**${(matter.court ?? '').toUpperCase() || '[DISTRICT]'}**`,
-        '',
-        `${matter.name} — MDL No. ${matter.mdl_number}`,
-        '',
-        `Judge ${matter.judge}`,
-        '',
-        'This Document Relates To: [ALL ACTIONS / CASE NO.]',
-        '',
-        '---',
-        '',
-      ].join('\n');
-    case 'signature':
-      return [
-        '',
-        'Dated: [INSERT DATE]',
-        '',
-        'Respectfully submitted,',
-        '',
-        '*/s/ [ATTORNEY NAME]*',
-        '',
-        '[ATTORNEY NAME]',
-        '',
-        'SEEGER WEISS LLP',
-        '',
-        '55 Challenger Road, Ridgefield Park, NJ 07660',
-        '',
-        '(973) 639-9100 · [EMAIL]',
-        '',
-        `*Counsel for Plaintiffs — ${matter.short_name}, MDL No. ${matter.mdl_number}*`,
-        '',
-      ].join('\n');
-    case 'certificate':
-      return [
-        '',
-        '**CERTIFICATE OF SERVICE**',
-        '',
-        'I hereby certify that on [INSERT DATE], I electronically filed the foregoing with the Clerk of Court using the CM/ECF system, which will send notification of such filing to all counsel of record.',
-        '',
-        '*/s/ [ATTORNEY NAME]*',
-        '',
-      ].join('\n');
+const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Minimal markdown → HTML converter for insertion (paragraphs, headings, bold, italic, lists). */
+function markdownToInsertableHtml(md: string): string {
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+  const closeList = () => {
+    if (listType) { out.push(`</${listType}>`); listType = null; }
+  };
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*(?!\s)(.+?)\*(?!\*)/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (!line.trim()) { closeList(); continue; }
+    const h = /^(#{1,4})\s+(.*)/.exec(line);
+    if (h) { closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    const ol = /^\d+\.\s+(.*)/.exec(line);
+    const ul = /^[-*]\s+(.*)/.exec(line);
+    if (ol) {
+      if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; }
+      out.push(`<li>${inline(ol[1])}</li>`);
+      continue;
+    }
+    if (ul) {
+      if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; }
+      out.push(`<li>${inline(ul[1])}</li>`);
+      continue;
+    }
+    if (/^---+$/.test(line)) { closeList(); out.push('<hr/>'); continue; }
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
   }
+  closeList();
+  return out.join('');
+}
+
+function buildBlockHtml(kind: InsertBlockKind, matter: AiAssistMatter): string {
+  switch (kind) {
+    case 'letterhead': {
+      const logoSrc = absoluteAssetUrl(seegerLogo.url);
+      return (
+        `<p style="text-align:center;margin:0 0 6pt 0;"><img src="${logoSrc}" alt="Seeger Weiss LLP" style="max-height:64px;width:auto;" /></p>` +
+        `<p style="text-align:center;margin:0;"><strong>SEEGER WEISS LLP</strong></p>` +
+        `<p style="text-align:center;margin:0;font-variant:small-caps;">Attorneys at Law</p>` +
+        `<p style="text-align:center;margin:0 0 8pt 0;font-size:10pt;">55 Challenger Road, Ridgefield Park, NJ 07660 · (973) 639-9100 · seegerweiss.com</p>` +
+        `<hr/>`
+      );
+    }
+    case 'caption':
+      return (
+        `<p style="text-align:center;margin:0;"><strong>UNITED STATES DISTRICT COURT</strong></p>` +
+        `<p style="text-align:center;margin:0;"><strong>${esc((matter.court ?? '').toUpperCase() || '[DISTRICT]')}</strong></p>` +
+        `<p style="text-align:center;margin:6pt 0 0 0;">${esc(matter.name)} — MDL No. ${esc(String(matter.mdl_number))}</p>` +
+        `<p style="text-align:center;margin:0;">Judge ${esc(matter.judge)}</p>` +
+        `<p style="text-align:center;margin:0 0 8pt 0;">This Document Relates To: [ALL ACTIONS / CASE NO.]</p>` +
+        `<hr/>`
+      );
+    case 'signature':
+      return (
+        `<p>Dated: [INSERT DATE]</p>` +
+        `<p>Respectfully submitted,</p>` +
+        `<p><em>/s/ [ATTORNEY NAME]</em></p>` +
+        `<p>[ATTORNEY NAME]</p>` +
+        `<p>SEEGER WEISS LLP</p>` +
+        `<p>55 Challenger Road, Ridgefield Park, NJ 07660</p>` +
+        `<p>(973) 639-9100 · [EMAIL]</p>` +
+        `<p><em>Counsel for Plaintiffs — ${esc(matter.short_name)}, MDL No. ${esc(String(matter.mdl_number))}</em></p>`
+      );
+    case 'certificate':
+      return (
+        `<p style="text-align:center;"><strong>CERTIFICATE OF SERVICE</strong></p>` +
+        `<p>I hereby certify that on [INSERT DATE], I electronically filed the foregoing with the Clerk of Court using the CM/ECF system, which will send notification of such filing to all counsel of record.</p>` +
+        `<p><em>/s/ [ATTORNEY NAME]</em></p>`
+      );
+  }
+}
+
+// Right-click context menu — a lightweight local component, positioned at the
+// pointer. Not shadcn's DropdownMenu because that wants to own the trigger event.
+interface CtxMenuState { x: number; y: number; selectionText: string }
+
+function ContextMenu({
+  state, onClose, onAsk, onSuggest, onComment, onCopy,
+}: {
+  state: CtxMenuState;
+  onClose: () => void;
+  onAsk: () => void;
+  onSuggest: () => void;
+  onComment: () => void;
+  onCopy: () => void;
+}) {
+  useEffect(() => {
+    const dismiss = () => onClose();
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('mousedown', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('mousedown', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('keydown', key);
+    };
+  }, [onClose]);
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const w = 240, h = 200;
+  const left = Math.min(state.x, vw - w - 8);
+  const top = Math.min(state.y, vh - h - 8);
+  return createPortal(
+    <div
+      data-claude-ui="true"
+      className="fixed z-[110] w-60 rounded-md border border-border bg-popover shadow-xl py-1 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-100"
+      style={{ left, top }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <button type="button" onClick={onAsk} className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-secondary/60">
+        <ClaudeMark className="h-3.5 w-3.5" /> Ask Claude about this…
+        <span className="ml-auto text-[9.5px] text-muted-foreground">⌘K</span>
+      </button>
+      <button type="button" onClick={onSuggest} className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-secondary/60">
+        <PenLine className="h-3.5 w-3.5 text-[#C96442]" /> Suggest edits (redline)
+      </button>
+      <button type="button" onClick={onComment} className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-secondary/60">
+        <MessageSquarePlus className="h-3.5 w-3.5 text-accent" /> Add as comment
+      </button>
+      <div className="my-1 border-t border-border/70" />
+      <button type="button" onClick={onCopy} className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-secondary/60">
+        <Copy className="h-3.5 w-3.5 text-muted-foreground" /> Copy
+      </button>
+    </div>,
+    document.body,
+  );
 }
 
 export default function WordEditor({
@@ -165,7 +244,6 @@ export default function WordEditor({
   onSaveStateChange: (s: { saving: boolean; lastSavedAt: number | null; dirty: boolean }) => void;
   onTextChange: (text: string) => void;
   onApi: (api: WordEditorApi | null) => void;
-  /** Run a verified redline pass scoped to a selection (handled by the draft route). */
   onSuggestEdits: (selectionText: string, instruction: string) => void;
 }) {
   const ref = useRef<SuperDocRef | null>(null);
@@ -176,7 +254,8 @@ export default function WordEditor({
   const [ready, setReady] = useState(false);
   const [fontBusy, setFontBusy] = useState(false);
   const [popoverAnchor, setPopoverAnchor] = useState<PopoverAnchor | null>(null);
-  const popoverTargetRef = useRef<unknown>(null); // captured selection target for comments
+  const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
+  const popoverTargetRef = useRef<unknown>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -201,9 +280,7 @@ export default function WordEditor({
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       }));
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [storagePath]);
 
   // ---- autosave ----
@@ -240,16 +317,12 @@ export default function WordEditor({
     textTimer.current = setTimeout(() => {
       const sd = ref.current?.getInstance();
       if (!sd) return;
-      try {
-        onTextChange(htmlToText(sd.getHTML()));
-      } catch {
-        /* extraction is best-effort */
-      }
+      try { onTextChange(htmlToText(sd.getHTML())); } catch { /* best-effort */ }
     }, 1200);
   }, [onTextChange]);
 
-  // ---- selection tracking → Claude affordance ----
-  const updatePopoverFromSelection = useCallback(() => {
+  // ---- selection tracking → floating Claude pill ----
+  const updatePopoverFromSelection = useCallback((forceOpen = false) => {
     if (selectionTimer.current) clearTimeout(selectionTimer.current);
     selectionTimer.current = setTimeout(() => {
       const shell = shellRef.current;
@@ -266,46 +339,85 @@ export default function WordEditor({
         return;
       }
       const range = sel.getRangeAt(0);
-      // the selection must live inside the canvas shell
       if (!shell.contains(range.commonAncestorContainer)) {
         setPopoverAnchor(null);
         return;
       }
       const rect = range.getBoundingClientRect();
-      const shellRect = shell.getBoundingClientRect();
-      // capture the portable selection target NOW (clicks later will collapse it)
       try {
         const doc = (editor as any).doc;
         popoverTargetRef.current = doc?.selection?.current?.()?.target ?? null;
       } catch {
         popoverTargetRef.current = null;
       }
+      // viewport-space anchor (top-center of selection)
       setPopoverAnchor({
-        x: Math.min(rect.right - shellRect.left + 6, shell.clientWidth - 44),
-        y: Math.max(4, rect.top - shellRect.top + shell.scrollTop - 4),
+        x: (rect.left + rect.right) / 2,
+        y: rect.top,
         selectionText: text,
+        forceOpen,
       });
-    }, 250);
+    }, forceOpen ? 0 : 120);
   }, []);
 
   useEffect(() => {
-    const handler = () => updatePopoverFromSelection();
+    const handler = (e: Event) => {
+      // ignore selection changes that happen inside Claude's own UI
+      const target = e.target as Node | null;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.closest?.('[data-claude-ui="true"]')) return;
+      if (target && (target as HTMLElement).closest?.('[data-claude-ui="true"]')) return;
+      updatePopoverFromSelection(false);
+    };
     document.addEventListener('selectionchange', handler);
     return () => document.removeEventListener('selectionchange', handler);
   }, [updatePopoverFromSelection]);
 
-  // ---- api exposed to the draft route ----
+  // ⌘K / Ctrl-K opens the popover on the current selection
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        const shell = shellRef.current;
+        const sel = window.getSelection();
+        if (!shell || !sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+        if (!shell.contains(range.commonAncestorContainer)) return;
+        e.preventDefault();
+        updatePopoverFromSelection(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [updatePopoverFromSelection]);
+
+  // Right-click inside the canvas → custom context menu
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const onCtx = (e: MouseEvent) => {
+      const sel = window.getSelection();
+      const text = sel?.toString().trim() ?? '';
+      if (text.length < 4) return; // let the browser show its native menu when nothing is selected
+      e.preventDefault();
+      // capture the doc-level target NOW so "Add as comment" has something to anchor to
+      try {
+        const doc = (editorRef.current as any)?.doc;
+        popoverTargetRef.current = doc?.selection?.current?.()?.target ?? null;
+      } catch { popoverTargetRef.current = null; }
+      setCtxMenu({ x: e.clientX, y: e.clientY, selectionText: text });
+    };
+    shell.addEventListener('contextmenu', onCtx);
+    return () => shell.removeEventListener('contextmenu', onCtx);
+  }, [ready]);
+
+  // ---- redline apply (unchanged) ----
   const applyRedlineEdit = useCallback((s: Suggestion): WordApplyResult => {
     const editor = editorRef.current;
     if (!editor) return { ok: false, reason: 'editor_not_ready', changeIds: [] };
     const doc = (editor as any).doc;
     let items: any[] = [];
     try {
-      const res = doc.query.match({
-        select: { type: 'text', pattern: s.anchor },
-        require: 'all',
-        limit: 100,
-      });
+      const res = doc.query.match({ select: { type: 'text', pattern: s.anchor }, require: 'all', limit: 100 });
       items = res?.items ?? [];
     } catch (e) {
       return { ok: false, reason: `query failed: ${(e as Error).message.slice(0, 60)}`, changeIds: [] };
@@ -316,11 +428,8 @@ export default function WordEditor({
     if (!item) return { ok: false, reason: 'occurrence_out_of_range', changeIds: [] };
 
     const listIds = (): Set<string> => {
-      try {
-        return new Set(((doc.trackChanges.list({})?.items ?? []) as any[]).map((c) => String(c.id)));
-      } catch {
-        return new Set();
-      }
+      try { return new Set(((doc.trackChanges.list({})?.items ?? []) as any[]).map((c) => String(c.id))); }
+      catch { return new Set(); }
     };
     const before = listIds();
 
@@ -355,11 +464,8 @@ export default function WordEditor({
     if (!editor) return;
     const doc = (editor as any).doc;
     for (const id of changeIds) {
-      try {
-        doc.trackChanges.decide({ decision, target: { kind: 'id', id } });
-      } catch (e) {
-        console.warn('trackChanges.decide failed', id, e);
-      }
+      try { doc.trackChanges.decide({ decision, target: { kind: 'id', id } }); }
+      catch (e) { console.warn('trackChanges.decide failed', id, e); }
     }
     scheduleSave();
     pushText();
@@ -373,47 +479,83 @@ export default function WordEditor({
       if (typeof doc.comments.remove === 'function') doc.comments.remove({ commentId });
       else if (typeof doc.comments.delete === 'function') doc.comments.delete({ commentId });
       scheduleSave();
-    } catch (e) {
-      console.warn('comment removal failed', e);
-    }
+    } catch (e) { console.warn('comment removal failed', e); }
   }, [scheduleSave]);
 
-  const insertMarkdownBlock = useCallback((markdown: string, where: 'start' | 'cursor') => {
+  // ---- HTML-based inserts (canonical path through ProseMirror) ----
+  const insertHtmlAtCursor = useCallback((html: string): boolean => {
     const editor = editorRef.current;
-    if (!editor) throw new Error('Editor not ready');
-    const doc = (editor as any).doc;
-    const frag = doc.markdownToFragment({ markdown });
-    const content = frag?.fragment ?? frag?.content ?? frag;
-    if (where === 'start') {
-      const first = doc.blocks.list({ limit: 1 })?.items?.[0];
-      doc.insert({ content, target: first?.address, placement: 'before' }, { changeMode: 'direct' });
-    } else {
-      // insert after the block containing the caret (or at end without a selection)
-      let address: unknown = undefined;
-      try {
-        const sel = doc.selection.current();
-        const blockId = sel?.target?.segments?.[0]?.blockId ?? sel?.target?.start?.blockId;
-        if (blockId) address = { kind: 'block', nodeId: blockId };
-      } catch { /* fall through to append */ }
-      if (address) doc.insert({ content, target: address, placement: 'after' }, { changeMode: 'direct' });
-      else doc.insert({ content }, { changeMode: 'direct' });
+    if (!editor) return false;
+    // Preferred: ProseMirror's insertContent (SuperDoc's stable path)
+    try {
+      const cmds = (editor as any).commands;
+      if (cmds?.focus) cmds.focus();
+      if (cmds?.insertContent) {
+        const ok = cmds.insertContent(html);
+        if (ok !== false) { scheduleSave(); pushText(); return true; }
+      }
+    } catch (e) {
+      console.warn('insertContent failed', e);
     }
-  }, []);
+    // Fallback: SuperDoc doc.insert with HTML content
+    try {
+      const doc = (editor as any).doc;
+      doc.insert({ content: { html } }, { changeMode: 'direct' });
+      scheduleSave(); pushText(); return true;
+    } catch (e) {
+      console.warn('doc.insert(html) failed', e);
+    }
+    return false;
+  }, [scheduleSave, pushText]);
+
+  const insertHtmlAtStart = useCallback((html: string): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    try {
+      const cmds = (editor as any).commands;
+      if (cmds?.focus) cmds.focus();
+      if (cmds?.setTextSelection) cmds.setTextSelection(0);
+      if (cmds?.insertContentAt) {
+        const ok = cmds.insertContentAt(0, html);
+        if (ok !== false) { scheduleSave(); pushText(); return true; }
+      }
+      if (cmds?.insertContent) {
+        const ok = cmds.insertContent(html);
+        if (ok !== false) { scheduleSave(); pushText(); return true; }
+      }
+    } catch (e) {
+      console.warn('insert-at-start failed', e);
+    }
+    return insertHtmlAtCursor(html);
+  }, [insertHtmlAtCursor, scheduleSave, pushText]);
+
+  const insertMarkdown = useCallback((markdown: string, where: InsertWhere = 'cursor'): boolean => {
+    const html = markdownToInsertableHtml(markdown);
+    return where === 'end' ? insertHtmlAtCursor(html) : insertHtmlAtCursor(html);
+  }, [insertHtmlAtCursor]);
+
+  const insertPlain = useCallback((text: string, where: InsertWhere = 'cursor'): boolean => {
+    const html = text
+      .split(/\n{2,}/)
+      .map((p) => `<p>${esc(p).replace(/\n/g, '<br/>')}</p>`)
+      .join('');
+    return where === 'end' ? insertHtmlAtCursor(html) : insertHtmlAtCursor(html);
+  }, [insertHtmlAtCursor]);
 
   const insertBlock = useCallback((kind: InsertBlockKind) => {
-    try {
-      insertMarkdownBlock(insertBlockMarkdown(kind, matter), kind === 'letterhead' || kind === 'caption' ? 'start' : 'cursor');
-      scheduleSave();
-      pushText();
+    const html = buildBlockHtml(kind, matter);
+    const atTop = kind === 'letterhead' || kind === 'caption';
+    const ok = atTop ? insertHtmlAtStart(html) : insertHtmlAtCursor(html);
+    if (ok) {
       toast.success(
         kind === 'letterhead' ? 'Firm letterhead added' :
         kind === 'caption' ? 'Caption block added' :
         kind === 'signature' ? 'Signature block inserted' : 'Certificate of service inserted',
       );
-    } catch (e) {
-      toast.error(`Couldn't insert block: ${(e as Error).message.slice(0, 80)}`);
+    } else {
+      toast.error(`Couldn't insert the ${kind} block — the editor rejected the content.`);
     }
-  }, [insertMarkdownBlock, matter, scheduleSave, pushText]);
+  }, [insertHtmlAtCursor, insertHtmlAtStart, matter]);
 
   const applyFont = useCallback((family: string): boolean => {
     const editor = editorRef.current;
@@ -449,18 +591,11 @@ export default function WordEditor({
       const match = FONT_SUGGESTIONS.find((f) => raw.toLowerCase().includes(f.family.toLowerCase()));
       const pick = match ?? FONT_SUGGESTIONS[0];
       const applied = applyFont(pick.family);
-      if (applied) {
-        toast.success(`Claude set the document font to ${pick.family}`, { description: pick.why });
-      } else {
-        toast.message(`Claude suggests ${pick.family}`, {
-          description: `${pick.why}. Apply it from the toolbar font menu.`,
-        });
-      }
+      if (applied) toast.success(`Claude set the document font to ${pick.family}`, { description: pick.why });
+      else toast.message(`Claude suggests ${pick.family}`, { description: `${pick.why}. Apply it from the toolbar font menu.` });
     } catch (e) {
       toast.error(`Font suggestion failed: ${(e as Error).message.slice(0, 80)}`);
-    } finally {
-      setFontBusy(false);
-    }
+    } finally { setFontBusy(false); }
   }, [runAssist, caseId, matter, applyFont]);
 
   const addCommentAtCapturedSelection = useCallback((text: string) => {
@@ -490,22 +625,19 @@ export default function WordEditor({
       extractText: () => {
         const sd = ref.current?.getInstance();
         if (!sd) return '';
-        try {
-          return htmlToText(sd.getHTML());
-        } catch {
-          return '';
-        }
+        try { return htmlToText(sd.getHTML()); } catch { return ''; }
       },
       applyRedlineEdit,
       decideTracked,
       removeComment,
       insertBlock,
       applyFont,
+      insertMarkdown,
+      insertPlain,
     });
     return () => onApi(null);
-  }, [ready, onApi, applyRedlineEdit, decideTracked, removeComment, insertBlock, applyFont]);
+  }, [ready, onApi, applyRedlineEdit, decideTracked, removeComment, insertBlock, applyFont, insertMarkdown, insertPlain]);
 
-  // flush pending save on unmount
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -514,6 +646,31 @@ export default function WordEditor({
       if (dirtyRef.current) void doSave();
     };
   }, [doSave]);
+
+  const contextMenu = useMemo(() => {
+    if (!ctxMenu) return null;
+    const closeMenu = () => setCtxMenu(null);
+    return (
+      <ContextMenu
+        state={ctxMenu}
+        onClose={closeMenu}
+        onAsk={() => { closeMenu(); updatePopoverFromSelection(true); }}
+        onSuggest={() => {
+          closeMenu();
+          onSuggestEdits(ctxMenu.selectionText, 'Improve this passage: precision, flow, and litigation register. Smallest sufficient edits.');
+        }}
+        onComment={() => {
+          closeMenu();
+          const note = window.prompt('Add a comment on this selection:', '');
+          if (note && note.trim()) addCommentAtCapturedSelection(note.trim());
+        }}
+        onCopy={() => {
+          closeMenu();
+          navigator.clipboard?.writeText(ctxMenu.selectionText).then(() => toast.success('Copied'));
+        }}
+      />
+    );
+  }, [ctxMenu, updatePopoverFromSelection, onSuggestEdits, addCommentAtCapturedSelection]);
 
   if (loadError) {
     return (
@@ -537,7 +694,7 @@ export default function WordEditor({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 word-editor-shell">
-      {/* Word-blue accessory strip: law inserts + AI design tools */}
+      {/* Word-blue accessory strip */}
       <div className="flex items-center gap-1 border-b border-[hsl(215_45%_86%)] bg-[hsl(215_65%_96%)] px-3 py-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -579,7 +736,7 @@ export default function WordEditor({
 
         <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-sans text-[hsl(215_35%_45%)]">
           <ClaudeMark className="h-3 w-3" />
-          AI edits arrive as tracked changes · attributed to Claude
+          Select any passage — Claude opens with ⌘K or right-click
         </span>
       </div>
 
@@ -600,10 +757,6 @@ export default function WordEditor({
           onReady={() => {
             setReady(true);
             pushText();
-            // Show every toolbar tool (wrapped onto extra rows via CSS) instead of hiding
-            // overflow behind the breakpoint filter. Passing this through modules.toolbar
-            // at construction clobbers the react wrapper's injected toolbar selector and
-            // stalls the layout engine (v1.44), so it is applied at runtime instead.
             try {
               const tb = (ref.current?.getInstance() as any)?.toolbar;
               if (tb?.config) {
@@ -612,17 +765,10 @@ export default function WordEditor({
                 tb.updateToolbarState?.();
                 tb.onToolbarResize?.();
               }
-            } catch (e) {
-              console.warn('toolbar unhide failed', e);
-            }
+            } catch (e) { console.warn('toolbar unhide failed', e); }
           }}
-          onEditorCreate={(e) => {
-            editorRef.current = e.editor;
-          }}
-          onEditorUpdate={() => {
-            scheduleSave();
-            pushText();
-          }}
+          onEditorCreate={(e) => { editorRef.current = e.editor; }}
+          onEditorUpdate={() => { scheduleSave(); pushText(); }}
           onContentError={(e) => {
             setLoadError('This .docx could not be parsed with full fidelity.');
             console.warn('SuperDoc content error', e);
@@ -638,6 +784,7 @@ export default function WordEditor({
           onSuggestEdits={onSuggestEdits}
           onClose={() => setPopoverAnchor(null)}
         />
+        {contextMenu}
       </div>
     </div>
   );
