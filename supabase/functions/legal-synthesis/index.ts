@@ -113,7 +113,7 @@ const RETRY_BASE_DELAY_MS = 2000;
 const RETRY_MAX_DELAY_MS = 15000;
 
 // ---------- v30: multi-agent + web + rerank ----------
-const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-pro-preview";
+const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-flash-lite";
 const CRITIC_MODEL  = Deno.env.get("CRITIC_MODEL")  ?? "gemini-3.5-flash";
 const VERIFIER_MODEL = Deno.env.get("VERIFIER_MODEL") ?? "gemini-3.5-flash";
 const RERANK_URL   = "https://api.voyageai.com/v1/rerank";
@@ -1489,6 +1489,75 @@ async function geminiJson(
   }
 }
 
+// Streaming variant of geminiJson used by the planner so the model's reasoning
+// (Gemini's "thinking" tokens, when the model exposes them via the OpenAI-compat
+// route) can be forwarded to the UI in real time. Falls back to the accumulated
+// content for JSON parsing at the end. Non-streaming callers should keep using
+// geminiJson — this is heavier and only worth it when reasoning is user-facing.
+async function geminiJsonStreaming(
+  model: string,
+  system: string,
+  user: string,
+  maxTokens: number,
+  onReasoning: (text: string) => void,
+): Promise<any> {
+  const res = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+      stream: true,
+      // Ask the OpenAI-compat endpoint to include reasoning tokens in the deltas.
+      // Different routes expose them under `reasoning`, `reasoning_content`, or
+      // `thinking` — the parser below handles all three.
+      reasoning: { effort: "low" },
+    }),
+  });
+  if (!res.ok || !res.body) {
+    const t = await res.text().catch(() => "");
+    throw new ApiError(`${model} ${res.status}: ${t.slice(0, 300)}`, res.status, null);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let content = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line || !line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const j = JSON.parse(payload);
+        const d = j?.choices?.[0]?.delta ?? {};
+        const rtxt =
+          (typeof d.reasoning === "string" ? d.reasoning : "") ||
+          (typeof d.reasoning_content === "string" ? d.reasoning_content : "") ||
+          (typeof d.thinking === "string" ? d.thinking : "");
+        if (rtxt) onReasoning(rtxt);
+        if (typeof d.content === "string") content += d.content;
+      } catch { /* ignore malformed frame */ }
+    }
+  }
+  try { return JSON.parse(content); } catch {
+    const m = content.match(/\{[\s\S]*\}/);
+    if (m) { try { return JSON.parse(m[0]); } catch { /* fall through */ } }
+    throw new Error(`${model} returned non-JSON output`);
+  }
+}
+
 // ---------- PLANNER ----------
 type Facet = {
   id: string;
@@ -1499,7 +1568,11 @@ type Facet = {
   court?: string;
 };
 
-async function runPlanner(question: string, matter: Matter): Promise<{ facets: Facet[]; rationale: string }> {
+async function runPlanner(
+  question: string,
+  matter: Matter,
+  emit?: (evt: Record<string, unknown>) => void,
+): Promise<{ facets: Facet[]; rationale: string }> {
   const system = `You are the PLANNER for a multi-agent litigation research assistant working the ${matter.name} record (MDL No. ${matter.mdl_number}, before ${matter.judge}).
 
 Decompose the attorney's question into 1–4 independent research FACETS. For each facet, produce:
@@ -1517,24 +1590,36 @@ Rules:
   * When several facets are independent, they will be executed in PARALLEL.
   * Never invent case names, statute cites, or PTO numbers.
 
+Before returning JSON, think through the decomposition step by step — this reasoning streams to the attorney as your visible planning, so keep it concise, professional, and legally substantive.
+
 Return ONLY JSON of the shape: { "rationale": "1–2 sentences on the decomposition", "facets": [ ... ] }`;
+  emit?.({ type: "plan_start", model: PLANNER_MODEL });
+  let out: any = null;
   try {
-    const out = await geminiJson(PLANNER_MODEL, system, question, 2048);
-    const facets = Array.isArray(out?.facets) ? out.facets : [];
-    const normalized: Facet[] = facets.slice(0, 4).map((f: any, i: number) => ({
-      id: String(f?.id ?? `facet_${i + 1}`).slice(0, 64),
-      question: String(f?.question ?? question).trim(),
-      hypothesis: String(f?.hypothesis ?? "").trim(),
-      specialists: Array.isArray(f?.specialists) ? f.specialists.map((s: any) => String(s)) : ["search_the_record"],
-      keywords: Array.isArray(f?.keywords) ? f.keywords.map((k: any) => String(k)) : undefined,
-      court: f?.court ? String(f.court) : undefined,
-    }));
-    return { facets: normalized.length ? normalized : [{ id: "default", question, hypothesis: "", specialists: ["search_the_record"] }], rationale: String(out?.rationale ?? "") };
+    if (emit) {
+      out = await geminiJsonStreaming(PLANNER_MODEL, system, question, 2048, (t) => {
+        emit({ type: "plan_reasoning", text: t });
+      });
+    } else {
+      out = await geminiJson(PLANNER_MODEL, system, question, 2048);
+    }
   } catch {
-    // Planner failure is non-fatal: fall back to a single default facet so the existing
-    // router loop still runs the question with its normal heuristics.
+    // Streaming path failed — try the plain non-streaming call once before giving up.
+    try { out = await geminiJson(PLANNER_MODEL, system, question, 2048); } catch { out = null; }
+  }
+  if (!out) {
     return { facets: [{ id: "default", question, hypothesis: "", specialists: ["search_the_record"] }], rationale: "" };
   }
+  const facets = Array.isArray(out?.facets) ? out.facets : [];
+  const normalized: Facet[] = facets.slice(0, 4).map((f: any, i: number) => ({
+    id: String(f?.id ?? `facet_${i + 1}`).slice(0, 64),
+    question: String(f?.question ?? question).trim(),
+    hypothesis: String(f?.hypothesis ?? "").trim(),
+    specialists: Array.isArray(f?.specialists) ? f.specialists.map((s: any) => String(s)) : ["search_the_record"],
+    keywords: Array.isArray(f?.keywords) ? f.keywords.map((k: any) => String(k)) : undefined,
+    court: f?.court ? String(f.court) : undefined,
+  }));
+  return { facets: normalized.length ? normalized : [{ id: "default", question, hypothesis: "", specialists: ["search_the_record"] }], rationale: String(out?.rationale ?? "") };
 }
 
 // ---------- CRITIC ----------
@@ -1612,7 +1697,7 @@ Return ONLY JSON: { "suggestions": ["...", "...", "..."] }`;
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-3-5-haiku-latest",
+        model: "claude-haiku-4-5",
         max_tokens: 512,
         system,
         messages: [{ role: "user", content: user }],
@@ -1751,7 +1836,7 @@ Deno.serve(async (req: Request) => {
       let plannedFacets: Facet[] = [];
       let plannerRationale = "";
       try {
-        const p = await runPlanner(question, matter);
+        const p = await runPlanner(question, matter, emit);
         plannedFacets = p.facets;
         plannerRationale = p.rationale;
         emit({

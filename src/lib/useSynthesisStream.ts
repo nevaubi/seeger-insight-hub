@@ -148,6 +148,8 @@ type SseToolError = {
 // round's best hits for surrounding context. Aggregated per round in the UI.
 type SseExpand = { type: 'expand'; round: number; source: string; count: number };
 // v30 additive frames (planner/web/verify) — safe to ignore if absent.
+type SsePlanStart = { type: 'plan_start'; model?: string };
+type SsePlanReasoning = { type: 'plan_reasoning'; text: string };
 type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
 type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
 type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
@@ -167,6 +169,8 @@ export type SynthEvent =
   | SseTool
   | SseToolError
   | SseExpand
+  | SsePlanStart
+  | SsePlanReasoning
   | SsePlan
   | SseWebResult
   | SseVerify
@@ -194,6 +198,9 @@ export type SynthState = {
   expansions: Record<number, number>;
   // v30 additive
   plan: PlanEvt | null;
+  planReasoning: string;
+  planModel: string | null;
+  planStreaming: boolean;
   webResults: WebResult[];
   verify: VerifyEvt | null;
   followups: string[];
@@ -219,6 +226,9 @@ const INITIAL: SynthState = {
   chunkOrder: [],
   expansions: {},
   plan: null,
+  planReasoning: '',
+  planModel: null,
+  planStreaming: false,
   webResults: [],
   verify: null,
   followups: [],
@@ -439,9 +449,23 @@ function reducer(state: SynthState, action: Action): SynthState {
             ],
           };
         }
+        case 'plan_start':
+          return {
+            ...state,
+            planStreaming: true,
+            planReasoning: '',
+            planModel: evt.model ?? state.planModel,
+          };
+        case 'plan_reasoning':
+          return {
+            ...state,
+            planStreaming: true,
+            planReasoning: state.planReasoning + (evt.text ?? ''),
+          };
         case 'plan':
           return {
             ...state,
+            planStreaming: false,
             plan: { rationale: evt.rationale ?? '', facets: evt.facets ?? [] },
           };
         case 'web_result':
