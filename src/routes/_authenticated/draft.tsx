@@ -1574,6 +1574,21 @@ function DocumentRail({
     ].filter((g) => g.items.length);
   }, [filtered]);
 
+  const outline = useMemo(() => {
+    if (mode !== 'outline' || !editor) return [] as { level: number; text: string; pos: number }[];
+    const items: { level: number; text: string; pos: number }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'heading') {
+        items.push({
+          level: (node.attrs as { level?: number }).level ?? 2,
+          text: node.textContent.trim() || 'Untitled section',
+          pos,
+        });
+      }
+    });
+    return items;
+  }, [mode, editor]);
+
   if (!open) {
     return (
       <aside className="hidden lg:flex lg:w-8 shrink-0 flex-col items-center h-full min-h-0 border-r border-border bg-card/40">
@@ -1596,20 +1611,6 @@ function DocumentRail({
     );
   }
 
-  const outline = useMemo(() => {
-    if (mode !== 'outline' || !editor) return [] as { level: number; text: string; pos: number }[];
-    const items: { level: number; text: string; pos: number }[] = [];
-    editor.state.doc.descendants((node, pos) => {
-      if (node.type.name === 'heading') {
-        items.push({
-          level: (node.attrs as { level?: number }).level ?? 2,
-          text: node.textContent.trim() || 'Untitled section',
-          pos,
-        });
-      }
-    });
-    return items;
-  }, [mode, editor]);
 
   return (
     <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col h-full min-h-0 border-r border-border bg-card/40 relative">
