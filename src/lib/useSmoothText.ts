@@ -11,10 +11,11 @@ import { prefersReducedMotion } from './motion';
  * @param running whether the upstream stream is still active
  * @param cps    characters per second to reveal (default ~600)
  */
-export function useSmoothText(full: string, running: boolean, cps = 900): string {
+export function useSmoothText(full: string, running: boolean, cps = 1200): string {
   const [shown, setShown] = useState('');
   const shownRef = useRef('');
   const fullRef = useRef('');
+  const progressRef = useRef(0); // fractional character progress
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
 
@@ -26,6 +27,7 @@ export function useSmoothText(full: string, running: boolean, cps = 900): string
     if (!running) {
       if (shownRef.current !== full) {
         shownRef.current = full;
+        progressRef.current = full.length;
         setShown(full);
       }
       if (rafRef.current != null) {
@@ -42,6 +44,7 @@ export function useSmoothText(full: string, running: boolean, cps = 900): string
     if (prefersReducedMotion()) {
       if (shownRef.current !== full) {
         shownRef.current = full;
+        progressRef.current = full.length;
         setShown(full);
       }
     }
@@ -51,11 +54,13 @@ export function useSmoothText(full: string, running: boolean, cps = 900): string
   useEffect(() => {
     if (full.length < shownRef.current.length) {
       shownRef.current = '';
+      progressRef.current = 0;
       setShown('');
     }
   }, [full]);
 
-  // RAF loop while running
+  // RAF loop while running — fractional accumulator so slow rates still
+  // advance visibly each frame instead of stalling then leaping.
   useEffect(() => {
     if (!running) return;
     if (prefersReducedMotion()) return;
@@ -63,22 +68,23 @@ export function useSmoothText(full: string, running: boolean, cps = 900): string
     const tick = (ts: number) => {
       rafRef.current = null;
       const last = lastTsRef.current ?? ts;
-      const dt = Math.max(0, ts - last);
+      const dt = Math.max(0, Math.min(64, ts - last));
       lastTsRef.current = ts;
 
       const target = fullRef.current;
-      const current = shownRef.current;
-      if (current.length < target.length) {
-        const behind = target.length - current.length;
-        // Base rate, with an aggressive catch-up when the buffer runs ahead.
-        const rate = cps + Math.max(0, behind - 80) * 8;
-        const advance = Math.max(1, Math.ceil((rate * dt) / 1000));
-        const nextLen = Math.min(target.length, current.length + advance);
-        const next = target.slice(0, nextLen);
-        shownRef.current = next;
-        setShown(next);
+      const shownLen = shownRef.current.length;
+      if (shownLen < target.length) {
+        const behind = target.length - shownLen;
+        // Soft catch-up: gentle boost only when the buffer is well ahead.
+        const rate = cps + Math.max(0, behind - 40) * 12;
+        progressRef.current = Math.max(progressRef.current, shownLen) + (rate * dt) / 1000;
+        const nextLen = Math.min(target.length, Math.max(shownLen + 1, Math.floor(progressRef.current)));
+        if (nextLen !== shownLen) {
+          const next = target.slice(0, nextLen);
+          shownRef.current = next;
+          setShown(next);
+        }
       }
-      // Keep ticking while running; stop only when not running (handled above).
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -92,3 +98,4 @@ export function useSmoothText(full: string, running: boolean, cps = 900): string
 
   return shown;
 }
+
