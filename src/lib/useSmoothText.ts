@@ -11,7 +11,7 @@ import { prefersReducedMotion } from './motion';
  * @param running whether the upstream stream is still active
  * @param cps    characters per second to reveal (default ~600)
  */
-export function useSmoothText(full: string, running: boolean, cps = 600): string {
+export function useSmoothText(full: string, running: boolean, cps = 900): string {
   const [shown, setShown] = useState('');
   const shownRef = useRef('');
   const fullRef = useRef('');
@@ -70,8 +70,8 @@ export function useSmoothText(full: string, running: boolean, cps = 600): string
       const current = shownRef.current;
       if (current.length < target.length) {
         const behind = target.length - current.length;
-        // Base rate, but catch up faster if we've fallen far behind.
-        const rate = cps + Math.max(0, behind - 200) * 4;
+        // Base rate, with an aggressive catch-up when the buffer runs ahead.
+        const rate = cps + Math.max(0, behind - 80) * 8;
         const advance = Math.max(1, Math.ceil((rate * dt) / 1000));
         const nextLen = Math.min(target.length, current.length + advance);
         const next = target.slice(0, nextLen);

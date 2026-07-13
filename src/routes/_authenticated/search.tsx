@@ -297,23 +297,23 @@ function Composer({
         className="relative"
       >
         <div
-          className="relative flex items-center bg-card rounded-lg border border-border focus-within:border-accent/70 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_45%,transparent)] transition-[box-shadow,border-color]"
+          className="relative flex items-center bg-card rounded-xl border border-border/70 focus-within:border-accent/60 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_35%,transparent),0_1px_0_rgba(0,0,0,0.02)] shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-[box-shadow,border-color]"
           style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
         >
-          <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground/70 pointer-events-none" strokeWidth={1.75} />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-lg"
+            className="flex-1 bg-transparent pl-11 pr-24 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/60 placeholder:font-sans placeholder:text-[13.5px] outline-none rounded-xl"
           />
-          <div className="absolute right-2 flex items-center gap-1">
+          <div className="absolute right-1.5 flex items-center gap-1">
             {running && onStop && (
               <button
                 type="button"
                 onClick={onStop}
-                className="h-9 px-3 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="h-8 px-2.5 text-[11px] uppercase tracking-wider rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"
               >
                 Stop
               </button>
@@ -323,16 +323,16 @@ function Composer({
               disabled={!q.trim() || running}
               aria-label="Ask the record"
               className={cn(
-                'h-9 w-9 inline-flex items-center justify-center rounded-md transition-colors',
+                'h-9 w-9 inline-flex items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150',
                 q.trim() && !running
-                  ? 'bg-accent text-accent-foreground hover:brightness-110'
-                  : 'bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-60',
+                  ? 'bg-accent text-accent-foreground hover:brightness-110 active:scale-[0.97]'
+                  : 'bg-secondary/60 text-muted-foreground/70 disabled:opacity-70',
               )}
             >
               {running ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <ArrowUp className="h-4 w-4" />
+                <ArrowUp className="h-4 w-4" strokeWidth={2} />
               )}
             </button>
           </div>
@@ -792,7 +792,7 @@ function SynthesisPanel({
                 setQ={setQ}
                 onSubmit={() => runQuery(q)}
                 variant="hero"
-                placeholder="Ask the record in plain English…"
+                placeholder="Ask the record…"
                 filters={filters}
                 setFilters={setFilters}
                 filtersOpen={filtersOpen}
@@ -874,14 +874,10 @@ function SynthesisPanel({
 
             {/* User turn */}
             {submitted && (
-              <div className="motion-fade-rise">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5 h-6 px-2 shrink-0 rounded-full border border-border bg-secondary/50 text-foreground/70 inline-flex items-center justify-center text-[10.5px] uppercase tracking-wider">
-                    You
-                  </div>
-                  <div className="font-serif text-[18px] leading-snug text-foreground">
-                    {submitted}
-                  </div>
+              <div className="motion-fade-rise pt-1">
+                <div className="t-eyebrow mb-1.5">You asked</div>
+                <div className="font-serif text-[19px] leading-[1.35] tracking-[-0.005em] text-foreground">
+                  {submitted}
                 </div>
               </div>
             )}
@@ -922,9 +918,13 @@ function SynthesisPanel({
             {showWriting && <WritingIndicator />}
 
             {showAnswer && (
-              <Card className="p-7 border-border shadow-none motion-fade-rise">
-                <div className="flex items-baseline justify-between mb-3">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
+              <div className="motion-fade-rise relative pl-5 pr-1 py-2">
+                <div
+                  className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-accent/60"
+                  aria-hidden
+                />
+                <div className="flex items-baseline justify-between mb-2">
+                  <div className="t-eyebrow">Answer</div>
                   {!running && finalRound != null && rounds[finalRound] && (
                     <AnswerExportMenu
                       question={submitted ?? 'Research memorandum'}
@@ -934,7 +934,7 @@ function SynthesisPanel({
                     />
                   )}
                 </div>
-                <div className="max-w-[68ch]">
+                <div className="max-w-[70ch]">
                   <AnswerStream
                     activeRound={activeRound}
                     isFinal={isFinalActive}
@@ -945,7 +945,7 @@ function SynthesisPanel({
                     onCitationClick={scrollToChunk}
                   />
                 </div>
-              </Card>
+              </div>
             )}
 
             {!running && finalRound != null && followups.length > 0 && (
@@ -963,7 +963,7 @@ function SynthesisPanel({
         </div>
 
         {/* Bottom-pinned composer */}
-        <div className="sticky bottom-0 lg:static border-t border-border/60 bg-background/90 backdrop-blur pt-3 pb-3 z-20">
+        <div className="sticky bottom-0 lg:static border-t border-border/50 bg-background/85 backdrop-blur-md pt-3 pb-3 z-20">
           <Composer
             q={q}
             setQ={setQ}
@@ -1182,7 +1182,7 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
 
 // Round header: numbered circle on the rail + eyebrow + one-line reasoning.
 function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
-  const shown = useSmoothText(reasoning, streaming, 55);
+  const shown = useSmoothText(reasoning, streaming, 140);
   return (
     <div className="flex items-start gap-3 motion-stream-in">
       <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
@@ -1303,7 +1303,7 @@ function InterimNoteRow({ text }: { text: string }) {
 
 function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
-  const shown = useSmoothText(text, streaming, 70);
+  const shown = useSmoothText(text, streaming, 180);
   return (
     <div className="mt-2">
       <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
@@ -1679,7 +1679,7 @@ function AnswerStream({
   }, [activeRound, isFinal, citationsByBlock]);
 
   // Smooth-stream the raw markdown (sentinels pass through untouched).
-  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 550);
+  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 1100);
   const markdown = running && isFinal ? smoothMarkdown : fullMarkdown;
 
   const components: Components = useMemo(() => {
