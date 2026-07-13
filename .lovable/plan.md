@@ -1,36 +1,52 @@
-## Polish: Change-review pill — anchor closer to the edit, smoother visuals
+# Ask the Record — UI polish pass
 
-### Problem
-The Accept / Reject pill has no CSS at all (`.change-pill*` classes exist but no rules), so it renders as unstyled inline text. It also floats at `top: coords.top - 34` regardless of whether the diff sits near the top of the viewport, so on selections near the top it can drift off-screen and it feels disconnected from the highlighted text.
+Frontend-only refinement of `src/routes/_authenticated/search.tsx` (+ small tweaks to `useSmoothText.ts` and `src/styles.css`). No orchestration or edge-function changes.
 
-### Change 1 — Anchor logic (`src/components/editor/change-pill.tsx`)
-- Measure both the start (`range.from`) and end (`range.to`) of the change to compute a natural anchor point.
-- Prefer placing the pill **just above** the change; if there isn't ~40px of room above (near top of scroll area), flip it to sit **just below** the change instead. Track a `placement: 'top' | 'bottom'` in state so the caret arrow points the right way.
-- Nudge the pill horizontally to align with the start of the diff (clamped inside the editor gutter), so it visibly "belongs" to the highlighted span.
-- Add a tiny opening transition (opacity + 4px slide) using an `is-open` class toggled after mount via `requestAnimationFrame`, so the pill fades in instead of snapping.
+## Goals
+- Cleaner, more modern "enterprise-legal" feel — rectangular chat surfaces, hairline borders, more breathing room, less ornament.
+- Smoother, faster-feeling streaming timeline.
+- Tighter composer + message rhythm.
 
-### Change 2 — Visual design (`src/styles.css`, new block near the other editor styles)
-Add a dedicated `.change-pill` design using existing tokens (parchment/navy/oxblood — no hardcoded colors):
+## Changes
 
-- Compact rounded-lg card (`~9px` radius), soft shadow (`0 8px 24px -12px oklch(...)`, plus 1px hairline border in `--border`), `backdrop-filter: blur(8px)` over a translucent `--popover` background.
-- 28px min height, `padding: 4px 4px 4px 8px`, `gap: 4px`, `font-family: var(--font-sans)`, `font-size: 11.5px`, `letter-spacing: 0.01em`.
-- `+N / −N` diff counter: subtle emerald / oxblood dot indicators (tokenised as `--tc-add`, `--tc-rem` so we don't hardcode hex) with `font-variant-numeric: tabular-nums`.
-- Vertical divider = 1px `--border`, 14px tall.
-- Buttons: 24px tall, 6px horizontal padding, `border-radius: 6px`, icon + label. Hover = `bg-secondary/60`, focus-visible = 1px accent ring. Accept variant = accent text on hover with subtle `--tc-add` tint; Reject = subtle `--tc-rem` tint on hover; Retry = neutral muted.
-- Caret arrow (6×6 rotated square) tokenised to the same popover bg + border, positioned bottom-center by default and top-center when placement flips.
-- Streaming state: shows the spinner + "Streaming…" in muted text with a soft pulse; keeps the +/− counter visible so users see the diff grow.
-- Motion: `transition: opacity 140ms ease, transform 160ms cubic-bezier(.2,.7,.2,1)`; opening from `translateY(4px)` (or `-4px` when flipped) to `0`. Respect `prefers-reduced-motion` (disable the transform, keep opacity fade).
+### 1. Chat surface (message column)
+- Replace the current soft/rounded card treatment with **rectangular message blocks**: `rounded-none` (or `rounded-sm` max), single hairline `border-b border-border/40` between turns, generous vertical padding (`py-6`), max content width ~720px, centered.
+- User turn: right-aligned label ("You · timestamp") in tabular-nums small-caps, body in Source Serif at 15/24.
+- Assistant turn: left rail with a 2px navy accent bar next to the answer; markdown body at 15.5/26 for editorial density.
+- Remove nested card shadows; rely on border + spacing.
 
-### Change 3 — Tokens (`src/styles.css`, `:root` and `.dark` blocks)
-Add two semantic tokens next to existing editor tokens:
-```
---tc-add: oklch(...)   /* muted emerald derived from --accent-friendly, not hex */
---tc-rem: oklch(...)   /* muted oxblood derived from --destructive */
-```
-Reused for both the `<ins>` / `<del>` marks and the pill accents so the whole track-changes surface reads as one system.
+### 2. Timeline (RunCard / ThoughtStepRow)
+- Collapse the rail into a **single 1px vertical hairline** with small square (not circular) nodes — 6px, filled with tool accent color, hollow when pending.
+- Replace per-row cards with flat rows: `[node] [tool label · monospaced tabular time] [reasoning line]`, no borders, `gap-3`, `py-1.5`.
+- Active row: thin left accent + `shimmer-text` on the reasoning line only (kill background shimmers on the row itself).
+- Add a subtle **layout transition** (`transition-all duration-200 ease-out`) so newly appended rows fade+slide 4px, not pop.
+- Elapsed time: right-aligned, `tabular-nums text-[11px] text-muted-foreground/70`, updates via existing 250ms ticker.
+- Collapsed "Writing…" state: single centered shimmer line, no card chrome.
 
-### Verification
-- `/draft`: highlight a paragraph mid-document → pill floats just above the diff, aligned to the left of the selection, arrow points down at the change.
-- Highlight the first line at the top of the document → pill flips below, arrow points up, stays fully visible.
-- Streaming → pill shows spinner + live +N/−N counter, no jumpiness.
-- Accept / Reject / Retry hover states feel intentional; keyboard focus rings visible; reduced-motion users get the fade only.
+### 3. Composer
+- Make it a true rectangular bar: `rounded-lg` (down from current), 1px border, `bg-background`, soft `shadow-[0_1px_0_rgba(0,0,0,0.02)]` only.
+- Softer `composer-halo` (drop opacity further, tighter radius match).
+- Submit button: square-ish 36×36, oxblood fill only when input non-empty; otherwise ghost.
+- Placeholder copy simplified to "Ask the record…".
+- Keep bottom-pinned with backdrop blur; reduce blur strength for a crisper edge.
+
+### 4. Faster-feeling streaming
+- `useSmoothText`: raise default chars/tick and reduce interval so tokens reveal ~1.6× faster (tune constants; keep the smoothing curve).
+- Writer markdown smoothing: drop the 550ms cadence closer to ~180–220ms so paragraphs appear promptly.
+- Reasoning lines: bump from 55 → ~90 chars/tick for snappier feel.
+- Keep `prefers-reduced-motion` short-circuit intact.
+
+### 5. Micro-polish
+- Unify all timestamps/counts to `tabular-nums`.
+- Replace remaining emoji-ish or heavier iconography in the trace with 14px lucide icons at `stroke-[1.5]`.
+- Empty launcher: tighten SuggestionDeck card padding and use the same rectangular border language.
+- Ensure light/dark parity for new borders (`border-border/40` tokens only, no hardcoded colors).
+
+## Files touched
+- `src/routes/_authenticated/search.tsx` — Composer, RunCard, ThoughtStepRow, message rendering, writer smoothing constants.
+- `src/lib/useSmoothText.ts` — default speed constants.
+- `src/styles.css` — refine `composer-halo`, add optional `.msg-rail` accent + row transition utility.
+
+## Out of scope
+- No changes to `useSynthesisStream`, edge functions, retrieval, or tool set.
+- No changes to sidebar, other routes, or evidence panel logic (only visual token alignment if trivially adjacent).
