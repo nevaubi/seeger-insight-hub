@@ -539,48 +539,113 @@ function DraftPage() {
       return;
     }
 
-    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
-    const preserveScroll = (fn: () => void) => {
-      const top = scrollEl?.scrollTop ?? 0;
-      fn();
-      if (scrollEl) scrollEl.scrollTop = top;
-    };
+    // OFF path — direct in-place replacement (previous behavior).
+    if (!suggestionsOn) {
+      const applyDirect = (buf: string) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+        const top = scrollEl?.scrollTop ?? 0;
+        const html = markdownToHtml(buf);
+        ed.chain()
+          .insertContentAt(
+            { from, to: currentDirectEnd },
+            html,
+            { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+          )
+          .run();
+        currentDirectEnd = from + (ed.state.doc.content.size - directBase);
+        if (scrollEl) scrollEl.scrollTop = top;
+      };
+      const directBase = editor.state.doc.content.size - (to - from);
+      let currentDirectEnd = to;
+      let acc = '';
+      let raf = 0;
+      const t = toast.loading('Refining selection…');
+      const res = await runAssistDirect({
+        mode: 'transform',
+        instruction,
+        selection: selectionText,
+        document: content,
+        caseId,
+        matter: matterScope,
+        onText: (delta) => {
+          acc += delta;
+          if (!raf) {
+            raf = requestAnimationFrame(() => {
+              raf = 0;
+              applyDirect(acc);
+            });
+          }
+        },
+      });
+      if (raf) cancelAnimationFrame(raf);
+      toast.dismiss(t);
+      applyDirect((res?.text ?? acc).trim() || selectionText);
+      setDirty(true);
+      toast.success('Selection updated');
+      return;
+    }
 
+    // ON path — create a track-change pair.
+    const cid = newChangeId();
+    const insMark = editor.schema.marks['insertion'];
+    const delMark = editor.schema.marks['deletion'];
+    if (!insMark || !delMark) {
+      toast.error('Track-changes marks missing');
+      return;
+    }
+
+    // 1) Wrap the selection with the deletion mark, then collapse the cursor
+    //    to the end of the deletion so the streamed insertion appears right
+    //    after it. Don't scroll into view.
+    const tr = editor.state.tr;
+    tr.addMark(from, to, delMark.create({ changeId: cid }));
+    editor.view.dispatch(tr);
+    editor.commands.setTextSelection(to);
+
+    setActiveChangeId(cid);
+    lastTransformRef.current = { instruction, selectionText, changeId: cid };
+    await streamIntoChange(cid, instruction, selectionText);
+    setDirty(true);
+  }
+
+  async function streamIntoChange(
+    cid: ChangeId,
+    instruction: string,
+    selectionText: string,
+  ) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    setChangeStreaming(true);
     const t = toast.loading('Refining selection…');
     let acc = '';
-    // Track the doc's size *outside* the currently-inserted range, so we can
-    // derive the end of the inserted span from the live doc size.
-    // baseSize = doc.size at start with the selection already removed.
-    const initialDocSize = editor.state.doc.content.size;
-    const baseSize = initialDocSize - (to - from);
-    let insertedLen = to - from;
+    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
 
-    const applyBuffer = (buf: string) => {
+    const flush = (buf: string) => {
       const ed = editorRef.current;
       if (!ed) return;
-      const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
       const top = scrollEl?.scrollTop ?? 0;
-      const html = markdownToHtml(buf);
+      const insR = findMarkRange(ed, 'insertion', cid);
+      const delR = findMarkRange(ed, 'deletion', cid);
+      // Where should the insertion live? Right after the deletion end, or
+      // replace the existing insertion span if one already exists.
+      const anchor = insR ?? { from: delR?.to ?? 0, to: delR?.to ?? 0 };
+      const escaped = buf
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      const html = `<ins data-cid="${cid}">${escaped}</ins>`;
       ed.chain()
-        .insertContentAt(
-          { from, to: from + insertedLen },
-          html,
-          { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-        )
+        .insertContentAt(anchor, html, {
+          updateSelection: false,
+          parseOptions: { preserveWhitespace: 'full' },
+        })
         .run();
-      insertedLen = ed.state.doc.content.size - baseSize;
       if (scrollEl) scrollEl.scrollTop = top;
     };
 
     let raf = 0;
-    const scheduleFlush = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        applyBuffer(acc);
-      });
-    };
-
     const res = await runAssistDirect({
       mode: 'transform',
       instruction,
@@ -590,16 +655,20 @@ function DraftPage() {
       matter: matterScope,
       onText: (delta) => {
         acc += delta;
-        scheduleFlush();
+        if (!raf) {
+          raf = requestAnimationFrame(() => {
+            raf = 0;
+            flush(acc);
+          });
+        }
       },
     });
-
     if (raf) cancelAnimationFrame(raf);
-    toast.dismiss(t);
     const finalText = (res?.text ?? acc).trim() || selectionText;
-    applyBuffer(finalText);
-    setDirty(true);
-    toast.success('Selection updated');
+    flush(finalText);
+    toast.dismiss(t);
+    setChangeStreaming(false);
+    toast.success('Suggestion ready — accept or reject');
   }
 }
 
