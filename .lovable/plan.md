@@ -1,60 +1,93 @@
 
-# Drafting fixes — inline transforms land in place, no auto-scroll, cleaner Claude column
+# Drafting → Claude for Legal in Word (Phase 3)
 
-Frontend only. Three files: `src/components/editor/legal-editor.tsx`, `src/routes/_authenticated/draft.tsx`, `src/components/editor/proposal-card.tsx` (+ tiny `src/styles.css` tweak for the wider column measure).
+Frontend only. Turn the current sidecar-and-editor into a Word-grade legal drafting surface with visible AI collaboration (track-changes, margin comments), keyboard-first authoring (slash menu, ghost completions), and live citation integrity.
 
-## 1. Refined text now lands where the selection is (not at the bottom)
+## 1. Word-style Track Changes for inline transforms
 
-Root cause: `runInlineTransform` calls `content.indexOf(selected)` on the markdown source. The selection comes from the rendered Tiptap document (plain text of a list item, an inline-formatted run, a bullet, etc.). It rarely matches the raw markdown string byte-for-byte — bullets, `**bold**` markers, list numbers, hard line breaks all differ — so `indexOf` returns `-1` and the code falls into the "append to end of document" fallback. That is the "output appears at the bottom" bug.
+Today Improve/Tighten/Bluebook silently replaces the selection. Word users expect to *see* the change and accept or reject it.
 
-Fix by carrying the ProseMirror positions across the boundary instead of doing a fragile string search:
+- Replace the direct `insertContentAt` in `runInlineTransform` with a two-tone diff overlay:
+  - Wrap the original selection in a `<del class="tc-del">…</del>` mark; stream the new text into an `<ins class="tc-ins">…</ins>` mark immediately after it.
+  - `.tc-del`: red strikethrough at 65% opacity. `.tc-ins`: green underline. Both inherit `.legal-prose`.
+  - Anchor a floating "Change" pill above the range with **Accept**, **Reject**, **Regenerate**, and a diff-word count ("+18 / −12").
+  - Accept collapses to `<ins>` text only; Reject restores the original; Regenerate re-streams into the same span.
+- Add a document-level **Suggestions** toggle in `DocumentBar` (On/Off). When Off, transforms apply directly (current behavior). When On (default), every transform lands as a suggestion.
+- New Tiptap marks (`Insertion`, `Deletion`) in `src/components/editor/track-changes.ts`; preserved through Turndown as HTML comments so markdown round-trip does not lose pending suggestions.
 
-- Extend `LegalEditor`'s `onVoiceAction` payload to include the actual editor range: `onVoiceAction({ instruction, selectionText, from, to })`.
-- Also expose the editor instance via a ref (`editorRef`) from `LegalEditor` so `DraftPage` can call Tiptap commands directly. (Ref forwarded through a new `onReady?: (editor: Editor) => void` prop — simpler and avoids `useImperativeHandle` boilerplate.)
-- Rewrite `runInlineTransform` in `draft.tsx` to operate on the editor range, not on markdown:
-  - Capture `{ from, to }` at click time (already stable because the BubbleMenu still has focus).
-  - Stream deltas into a scratch buffer.
-  - On each flush (rAF-throttled), call `editor.chain().insertContentAt({ from, to: from + prevInsertedLen }, markdownToHtml(buffer), { updateSelection: false }).run()` — replaces only the previously-inserted span, never the whole doc.
-  - Do NOT call `.focus()` or pass `scrollIntoView`. `insertContentAt` alone does not scroll when `updateSelection: false`.
-  - After completion, do one final replace with the sanitized final text; sync markdown back via the editor's normal `onUpdate` path (already wired), so the persisted markdown stays authoritative without us doing `setContent` on the whole document.
-- Remove the "fallback: append at end" branch entirely. If the range is somehow invalid (empty selection), just no-op with a toast — never dump refined text at the document bottom.
+## 2. Margin comments pinned to the text
 
-## 2. No more auto-scroll after highlight + Claude improve
+Replace the transient "Ask Claude on ¶" toast pattern with real margin threads, mirroring Word's review pane.
 
-Two things drive the jump today:
-1. `setContent(before + acc + after)` on every delta reflows the entire ProseMirror doc; Tiptap resets viewport in some paths.
-2. Toast + focus stealing.
+- New `CommentMark` Tiptap mark with a `commentId` attribute; renders a dotted underline in the prose.
+- Right-margin rail inside the editor column stacks `CommentThread` cards vertically, aligned by CSS `top` computed from each mark's `getBoundingClientRect`.
+- Each thread supports: quote of the anchored text, one AI reply (streamed via `ai-assist`, new `mode:'comment'`), and inline "Insert reply into document" or "Apply as edit" (routes back through §1).
+- The BubbleMenu **Ask Claude** action now creates a comment thread on the selection instead of dispatching a window event. The sidecar chat stays for freeform drafting.
+- Persistence: comments serialize as `<span data-comment="…">` and survive markdown round-trip via a Turndown rule.
 
-Fixes:
-- The new range-based `insertContentAt` above is local, so ProseMirror does not reflow the whole doc.
-- Wrap the streaming updates in a scroll-preservation guard on `.legal-editor-content`: capture `scrollTop` before each flush, restore it after (belt-and-suspenders for any residual jump).
-- In `LegalEditor`, when a voice action fires, do NOT call `editor.commands.focus()` afterwards. Keep the BubbleMenu closed by clearing the selection to a collapsed cursor at `to` only after the final flush, with `{ scrollIntoView: false }`.
-- Sidecar auto-scroll: `ClaudeSidecar` currently scrolls its own panel to the newest proposal on every append. That is fine for chat, but should NOT run for the inline-transform path (which does not create a proposal card). No change needed there since inline transforms don't touch `proposals`, but confirm by leaving the sidecar untouched in this path.
+## 3. Slash menu ("/") for legal inserts
 
-## 3. Claude column — wider, denser, better aligned
+Notion/Word-style command palette that opens on `/` at line start (or via `⌘/`).
 
-Sidecar column and proposal cards are cramped at `w-[440px]` with `text-[13.5px]` inside a narrow measure.
+- New `SlashCommandExtension` using Tiptap's Suggestion util. Commands:
+  - Structure: H1/H2/H3, numbered section (I., A., 1., a.), block quote, hard rule, page break.
+  - Legal blocks: **Case caption**, **Signature block** (from `matterScope`), **Certificate of service**, **Table of authorities placeholder**, **Footnote**, **Exhibit reference**.
+  - Citations: **Insert citation…** opens the existing cite picker inline (reuses `formatShortCite` / `formatFullCite`).
+  - AI: **Continue writing**, **Summarize above**, **Draft section from outline point** — each streams into a diff span (§1).
+- Keyboard-navigated (↑/↓/Enter/Esc), styled to match the BubbleMenu.
 
-- Widen the sidecar: `lg:w-[520px] xl:w-[560px]` (still comfortably fits at 1280 with rail open; sidecar remains user-collapsible via the top-bar toggle).
-- Proposal card body:
-  - Bump content padding to `px-4 pb-3.5`, header to `px-4 py-3`.
-  - Prose: `text-[14px] leading-[1.7]`, `max-w-none`, `hyphens-auto`, `text-pretty` for balanced wrapping.
-  - Tables inside answers: `w-full text-[12.5px]` with `th` uppercase tracking, zebra rows via `tbody tr:nth-child(even)`.
-  - Citation chips: allow wrapping to a second row cleanly (`gap-y-1.5`), tighten chip radius to `rounded-md`, and align the `[n]` marker + label + pin on a single baseline (`items-baseline` instead of `items-center`) so numbers don't look like they float above the text.
-  - Header row: replace the truncated `line-clamp-2` first line with a two-line summary and drop the `truncate` on the scope label so long scopes wrap instead of getting cut.
-- Add a subtle 1px hairline between stacked cards (`.proposal-card + .proposal-card { border-top: 1px solid var(--border); }` in `styles.css`) rather than the current gap-only rhythm — reads more like a document.
-- Sidecar header: keep 40-ish px height but move the Beta pill + Ground switch onto a single baseline with the title; today the switch pushes to the right edge and the title feels off-center at wider widths.
+## 4. Ghost-text autocomplete (Tab to accept)
 
-## 4. Template cards — better click feedback and hit target
+- `GhostCompletionExtension`: on 800ms idle at end of paragraph, request a 1–2 sentence continuation from `ai-assist` (`mode:'continue'`, cheap model, capped ~60 tokens), context = last ~800 chars.
+- Renders as a widget decoration in muted italic. `Tab` accepts (normal insertion, not tracked). `Esc` or continued typing dismisses.
+- Feature-flagged via `DocumentBar` "…" menu (default **off** on first ship to watch cost).
 
-The cards work, but the interaction feels dead because the whole panel keeps its idle state until the first stream delta arrives (2–4s on cold requests).
+## 5. Live cite-check with margin badges
 
-- On click, immediately swap the picked card into a compact "Preparing <template title>…" state with a spinner and disable the other cards, so the user sees the click registered.
-- Increase card hit area padding (`py-3`) and give the icon a small circular badge (`h-6 w-6 rounded-full bg-accent/8`) for a firmer press target and clearer visual hierarchy.
-- Category pill row: switch from horizontal scroll to a wrapping row (`flex-wrap gap-1.5`) so all six categories are visible without scrolling in the wider column.
-- Keep the same prompts and template list unchanged.
+Wire the existing `cite-check` edge function into the editor.
+
+- Debounced (2s) pass: extract citation-like tokens (`PTO-\d+`, `CMO-\d+`, `Rule \d+`, `\d+ U\.S\.C\.`, etc.), send to `cite-check`.
+- For each hit: subtle underline (blue = verified, amber = unresolved, red = conflicted) via a decoration set, plus a small dot in the right margin at the paragraph's y.
+- Hover shows a card with the resolved order (title, date, page pin, source URL) and a one-click **Replace with Bluebook short form** action routed through §1.
+
+## 6. Document outline (rail's second mode)
+
+- Segmented control at the top of `DocumentRail`: **Documents** | **Outline**.
+- Outline built from the editor's headings tree; click scrolls to that heading with a soft highlight flash.
+- Drag-to-reorder headings via Tiptap `NodeRange` moves; also enables **Draft this section** per outline item (reuses §3 slash command).
+- Collapsed rail gets a second icon strip button for Outline.
+
+## 7. Editorial polish (small, high-signal)
+
+- **Focus mode** (`⌘.`): dim all paragraphs except the one containing the caret to 40% opacity.
+- **Page rulers**: faint hairlines every ~600px of scroll, toggled from "…" menu.
+- **Live counts** in `DocumentBar` right cluster: word count, reading time, pending-suggestion count (§1), all `tabular-nums`.
+- **Drop cap** option per document (stored in localStorage per doc id — no schema changes).
+
+## 8. Sidecar refinements
+
+- When a suggestion or comment exists at the caret, the sidecar shows a contextual header "Reviewing suggestion on ¶ 3" with the same Accept/Reject/Regenerate controls, so keyboard users never leave the sidecar.
+- Proposal cards get an **Insert as tracked change** action alongside Apply — routes through §1.
+
+## Technical details
+
+New files:
+- `src/components/editor/track-changes.ts` — Insertion/Deletion marks + accept/reject helpers
+- `src/components/editor/comment-mark.ts` + `src/components/editor/comment-rail.tsx`
+- `src/components/editor/slash-menu.tsx` + `src/components/editor/slash-commands.ts`
+- `src/components/editor/ghost-completion.ts`
+- `src/components/editor/cite-check-extension.ts`
+- `src/components/editor/outline.tsx`
+
+Extended:
+- `legal-editor.tsx` — register new extensions, expose `applySuggestion`/`rejectSuggestion` via the `onReady` editor ref
+- `draft.tsx` — Suggestions toggle in DocumentBar, comment rail slot, Outline mode in rail, live counts
+- `tiptap-markdown.ts` — preserve tracked-change and comment spans through round-trip
+- `styles.css` — diff colors, comment underline, margin rail, ghost text, focus mode, page rulers
+- `useAiAssist.ts` — add `continue` and `comment` modes
+
+No new dependencies (Tiptap's Suggestion util is already transitively present). No backend/schema changes; `ai-assist` already accepts arbitrary `mode`/`instruction`.
 
 ## Out of scope
 
-- No changes to `useAiAssist`, `ai-assist` edge function, matter/routing wiring, exports, autosave, or the document rail behavior.
-- No change to how proposals are created in the sidecar chat — only visual polish inside `ProposalCard`.
+Multi-user real-time cursors, redlines exchanged between users, DOCX-native track-changes export, voice dictation, retrieval changes.
