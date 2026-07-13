@@ -1,28 +1,18 @@
-# Fix: crash when collapsing the left doc panel on `/draft`
+## Fix: Drafting page freezes when clicking a Claude bubble-menu option
 
-## Root cause
-`DocumentRail` in `src/routes/_authenticated/draft.tsx` violates the Rules of Hooks:
+### Root cause
+`src/components/editor/change-pill.tsx` runs a `useLayoutEffect(() => { ... })` with **no dependency array**. Inside, it calls `setPos({ top, left })` and `setDiff({ added, removed })` with brand-new object literals on every render. As soon as `activeChangeId` is assigned (which happens the moment a Claude voice action starts), React re-renders → the effect fires again → new object refs → another re-render → infinite loop → tab freezes.
 
-```
-line 1551  useMemo(filtered)   ← always runs
-line 1559  useMemo(groups)     ← always runs
-line 1577  if (!open) return … ← EARLY RETURN
-line 1599  useMemo(outline)    ← only runs when open === true
-```
+The freeze is also amplified by the `editor.on('transaction', force)` listener bumping a counter on every ProseMirror transaction while streaming, but the primary bug is the unguarded effect.
 
-When the user clicks the collapse button, `open` flips to `false`, the component renders with one fewer hook than the previous render, and React throws **Minified error #300** ("Rendered fewer hooks than the previous render"), which unmounts the whole draft page.
+### Change (single file)
+`src/components/editor/change-pill.tsx`
 
-The tiptap `[link, underline]` duplicate-extension warning is unrelated noise — StarterKit v3 now bundles those.
+1. Give the position/count effect a real dependency list: `[editor, changeId, tick]`, where `tick` is the existing `force` counter — so it re-measures on transactions and when the active change changes, not on every render.
+2. Only call `setPos` / `setDiff` when the values actually change (shallow compare top/left and added/removed) so identical objects don't trigger another render.
+3. Keep the `null` short-circuit path but guard it the same way (only `setPos(null)` if it isn't already `null`).
 
-## Fix (surgical, ~10 lines)
-
-1. **`src/routes/_authenticated/draft.tsx`** — in `DocumentRail`, hoist the `outline` `useMemo` above the `if (!open) return …` block so all three hooks run on every render regardless of `open`.
-2. **`src/components/editor/legal-editor.tsx`** — drop the standalone `Underline` and `Link` extensions (kept from StarterKit) to silence the tiptap warning; reconfigure Link via `StarterKit.configure({ link: { openOnClick: true, HTMLAttributes: { rel: 'noreferrer', target: '_blank' } } })`. Remove the now-unused imports.
-
-## Non-goals
-No visual changes, no rail behavior changes, nothing else touched.
-
-## Verification
-- Typecheck clean.
-- Open `/draft`, click the collapse chevron → panel collapses to the 32px rail without crashing; expand again works.
-- Console no longer shows the tiptap duplicate-extension warning.
+### Verification
+- Reload `/draft`, highlight a paragraph, click "Persuasive" (or any bubble-menu Claude action).
+- Expected: change pill appears above the pending diff, streams the suggestion, page stays responsive; no browser freeze / no "page unresponsive" dialog.
+- Toggle Suggestions off, repeat with a direct in-place transform — no regression.
