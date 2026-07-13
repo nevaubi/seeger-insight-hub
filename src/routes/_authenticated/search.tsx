@@ -922,9 +922,13 @@ function SynthesisPanel({
             {showWriting && <WritingIndicator />}
 
             {showAnswer && (
-              <Card className="p-7 border-border shadow-none motion-fade-rise">
-                <div className="flex items-baseline justify-between mb-3">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
+              <div className="motion-fade-rise relative pl-5 pr-1 py-2">
+                <div
+                  className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-accent/60"
+                  aria-hidden
+                />
+                <div className="flex items-baseline justify-between mb-2">
+                  <div className="t-eyebrow">Answer</div>
                   {!running && finalRound != null && rounds[finalRound] && (
                     <AnswerExportMenu
                       question={submitted ?? 'Research memorandum'}
@@ -934,7 +938,7 @@ function SynthesisPanel({
                     />
                   )}
                 </div>
-                <div className="max-w-[68ch]">
+                <div className="max-w-[70ch]">
                   <AnswerStream
                     activeRound={activeRound}
                     isFinal={isFinalActive}
@@ -945,7 +949,7 @@ function SynthesisPanel({
                     onCitationClick={scrollToChunk}
                   />
                 </div>
-              </Card>
+              </div>
             )}
 
             {!running && finalRound != null && followups.length > 0 && (
