@@ -1182,7 +1182,7 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
 
 // Round header: numbered circle on the rail + eyebrow + one-line reasoning.
 function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
-  const shown = useSmoothText(reasoning, streaming, 55);
+  const shown = useSmoothText(reasoning, streaming, 140);
   return (
     <div className="flex items-start gap-3 motion-stream-in">
       <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
