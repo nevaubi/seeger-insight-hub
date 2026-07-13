@@ -331,17 +331,23 @@
 .legal-editor-shell {
   position: relative;
   isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
 }
 
 .legal-editor-content {
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   overflow-y: auto;
 }
 
 .legal-editor-content .ProseMirror {
   min-height: 40vh;
-  padding: 2.25rem 3.5rem 6rem 3.5rem;
-  max-width: 78ch;
+  padding: 3rem clamp(1.5rem, 6vw, 4rem) 8rem;
+  max-width: 72ch;
   margin: 0 auto;
   outline: none;
   position: relative;
@@ -358,18 +364,21 @@
 
 .legal-prose {
   font-family: var(--font-serif);
-  font-size: 15.5px;
-  line-height: 1.72;
+  font-size: 16px;
+  line-height: 1.75;
+  letter-spacing: 0.005em;
   color: var(--foreground);
+  font-feature-settings: "onum" 1, "liga" 1, "kern" 1;
+  hanging-punctuation: first last;
 }
 
 .legal-prose h1 {
   font-family: var(--font-serif);
   font-weight: 600;
-  font-size: 1.75rem;
-  line-height: 1.2;
+  font-size: 1.85rem;
+  line-height: 1.18;
   letter-spacing: -0.015em;
-  margin: 1.75rem 0 0.75rem;
+  margin: 2rem 0 0.6rem;
   color: var(--foreground);
 }
 .legal-prose h2 {
@@ -378,7 +387,9 @@
   font-size: 1.375rem;
   line-height: 1.25;
   letter-spacing: -0.01em;
-  margin: 1.5rem 0 0.5rem;
+  margin: 2rem 0 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
   color: var(--foreground);
 }
 .legal-prose h3 {
@@ -386,7 +397,7 @@
   font-weight: 600;
   font-size: 1.1rem;
   line-height: 1.3;
-  margin: 1.25rem 0 0.35rem;
+  margin: 1.4rem 0 0.35rem;
   color: var(--foreground);
 }
 .legal-prose h4 {
@@ -396,35 +407,49 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: color-mix(in oklab, var(--foreground) 75%, transparent);
-  margin: 1.1rem 0 0.35rem;
+  margin: 1.2rem 0 0.35rem;
 }
 
-.legal-prose p { margin: 0.55rem 0; }
+.legal-prose h1 + p,
+.legal-prose h2 + p,
+.legal-prose h3 + p,
+.legal-prose h4 + p {
+  margin-top: 0.35rem;
+  text-indent: 0;
+}
+.legal-prose h1 + p::first-line {
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+}
+
+.legal-prose p { margin: 0.65rem 0; }
 .legal-prose strong { font-weight: 600; color: var(--foreground); }
 .legal-prose em { font-style: italic; }
 
 .legal-prose ol,
 .legal-prose ul {
-  padding-left: 1.5rem;
-  margin: 0.5rem 0;
+  padding-left: 1.75rem;
+  margin: 0.6rem 0;
 }
 .legal-prose ol { list-style: decimal outside; }
 .legal-prose ol ol { list-style: upper-alpha outside; }
-.legal-prose ol ol ol { list-style: decimal outside; }
+.legal-prose ol ol ol { list-style: lower-roman outside; }
 .legal-prose ol ol ol ol { list-style: lower-alpha outside; }
 .legal-prose ul { list-style: disc outside; }
-.legal-prose li { margin: 0.25rem 0; padding-left: 0.15rem; }
+.legal-prose li { margin: 0.3rem 0; padding-left: 0.35rem; }
 .legal-prose li::marker {
   color: color-mix(in oklab, var(--foreground) 60%, transparent);
   font-variant-numeric: tabular-nums;
 }
 
 .legal-prose blockquote {
-  border-left: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
-  padding: 0.15rem 0 0.15rem 1rem;
-  margin: 0.75rem 0;
-  color: color-mix(in oklab, var(--foreground) 85%, transparent);
-  font-style: italic;
+  border-left: 3px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 4%, transparent);
+  padding: 0.4rem 0.9rem 0.4rem 1rem;
+  margin: 0.9rem 0;
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
+  font-style: normal;
+  border-radius: 0 3px 3px 0;
 }
 
 .legal-prose a {
@@ -437,8 +462,21 @@
 
 .legal-prose hr {
   border: 0;
-  border-top: 1px solid var(--border);
-  margin: 1.75rem 0;
+  height: 1.5rem;
+  margin: 2rem 0;
+  position: relative;
+  overflow: visible;
+}
+.legal-prose hr::before {
+  content: "· · ·";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.5em;
+  color: color-mix(in oklab, var(--foreground) 40%, transparent);
+  font-family: var(--font-serif);
 }
 
 .legal-prose code {
@@ -491,8 +529,8 @@
 
 .legal-gutter-mark {
   position: absolute;
-  left: max(1rem, calc((100% - 78ch) / 2 - 2.25rem));
-  top: 2.25rem;
+  left: max(1rem, calc((100% - 72ch) / 2 - 2.25rem));
+  top: 3rem;
   display: none;
   align-items: center;
   gap: 4px;
@@ -524,6 +562,7 @@
   border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
   color: var(--accent);
 }
+
 
 /* Bubble menu */
 .bubble-menu {
