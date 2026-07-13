@@ -931,6 +931,9 @@ function SynthesisPanel({
                     expansions={expansions}
                     writerRound={writerRound}
                     plan={plan}
+                    planReasoning={planReasoning}
+                    planModel={planModel}
+                    planStreaming={planStreaming}
                     webResults={webResults}
                     verify={verify}
                   />
