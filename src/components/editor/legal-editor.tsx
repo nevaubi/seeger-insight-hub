@@ -20,11 +20,19 @@ import { VOICE_ACTIONS } from './voice-actions';
  * - onChange: markdown string (debounced serialisation)
  * - onAskClaude: user asked Claude about a specific selection or paragraph
  */
+export type VoiceActionPayload = {
+  instruction: string;
+  selectionText: string;
+  from: number;
+  to: number;
+};
+
 export type LegalEditorProps = {
   value: string;
   onChange: (markdown: string) => void;
   onAskClaude: (payload: { text: string; kind: 'selection' | 'paragraph' }) => void;
-  onVoiceAction: (instruction: string, selection: string) => void | Promise<void>;
+  onVoiceAction: (payload: VoiceActionPayload) => void | Promise<void>;
+  onReady?: (editor: Editor) => void;
   running?: boolean;
   className?: string;
 };
