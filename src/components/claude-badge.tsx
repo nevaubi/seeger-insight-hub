@@ -8,6 +8,8 @@ import poweredByClaude from '@/assets/powered-by-claude.png.asset.json';
 interface ClaudeBadgeProps {
   variant?: 'chip' | 'inline';
   className?: string;
+  /** @deprecated the wordmark is now baked into the image */
+  label?: string;
 }
 
 export function ClaudeBadge({ variant = 'inline', className }: ClaudeBadgeProps) {
