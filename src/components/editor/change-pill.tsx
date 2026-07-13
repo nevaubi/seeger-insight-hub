@@ -34,10 +34,13 @@ export function ChangePill({
   onReject,
   onRegenerate,
 }: ChangePillProps) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<
+    { top: number; left: number; placement: 'top' | 'bottom' } | null
+  >(null);
   const [diff, setDiff] = useState<{ added: number; removed: number }>({ added: 0, removed: 0 });
-  // Bumped on every editor transaction so the pill re-measures while streaming.
+  const [open, setOpen] = useState(false);
   const [tick, force] = useState(0);
+
   useEffect(() => {
     if (!editor) return;
     const rerender = () => force((n) => n + 1);
@@ -52,6 +55,7 @@ export function ChangePill({
   useLayoutEffect(() => {
     if (!editor || !changeId) {
       setPos((prev) => (prev === null ? prev : null));
+      setOpen(false);
       return;
     }
     const range = findChangeRange(editor, changeId);
@@ -63,15 +67,25 @@ export function ChangePill({
     const scrollEl = view.dom.closest('.legal-editor-content') as HTMLElement | null;
     if (!scrollEl) return;
     try {
-      const coords = view.coordsAtPos(range.from);
+      const startCoords = view.coordsAtPos(range.from);
+      const endCoords = view.coordsAtPos(range.to);
       const scrollRect = scrollEl.getBoundingClientRect();
-      const top = coords.top - scrollRect.top + scrollEl.scrollTop - 34;
-      const left = coords.left - scrollRect.left;
-      setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+      const localTopAbove = startCoords.top - scrollRect.top + scrollEl.scrollTop;
+      const localTopBelow = endCoords.bottom - scrollRect.top + scrollEl.scrollTop;
+      // Flip below if there's less than 44px of room above the diff
+      // (relative to the current scroll position, not the doc).
+      const viewportOffset = startCoords.top - scrollRect.top;
+      const placement: 'top' | 'bottom' = viewportOffset < 44 ? 'bottom' : 'top';
+      const top = placement === 'top' ? localTopAbove - 38 : localTopBelow + 10;
+      const left = startCoords.left - scrollRect.left;
+      setPos((prev) =>
+        prev && prev.top === top && prev.left === left && prev.placement === placement
+          ? prev
+          : { top, left, placement },
+      );
     } catch {
       setPos((prev) => (prev === null ? prev : null));
     }
-    // Update counts
     const insR = findMarkRange(editor, 'insertion', changeId);
     const delR = findMarkRange(editor, 'deletion', changeId);
     const added = insR ? wordCount(markText(editor, insR)) : 0;
@@ -79,20 +93,32 @@ export function ChangePill({
     setDiff((prev) => (prev.added === added && prev.removed === removed ? prev : { added, removed }));
   }, [editor, changeId, tick]);
 
+  // Fade in shortly after mount so the pill doesn't snap into place.
+  useEffect(() => {
+    if (!pos) {
+      setOpen(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setOpen(true));
+    return () => cancelAnimationFrame(id);
+  }, [pos !== null, changeId]);
 
   if (!editor || !changeId || !pos) return null;
 
   return (
     <div
-      className="change-pill"
+      className={`change-pill is-${pos.placement}${open ? ' is-open' : ''}${streaming ? ' is-streaming' : ''}`}
       style={{ top: pos.top, left: Math.max(pos.left, 12) }}
       role="dialog"
       aria-label="Suggested change"
     >
-      <span className="change-pill-diff">
-        <span className="change-pill-add">+{diff.added}</span>
-        <span className="change-pill-sep">/</span>
-        <span className="change-pill-rem">−{diff.removed}</span>
+      <span className="change-pill-diff" aria-hidden="true">
+        <span className="change-pill-add">
+          <span className="change-pill-dot" /> +{diff.added}
+        </span>
+        <span className="change-pill-rem">
+          <span className="change-pill-dot" /> −{diff.removed}
+        </span>
       </span>
       <div className="change-pill-divider" />
       {streaming ? (
@@ -125,7 +151,7 @@ export function ChangePill({
           {onRegenerate && (
             <button
               type="button"
-              className="change-pill-btn"
+              className="change-pill-btn is-retry"
               onMouseDown={(e) => e.preventDefault()}
               onClick={onRegenerate}
               title="Regenerate this change"
@@ -136,6 +162,8 @@ export function ChangePill({
           )}
         </>
       )}
+      <span className="change-pill-arrow" aria-hidden="true" />
     </div>
   );
 }
+
