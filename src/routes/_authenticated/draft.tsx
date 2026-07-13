@@ -1178,8 +1178,8 @@ function ChatBubble({
 
       {!msg.streaming && msg.content && (
         <div className="flex items-center gap-1.5 px-1">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onAppend(msg.content)}>
-            <Copy className="h-3 w-3" /> Copy for document
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1 text-accent hover:text-accent" onClick={() => onAppend(msg.content)} title="Insert this response into the Word canvas at the cursor">
+            <PenLine className="h-3 w-3" /> Insert into document
           </Button>
           <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={copy}>
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} {copied ? 'Copied' : 'Copy'}
