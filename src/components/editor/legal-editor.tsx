@@ -14,6 +14,7 @@ import { Loader2, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { htmlToMarkdown, markdownToHtml } from '@/lib/tiptap-markdown';
 import { VOICE_ACTIONS } from './voice-actions';
+import { Insertion, Deletion } from './track-changes';
 
 /**
  * Signals from the editor to its host page.
@@ -113,6 +114,8 @@ export function LegalEditor({
       Link.configure({ openOnClick: true, HTMLAttributes: { rel: 'noreferrer', target: '_blank' } }),
       Highlight.configure({ multicolor: false }),
       HoverParagraphExtension,
+      Insertion,
+      Deletion,
     ],
     [],
   );
