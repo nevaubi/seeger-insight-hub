@@ -963,7 +963,7 @@ function SynthesisPanel({
         </div>
 
         {/* Bottom-pinned composer */}
-        <div className="sticky bottom-0 lg:static border-t border-border/60 bg-background/90 backdrop-blur pt-3 pb-3 z-20">
+        <div className="sticky bottom-0 lg:static border-t border-border/50 bg-background/85 backdrop-blur-md pt-3 pb-3 z-20">
           <Composer
             q={q}
             setQ={setQ}
