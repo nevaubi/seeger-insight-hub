@@ -1064,7 +1064,13 @@ function TemplateLauncher({
   disabled: boolean;
 }) {
   const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
   const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
+  const handlePick = (t: DraftTemplate) => {
+    if (disabled || pickedKey) return;
+    setPickedKey(t.title);
+    onPick(t);
+  };
   return (
     <div className="py-2 px-1">
       <div className="text-center mb-4 px-2">
@@ -1078,15 +1084,15 @@ function TemplateLauncher({
         </p>
       </div>
 
-      <div className="-mx-1 mb-2.5 overflow-x-auto">
-        <div className="flex gap-1 px-1 min-w-min">
+      <div className="mb-3">
+        <div className="flex flex-wrap gap-1.5">
           {TEMPLATE_CATEGORIES.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => setCat(c)}
               className={cn(
-                'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
+                'rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
                 cat === c
                   ? 'bg-accent/10 border-accent/40 text-accent'
                   : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
@@ -1101,26 +1107,39 @@ function TemplateLauncher({
       <div className="space-y-1.5">
         {items.map((t) => {
           const Icon = t.icon;
+          const isPicked = pickedKey === t.title;
+          const isDim = !!pickedKey && !isPicked;
           return (
             <button
               key={t.title}
               type="button"
-              onClick={() => onPick(t)}
-              disabled={disabled}
-              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50"
+              onClick={() => handlePick(t)}
+              disabled={disabled || !!pickedKey}
+              className={cn(
+                'group w-full flex items-start gap-3 rounded-md border bg-card px-3 py-3 text-left transition',
+                'hover:border-accent/50 hover:bg-accent/5 disabled:cursor-default',
+                isPicked ? 'border-accent/60 bg-accent/5' : 'border-border',
+                isDim && 'opacity-45',
+              )}
             >
-              <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
+              <span className="h-6 w-6 rounded-full bg-accent/10 grid place-items-center shrink-0 mt-0.5">
+                {isPicked ? (
+                  <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
+                ) : (
+                  <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
+                )}
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">
+                  <span className="text-[13px] font-sans font-medium text-foreground/90 leading-snug">
                     {t.title}
                   </span>
                   <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">
                     {t.docType}
                   </span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
-                  {t.summary}
+                <p className="text-[11.5px] text-muted-foreground leading-snug mt-0.5">
+                  {isPicked ? `Preparing ${t.title.toLowerCase()}…` : t.summary}
                 </p>
               </div>
             </button>
