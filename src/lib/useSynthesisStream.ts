@@ -148,6 +148,8 @@ type SseToolError = {
 // round's best hits for surrounding context. Aggregated per round in the UI.
 type SseExpand = { type: 'expand'; round: number; source: string; count: number };
 // v30 additive frames (planner/web/verify) — safe to ignore if absent.
+type SsePlanStart = { type: 'plan_start'; model?: string };
+type SsePlanReasoning = { type: 'plan_reasoning'; text: string };
 type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
 type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
 type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
