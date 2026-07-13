@@ -36,9 +36,8 @@ export function ChangePill({
 }: ChangePillProps) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [diff, setDiff] = useState<{ added: number; removed: number }>({ added: 0, removed: 0 });
-  // Force a re-measure on every editor transaction so streaming updates keep
-  // the pill glued to the top of the growing diff.
-  const [, force] = useState(0);
+  // Bumped on every editor transaction so the pill re-measures while streaming.
+  const [tick, force] = useState(0);
   useEffect(() => {
     if (!editor) return;
     const rerender = () => force((n) => n + 1);
@@ -52,12 +51,12 @@ export function ChangePill({
 
   useLayoutEffect(() => {
     if (!editor || !changeId) {
-      setPos(null);
+      setPos((prev) => (prev === null ? prev : null));
       return;
     }
     const range = findChangeRange(editor, changeId);
     if (!range) {
-      setPos(null);
+      setPos((prev) => (prev === null ? prev : null));
       return;
     }
     const view = editor.view;
@@ -68,18 +67,18 @@ export function ChangePill({
       const scrollRect = scrollEl.getBoundingClientRect();
       const top = coords.top - scrollRect.top + scrollEl.scrollTop - 34;
       const left = coords.left - scrollRect.left;
-      setPos({ top, left });
+      setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
     } catch {
-      setPos(null);
+      setPos((prev) => (prev === null ? prev : null));
     }
     // Update counts
     const insR = findMarkRange(editor, 'insertion', changeId);
     const delR = findMarkRange(editor, 'deletion', changeId);
-    setDiff({
-      added: insR ? wordCount(markText(editor, insR)) : 0,
-      removed: delR ? wordCount(markText(editor, delR)) : 0,
-    });
-  });
+    const added = insR ? wordCount(markText(editor, insR)) : 0;
+    const removed = delR ? wordCount(markText(editor, delR)) : 0;
+    setDiff((prev) => (prev.added === added && prev.removed === removed ? prev : { added, removed }));
+  }, [editor, changeId, tick]);
+
 
   if (!editor || !changeId || !pos) return null;
 
