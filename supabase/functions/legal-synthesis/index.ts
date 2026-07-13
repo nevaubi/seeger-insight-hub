@@ -113,7 +113,7 @@ const RETRY_BASE_DELAY_MS = 2000;
 const RETRY_MAX_DELAY_MS = 15000;
 
 // ---------- v30: multi-agent + web + rerank ----------
-const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-pro-preview";
+const PLANNER_MODEL = Deno.env.get("PLANNER_MODEL") ?? "gemini-3.1-flash-lite";
 const CRITIC_MODEL  = Deno.env.get("CRITIC_MODEL")  ?? "gemini-3.5-flash";
 const VERIFIER_MODEL = Deno.env.get("VERIFIER_MODEL") ?? "gemini-3.5-flash";
 const RERANK_URL   = "https://api.voyageai.com/v1/rerank";
