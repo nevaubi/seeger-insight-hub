@@ -14,6 +14,18 @@ const td = new TurndownService({
   strongDelimiter: '**',
 });
 
+// Track-changes serialization: on autosave/export we materialize the
+// "accepted" version of pending suggestions — deletions vanish, insertions
+// collapse to their plain text. Pending diffs are session-local.
+td.addRule('trackChangesDeletion', {
+  filter: (node) => node.nodeName === 'DEL',
+  replacement: () => '',
+});
+td.addRule('trackChangesInsertion', {
+  filter: (node) => node.nodeName === 'INS',
+  replacement: (content) => content,
+});
+
 // GFM tables → pipe tables
 td.addRule('table', {
   filter: 'table',

@@ -25,6 +25,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
   X,
+  Check,
+  GitPullRequestArrow,
+  Focus,
+  Hash,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
@@ -68,6 +72,17 @@ import type { Editor } from '@tiptap/react';
 import { markdownToHtml } from '@/lib/tiptap-markdown';
 import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
 import { VOICE_ACTIONS } from '@/components/editor/voice-actions';
+import {
+  acceptChange,
+  rejectChange,
+  acceptAll,
+  rejectAll,
+  findMarkRange,
+  listChangeIds,
+  newChangeId,
+  type ChangeId,
+} from '@/components/editor/track-changes';
+import { ChangePill } from '@/components/editor/change-pill';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -120,11 +135,76 @@ function DraftPage() {
     }
   }, [railOpen]);
   const [railQuery, setRailQuery] = useState('');
+  const [railMode, setRailMode] = useState<'docs' | 'outline'>('docs');
   const [sidecarOpen, setSidecarOpen] = useState(true);
   const footnoteCounterRef = useRef(0);
   const lastCiteKeyRef = useRef<string | null>(null);
   const cursorRef = useRef<number>(0);
   const editorRef = useRef<Editor | null>(null);
+
+  // Track-changes state
+  const [suggestionsOn, setSuggestionsOn] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('draft.suggestions') !== '0';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.suggestions', suggestionsOn ? '1' : '0');
+    }
+  }, [suggestionsOn]);
+  const [activeChangeId, setActiveChangeId] = useState<ChangeId | null>(null);
+  const [changeStreaming, setChangeStreaming] = useState(false);
+  const [pendingChangeCount, setPendingChangeCount] = useState(0);
+  const lastTransformRef = useRef<{
+    instruction: string;
+    selectionText: string;
+    changeId: ChangeId;
+  } | null>(null);
+
+  // Editorial polish state
+  const [focusMode, setFocusMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('draft.focus') === '1';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.focus', focusMode ? '1' : '0');
+    }
+  }, [focusMode]);
+  // ⌘. keyboard toggle for focus mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+        e.preventDefault();
+        setFocusMode((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Derived: live word count + reading time
+  const stats = useMemo(() => {
+    const plain = content
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[#*_>`~[\]()\-!]/g, ' ');
+    const words = plain.trim() ? plain.trim().split(/\s+/).length : 0;
+    const readMin = Math.max(1, Math.round(words / 220));
+    return { words, readMin };
+  }, [content]);
+
+  // Track pending suggestion count from the editor
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const update = () => setPendingChangeCount(listChangeIds(ed).length);
+    update();
+    ed.on('transaction', update);
+    return () => {
+      ed.off('transaction', update);
+    };
+  }, [editorRef.current]);
+
 
   const matterScope = useMemo(
     () => ({
@@ -287,6 +367,56 @@ function DraftPage() {
     toast.success('Citation appended');
   };
 
+  const acceptActive = () => {
+    const ed = editorRef.current;
+    if (!ed || !activeChangeId) return;
+    if (acceptChange(ed, activeChangeId)) {
+      setActiveChangeId(null);
+      setDirty(true);
+    }
+  };
+  const rejectActive = () => {
+    const ed = editorRef.current;
+    if (!ed || !activeChangeId) return;
+    if (rejectChange(ed, activeChangeId)) {
+      setActiveChangeId(null);
+      setDirty(true);
+    }
+  };
+  const regenerateActive = async () => {
+    const ed = editorRef.current;
+    const last = lastTransformRef.current;
+    if (!ed || !activeChangeId || !last) return;
+    // Clear existing insertion, then re-stream into the same change slot.
+    const insR = findMarkRange(ed, 'insertion', activeChangeId);
+    if (insR) {
+      const tr = ed.state.tr.delete(insR.from, insR.to);
+      ed.view.dispatch(tr);
+    }
+    await streamIntoChange(activeChangeId, last.instruction, last.selectionText);
+  };
+
+  const handleAcceptAll = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const n = acceptAll(ed);
+    if (n) {
+      setActiveChangeId(null);
+      setDirty(true);
+      toast.success(`Accepted ${n} suggestion${n === 1 ? '' : 's'}`);
+    }
+  };
+  const handleRejectAll = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const n = rejectAll(ed);
+    if (n) {
+      setActiveChangeId(null);
+      setDirty(true);
+      toast.success(`Rejected ${n} suggestion${n === 1 ? '' : 's'}`);
+    }
+  };
+
   return (
     <AppShell>
       {/* Compact top bar — replaces PageHeader, saves ~110px of vertical space */}
@@ -317,12 +447,23 @@ function DraftPage() {
         isLoading={isLoading}
         onPickDoc={loadDoc}
         onNewDoc={newDocument}
+        suggestionsOn={suggestionsOn}
+        onToggleSuggestions={() => setSuggestionsOn((v) => !v)}
+        pendingChangeCount={pendingChangeCount}
+        onAcceptAll={handleAcceptAll}
+        onRejectAll={handleRejectAll}
+        focusMode={focusMode}
+        onToggleFocus={() => setFocusMode((v) => !v)}
+        wordCount={stats.words}
+        readMin={stats.readMin}
       />
 
       <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
         <DocumentRail
           open={railOpen}
           onToggle={() => setRailOpen((v) => !v)}
+          mode={railMode}
+          onModeChange={setRailMode}
           docs={docs}
           activeId={activeId}
           isLoading={isLoading}
@@ -330,10 +471,16 @@ function DraftPage() {
           setQuery={setRailQuery}
           onPick={loadDoc}
           onNew={newDocument}
+          editor={editorRef.current}
         />
 
         {/* Editor */}
-        <div className="lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)]">
+        <div
+          className={cn(
+            'lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)] relative',
+            focusMode && 'legal-focus-mode',
+          )}
+        >
           <LegalEditor
             value={content}
             onChange={onContentChange}
@@ -350,6 +497,14 @@ function DraftPage() {
               await runInlineTransform(payload);
             }}
             className="flex-1 min-h-0"
+          />
+          <ChangePill
+            editor={editorRef.current}
+            changeId={activeChangeId}
+            streaming={changeStreaming}
+            onAccept={acceptActive}
+            onReject={rejectActive}
+            onRegenerate={regenerateActive}
           />
         </div>
 
@@ -384,48 +539,113 @@ function DraftPage() {
       return;
     }
 
-    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
-    const preserveScroll = (fn: () => void) => {
-      const top = scrollEl?.scrollTop ?? 0;
-      fn();
-      if (scrollEl) scrollEl.scrollTop = top;
-    };
+    // OFF path — direct in-place replacement (previous behavior).
+    if (!suggestionsOn) {
+      const applyDirect = (buf: string) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
+        const top = scrollEl?.scrollTop ?? 0;
+        const html = markdownToHtml(buf);
+        ed.chain()
+          .insertContentAt(
+            { from, to: currentDirectEnd },
+            html,
+            { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
+          )
+          .run();
+        currentDirectEnd = from + (ed.state.doc.content.size - directBase);
+        if (scrollEl) scrollEl.scrollTop = top;
+      };
+      const directBase = editor.state.doc.content.size - (to - from);
+      let currentDirectEnd = to;
+      let acc = '';
+      let raf = 0;
+      const t = toast.loading('Refining selection…');
+      const res = await runAssistDirect({
+        mode: 'transform',
+        instruction,
+        selection: selectionText,
+        document: content,
+        caseId,
+        matter: matterScope,
+        onText: (delta) => {
+          acc += delta;
+          if (!raf) {
+            raf = requestAnimationFrame(() => {
+              raf = 0;
+              applyDirect(acc);
+            });
+          }
+        },
+      });
+      if (raf) cancelAnimationFrame(raf);
+      toast.dismiss(t);
+      applyDirect((res?.text ?? acc).trim() || selectionText);
+      setDirty(true);
+      toast.success('Selection updated');
+      return;
+    }
 
+    // ON path — create a track-change pair.
+    const cid = newChangeId();
+    const insMark = editor.schema.marks['insertion'];
+    const delMark = editor.schema.marks['deletion'];
+    if (!insMark || !delMark) {
+      toast.error('Track-changes marks missing');
+      return;
+    }
+
+    // 1) Wrap the selection with the deletion mark, then collapse the cursor
+    //    to the end of the deletion so the streamed insertion appears right
+    //    after it. Don't scroll into view.
+    const tr = editor.state.tr;
+    tr.addMark(from, to, delMark.create({ changeId: cid }));
+    editor.view.dispatch(tr);
+    editor.commands.setTextSelection(to);
+
+    setActiveChangeId(cid);
+    lastTransformRef.current = { instruction, selectionText, changeId: cid };
+    await streamIntoChange(cid, instruction, selectionText);
+    setDirty(true);
+  }
+
+  async function streamIntoChange(
+    cid: ChangeId,
+    instruction: string,
+    selectionText: string,
+  ) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    setChangeStreaming(true);
     const t = toast.loading('Refining selection…');
     let acc = '';
-    // Track the doc's size *outside* the currently-inserted range, so we can
-    // derive the end of the inserted span from the live doc size.
-    // baseSize = doc.size at start with the selection already removed.
-    const initialDocSize = editor.state.doc.content.size;
-    const baseSize = initialDocSize - (to - from);
-    let insertedLen = to - from;
+    const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
 
-    const applyBuffer = (buf: string) => {
+    const flush = (buf: string) => {
       const ed = editorRef.current;
       if (!ed) return;
-      const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
       const top = scrollEl?.scrollTop ?? 0;
-      const html = markdownToHtml(buf);
+      const insR = findMarkRange(ed, 'insertion', cid);
+      const delR = findMarkRange(ed, 'deletion', cid);
+      // Where should the insertion live? Right after the deletion end, or
+      // replace the existing insertion span if one already exists.
+      const anchor = insR ?? { from: delR?.to ?? 0, to: delR?.to ?? 0 };
+      const escaped = buf
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      const html = `<ins data-cid="${cid}">${escaped}</ins>`;
       ed.chain()
-        .insertContentAt(
-          { from, to: from + insertedLen },
-          html,
-          { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-        )
+        .insertContentAt(anchor, html, {
+          updateSelection: false,
+          parseOptions: { preserveWhitespace: 'full' },
+        })
         .run();
-      insertedLen = ed.state.doc.content.size - baseSize;
       if (scrollEl) scrollEl.scrollTop = top;
     };
 
     let raf = 0;
-    const scheduleFlush = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        applyBuffer(acc);
-      });
-    };
-
     const res = await runAssistDirect({
       mode: 'transform',
       instruction,
@@ -435,16 +655,20 @@ function DraftPage() {
       matter: matterScope,
       onText: (delta) => {
         acc += delta;
-        scheduleFlush();
+        if (!raf) {
+          raf = requestAnimationFrame(() => {
+            raf = 0;
+            flush(acc);
+          });
+        }
       },
     });
-
     if (raf) cancelAnimationFrame(raf);
-    toast.dismiss(t);
     const finalText = (res?.text ?? acc).trim() || selectionText;
-    applyBuffer(finalText);
-    setDirty(true);
-    toast.success('Selection updated');
+    flush(finalText);
+    toast.dismiss(t);
+    setChangeStreaming(false);
+    toast.success('Suggestion ready — accept or reject');
   }
 }
 
@@ -490,6 +714,15 @@ function DocumentBar({
   isLoading,
   onPickDoc,
   onNewDoc,
+  suggestionsOn,
+  onToggleSuggestions,
+  pendingChangeCount,
+  onAcceptAll,
+  onRejectAll,
+  focusMode,
+  onToggleFocus,
+  wordCount,
+  readMin,
 }: {
   title: string;
   onTitleChange: (v: string) => void;
@@ -514,6 +747,15 @@ function DocumentBar({
   isLoading: boolean;
   onPickDoc: (d: WorkspaceDocument) => void;
   onNewDoc: () => void;
+  suggestionsOn: boolean;
+  onToggleSuggestions: () => void;
+  pendingChangeCount: number;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+  focusMode: boolean;
+  onToggleFocus: () => void;
+  wordCount: number;
+  readMin: number;
 }) {
   return (
     <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
@@ -552,6 +794,69 @@ function DocumentBar({
       />
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {/* Live counts */}
+        <div className="hidden xl:flex items-center gap-2 text-[10.5px] font-sans tabular-nums text-muted-foreground px-1.5">
+          <span>{wordCount.toLocaleString()} words</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span>{readMin} min read</span>
+        </div>
+
+        {/* Suggestions review cluster */}
+        <div className="hidden md:flex items-center h-8 rounded-md border border-border bg-card/60 pl-1 pr-0.5 gap-0.5">
+          <button
+            type="button"
+            onClick={onToggleSuggestions}
+            className={cn(
+              'inline-flex items-center gap-1.5 h-7 px-2 rounded text-[11px] font-sans transition',
+              suggestionsOn ? 'text-accent' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title={
+              suggestionsOn
+                ? 'Suggestions on — edits land as tracked changes'
+                : 'Suggestions off — edits apply directly'
+            }
+          >
+            <GitPullRequestArrow className="h-3.5 w-3.5" />
+            Suggest
+            {pendingChangeCount > 0 && (
+              <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-accent/15 text-accent text-[9.5px] font-medium tabular-nums">
+                {pendingChangeCount}
+              </span>
+            )}
+          </button>
+          {pendingChangeCount > 0 && (
+            <>
+              <span className="h-4 w-px bg-border" />
+              <button
+                type="button"
+                onClick={onAcceptAll}
+                className="inline-flex items-center gap-1 h-7 px-1.5 rounded text-[11px] font-sans text-emerald-700 hover:bg-emerald-500/10"
+                title="Accept all suggestions"
+              >
+                <Check className="h-3 w-3" /> All
+              </button>
+              <button
+                type="button"
+                onClick={onRejectAll}
+                className="inline-flex items-center gap-1 h-7 px-1.5 rounded text-[11px] font-sans text-rose-700 hover:bg-rose-500/10"
+                title="Reject all suggestions"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </>
+          )}
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleFocus}
+          className={cn('h-8 w-8 p-0 hidden md:inline-flex', focusMode && 'text-accent')}
+          title={focusMode ? 'Focus mode on (⌘.)' : 'Focus mode (⌘.)'}
+        >
+          <Focus className="h-3.5 w-3.5" />
+        </Button>
+
         <SaveStatus
           dirty={dirty}
           saving={saving}
@@ -559,6 +864,7 @@ function DocumentBar({
           hasActive={hasActive}
           onSave={onSave}
         />
+
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1217,6 +1523,8 @@ function useRelativeTime(ts: number | null): string {
 function DocumentRail({
   open,
   onToggle,
+  mode = 'docs',
+  onModeChange,
   docs,
   activeId,
   isLoading,
@@ -1224,9 +1532,12 @@ function DocumentRail({
   setQuery,
   onPick,
   onNew,
+  editor,
 }: {
   open: boolean;
   onToggle: () => void;
+  mode?: 'docs' | 'outline';
+  onModeChange?: (m: 'docs' | 'outline') => void;
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
@@ -1234,7 +1545,9 @@ function DocumentRail({
   setQuery: (s: string) => void;
   onPick: (d: WorkspaceDocument) => void;
   onNew: () => void;
+  editor?: Editor | null;
 }) {
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return docs;
@@ -1283,27 +1596,64 @@ function DocumentRail({
     );
   }
 
+  const outline = useMemo(() => {
+    if (mode !== 'outline' || !editor) return [] as { level: number; text: string; pos: number }[];
+    const items: { level: number; text: string; pos: number }[] = [];
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'heading') {
+        items.push({
+          level: (node.attrs as { level?: number }).level ?? 2,
+          text: node.textContent.trim() || 'Untitled section',
+          pos,
+        });
+      }
+    });
+    return items;
+  }, [mode, editor]);
+
   return (
     <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col h-full min-h-0 border-r border-border bg-card/40 relative">
       <div className="px-3 py-2 border-b border-border flex items-center gap-2 shrink-0">
-        <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
-          {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
-        </span>
+        <div className="inline-flex items-center rounded-sm border border-border overflow-hidden">
+          <button
+            type="button"
+            onClick={() => onModeChange?.('docs')}
+            className={cn(
+              'h-6 px-2 text-[10.5px] uppercase tracking-[0.12em] font-sans',
+              mode === 'docs' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Docs
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange?.('outline')}
+            className={cn(
+              'h-6 px-2 text-[10.5px] uppercase tracking-[0.12em] font-sans border-l border-border',
+              mode === 'outline' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Outline
+          </button>
+        </div>
         <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-[11.5px]" onClick={onNew}>
           <Plus className="h-3.5 w-3.5" /> New
         </Button>
       </div>
-      <div className="px-2.5 py-2 border-b border-border shrink-0">
-        <div className="relative">
-          <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search documents…"
-            className="h-8 pl-7 text-[12.5px]"
-          />
+      {mode === 'docs' && (
+        <div className="px-2.5 py-2 border-b border-border shrink-0">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search documents…"
+              className="h-8 pl-7 text-[12.5px]"
+            />
+          </div>
         </div>
-      </div>
+      )}
+
       <button
         type="button"
         onClick={onToggle}
@@ -1315,57 +1665,96 @@ function DocumentRail({
       </button>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        {groups.length === 0 && !isLoading && (
-          <div className="p-4 text-[12px] text-muted-foreground">
-            {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
-          </div>
-        )}
-        {groups.map((g) => (
-          <div key={g.label} className="py-1.5">
-            <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
-              {g.label}
+        {mode === 'outline' ? (
+          outline.length === 0 ? (
+            <div className="p-4 text-[12px] text-muted-foreground">
+              No headings yet. Use H1 / H2 / H3 to structure the document.
             </div>
-            {g.items.map((d) => {
-              const active = d.id === activeId;
-              return (
+          ) : (
+            <div className="py-1.5">
+              {outline.map((h, i) => (
                 <button
-                  key={d.id}
+                  key={`${h.pos}-${i}`}
                   type="button"
-                  onClick={() => onPick(d)}
-                  className={cn(
-                    'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
-                    active
-                      ? 'bg-secondary/70 border-accent'
-                      : 'border-transparent hover:bg-secondary/40 hover:border-border',
-                  )}
+                  onClick={() => {
+                    if (!editor) return;
+                    editor.chain().focus().setTextSelection(h.pos + 1).scrollIntoView().run();
+                  }}
+                  className="w-full text-left px-3 py-1.5 border-l-2 border-transparent hover:bg-secondary/40 hover:border-border transition"
+                  style={{ paddingLeft: `${12 + (h.level - 1) * 10}px` }}
                 >
                   <span
                     className={cn(
-                      'truncate text-[12.5px]',
-                      active
-                        ? 'font-semibold text-foreground'
-                        : 'font-medium text-foreground/90',
+                      'block truncate',
+                      h.level === 1
+                        ? 'text-[12.5px] font-serif font-semibold text-foreground'
+                        : h.level === 2
+                          ? 'text-[12px] font-serif text-foreground/90'
+                          : 'text-[11.5px] text-muted-foreground',
                     )}
                   >
-                    {d.title || 'Untitled document'}
-                  </span>
-                  <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
-                    {new Date(d.updated_at).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {h.text}
                   </span>
                 </button>
-              );
-            })}
-          </div>
-        ))}
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            {groups.length === 0 && !isLoading && (
+              <div className="p-4 text-[12px] text-muted-foreground">
+                {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
+              </div>
+            )}
+            {groups.map((g) => (
+              <div key={g.label} className="py-1.5">
+                <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
+                  {g.label}
+                </div>
+                {g.items.map((d) => {
+                  const active = d.id === activeId;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => onPick(d)}
+                      className={cn(
+                        'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                        active
+                          ? 'bg-secondary/70 border-accent'
+                          : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'truncate text-[12.5px]',
+                          active
+                            ? 'font-semibold text-foreground'
+                            : 'font-medium text-foreground/90',
+                        )}
+                      >
+                        {d.title || 'Untitled document'}
+                      </span>
+                      <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
+                        {new Date(d.updated_at).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </aside>
   );
 }
+
 
 // ============================================================
 // Bluebook cite formatting (retained)
