@@ -1679,7 +1679,7 @@ function AnswerStream({
   }, [activeRound, isFinal, citationsByBlock]);
 
   // Smooth-stream the raw markdown (sentinels pass through untouched).
-  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 1100);
+  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 1600);
   const markdown = running && isFinal ? smoothMarkdown : fullMarkdown;
 
   const components: Components = useMemo(() => {
