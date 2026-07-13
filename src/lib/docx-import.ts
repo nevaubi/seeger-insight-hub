@@ -203,33 +203,13 @@ type ImportCtx = {
 function headingLevel(p: Element): 1 | 2 | 3 | null {
   const pPr = firstLocal(p, 'pPr');
   const style = wVal(firstLocal(pPr ?? p, 'pStyle'));
-  if (style) {
-    const m = /heading\s*([1-6])/i.exec(style);
-    if (m) {
-      const n = Number(m[1]);
-      return (n <= 1 ? 1 : n === 2 ? 2 : 3) as 1 | 2 | 3;
-    }
-    if (/^Title$/i.test(style)) return 1;
+  if (!style) return null;
+  const m = /heading\s*([1-6])/i.exec(style);
+  if (m) {
+    const n = Number(m[1]);
+    return (n <= 1 ? 1 : n === 2 ? 2 : 3) as 1 | 2 | 3;
   }
-  // heuristic for direct-formatted headings (no pStyle): a short paragraph whose runs
-  // are ALL bold with an enlarged size reads as a heading; level from the size
-  const runs = localChildren(p, 'r');
-  if (!runs.length) return null;
-  let maxHalf = 0;
-  for (const r of runs) {
-    const rPr = firstLocal(r, 'rPr');
-    const t = firstLocal(r, 't');
-    if (!t || !(t.textContent ?? '').trim()) continue;
-    const bold = !!rPr && !!firstLocal(rPr, 'b') && wVal(firstLocal(rPr, 'b')) !== 'false' && wVal(firstLocal(rPr, 'b')) !== '0';
-    if (!bold) return null;
-    const sz = Number(wVal(firstLocal(rPr!, 'sz')) ?? '0');
-    maxHalf = Math.max(maxHalf, sz);
-  }
-  const text = (p.textContent ?? '').trim();
-  if (!text || text.length > 120) return null;
-  if (maxHalf >= 32) return 1;
-  if (maxHalf >= 28) return 2;
-  if (maxHalf >= 26) return 3;
+  if (/^Title$/i.test(style)) return 1;
   return null;
 }
 
@@ -247,7 +227,7 @@ function listInfo(p: Element, ctx: ImportCtx): { kind: 'bullet' | 'ordered'; lev
 function paragraphToMarkdown(p: Element, ctx: ImportCtx, orderedCounters: Map<string, number>): string {
   const text = piecesToMarkdown(readRuns(p, ctx)).replace(/\n/g, '\n');
   const h = headingLevel(p);
-  if (h) return `${'#'.repeat(h)} ${text.trim().replace(/^\*\*(.*)\*\*$/s, '$1')}`;
+  if (h) return `${'#'.repeat(h)} ${text.trim()}`;
   const li = listInfo(p, ctx);
   if (li) {
     const indent = '  '.repeat(li.level);
@@ -259,9 +239,6 @@ function paragraphToMarkdown(p: Element, ctx: ImportCtx, orderedCounters: Map<st
     }
     return `${indent}- ${text.trim()}`;
   }
-  // literal bullet glyphs (documents written with "• " text instead of real numbering)
-  const glyph = /^\s*[•▪◦‣]\s+(.*)$/s.exec(text);
-  if (glyph) return `- ${glyph[1].trim()}`;
   orderedCounters.clear();
   return text;
 }
@@ -269,17 +246,14 @@ function paragraphToMarkdown(p: Element, ctx: ImportCtx, orderedCounters: Map<st
 function tableToMarkdown(tbl: Element, ctx: ImportCtx): string {
   const rows = localChildren(tbl, 'tr');
   if (!rows.length) return '';
-  const cellsOf = (tr: Element, stripBold = false) =>
+  const cellsOf = (tr: Element) =>
     localChildren(tr, 'tc').map((tc) => {
       const parts = localChildren(tc, 'p')
         .map((p) => piecesToMarkdown(readRuns(p, ctx)).trim())
         .filter(Boolean);
-      let cell = parts.join(' ').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-      // header rows are typically bold-formatted; markdown headers are already emphasized
-      if (stripBold) cell = cell.replace(/\*\*([^*]+)\*\*/g, '$1');
-      return cell;
+      return parts.join(' ').replace(/\|/g, '\\|').replace(/\n/g, ' ');
     });
-  const header = cellsOf(rows[0], true);
+  const header = cellsOf(rows[0]);
   const cols = Math.max(1, header.length);
   const lines: string[] = [];
   lines.push(`| ${header.concat(Array(Math.max(0, cols - header.length)).fill('')).join(' | ')} |`);
