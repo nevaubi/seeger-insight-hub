@@ -80,6 +80,8 @@
   --input: hsl(208 26% 88%);
   --ring: hsl(204 68% 27%);
   --gold: hsl(38 42% 45%);
+  --tc-add: hsl(150 42% 38%);
+  --tc-rem: hsl(2 58% 46%);
 
   --chart-1: hsl(204 68% 27%);
   --chart-2: hsl(203 66% 36%);
