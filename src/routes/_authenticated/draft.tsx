@@ -25,6 +25,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
   X,
+  Check,
+  GitPullRequestArrow,
+  Focus,
+  Hash,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
@@ -68,6 +72,17 @@ import type { Editor } from '@tiptap/react';
 import { markdownToHtml } from '@/lib/tiptap-markdown';
 import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
 import { VOICE_ACTIONS } from '@/components/editor/voice-actions';
+import {
+  acceptChange,
+  rejectChange,
+  acceptAll,
+  rejectAll,
+  findMarkRange,
+  listChangeIds,
+  newChangeId,
+  type ChangeId,
+} from '@/components/editor/track-changes';
+import { ChangePill } from '@/components/editor/change-pill';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
