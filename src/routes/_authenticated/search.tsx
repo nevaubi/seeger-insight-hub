@@ -1377,7 +1377,7 @@ function WriterReasoning({ text, streaming }: { text: string; streaming: boolean
 // The single shimmering phrase shown the instant the writer is called, until the first answer token streams.
 function WritingIndicator() {
   return (
-    <div className="motion-fade-rise flex items-center justify-center py-12">
+    <div className="motion-fade-rise flex items-center justify-center py-12" style={{ animationDelay: '260ms', animationDuration: '420ms' }}>
       <span className="inline-flex items-center gap-2.5">
         <PenLine className="h-4 w-4 text-accent" strokeWidth={1.75} />
         <span className="font-serif text-[17px] tracking-[-0.01em] shimmer-text">Writing…</span>
@@ -1385,6 +1385,7 @@ function WritingIndicator() {
     </div>
   );
 }
+
 
 // Post-completion re-expander for the research trace.
 function TraceToggle({ open, onToggle, steps, elapsedMs }: { open: boolean; onToggle: () => void; steps: number; elapsedMs: number }) {
