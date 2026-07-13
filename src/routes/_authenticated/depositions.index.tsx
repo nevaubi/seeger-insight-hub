@@ -331,7 +331,7 @@ function DepositionsPage() {
                   <button
                     key={d.id}
                     onClick={() =>
-                      navigate({ to: '/depositions/$id', params: { id: d.id } })
+                      navigate({ to: '/depositions/$id', params: { id: d.id }, search: { analyze: false } })
                     }
                     className="group w-full text-left"
                   >

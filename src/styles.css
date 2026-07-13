@@ -323,3 +323,34 @@
   }
 }
 
+
+/* ---------- Word mode (SuperDoc) chrome ---------- */
+/* Toolbar: never clip tools — wrap onto additional rows; tint toward Word's blue. */
+.word-editor-shell {
+  --sd-ui-action: hsl(215 60% 40%);
+  --sd-ui-action-hover: hsl(215 60% 34%);
+  --sd-ui-action-text: hsl(0 0% 100%);
+  --sd-ui-active-bg: hsl(215 62% 91%);
+  --sd-ui-hover-bg: hsl(215 55% 93%);
+  --sd-ui-border: hsl(215 40% 87%);
+}
+.word-editor-shell .superdoc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  height: auto !important;
+  min-height: 38px;
+  row-gap: 2px;
+  padding: 3px 8px;
+  background: hsl(215 65% 97%);
+  border-bottom: 1px solid hsl(215 42% 87%);
+}
+.word-editor-shell .superdoc-toolbar .sd-toolbar-item { flex-shrink: 0; }
+/* keep separators tidy when rows wrap */
+.word-editor-shell .superdoc-toolbar .sd-toolbar-item-ctn { flex-shrink: 0; }
+.word-editor-shell .superdoc-toolbar .button-group {
+  flex-wrap: wrap;
+  height: auto;
+  min-width: 0;
+  row-gap: 2px;
+}

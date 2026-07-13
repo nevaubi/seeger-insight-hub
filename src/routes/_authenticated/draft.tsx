@@ -7,8 +7,6 @@ import {
   Save,
   Trash2,
   FileText as FileTextIcon,
-  Eye,
-  Pencil,
   Loader2,
   ChevronDown,
   CornerDownLeft,
@@ -26,7 +24,6 @@ import {
   AlertTriangle,
   Command as CommandIcon,
   Quote,
-  MessageSquareText,
   Sparkles,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -76,39 +73,27 @@ import {
   type AiAssistMeta,
 } from '@/lib/useAiAssist';
 import { useRedline } from '@/lib/useRedline';
+import { locateAnchor, scanPlaceholdersLocal, type PlaceholderHit } from '@/lib/redline';
 import {
-  occurrenceAt,
-  scanPlaceholdersLocal,
-  type PlaceholderHit,
-  type Suggestion,
-} from '@/lib/redline';
-import {
-  downloadDocx,
+  buildDocx,
   printDocument,
   blocksToHtml,
   markdownToBlocks,
-  downloadBlob,
-  exportFilename,
 } from '@/lib/file-export';
-import { importDocx } from '@/lib/docx-import';
 import {
   dedupeCitations,
   expandLabel,
-  formatFootnoteCite,
   formatFullCite,
   formatPagePin,
   formatShortCite,
-  citeSourceKey,
   type CiteChip,
 } from '@/lib/bluebook';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from '@/components/draft/changes-panel';
 import { ChecksPanel } from '@/components/draft/checks-panel';
-import { RedlineView } from '@/components/draft/redline-view';
-import { SelectionMenu, TRANSFORMS } from '@/components/draft/selection-menu';
 import { CommandPalette, type PaletteTemplate } from '@/components/draft/command-palette';
 import { VersionHistory, snapshotVersion } from '@/components/draft/version-history';
-import { TierBadge } from '@/components/draft/tier-badge';
+import { ClaudeBadge } from '@/components/claude-badge';
 import {
   DRAFT_TEMPLATES,
   MARKUP_PRESETS,
@@ -117,8 +102,10 @@ import {
 } from '@/components/draft/templates';
 import type { WordEditorApi } from '@/components/draft/word-editor';
 
-// SuperDoc is a heavy editor runtime — loaded only when a Word-mode document is opened.
+// SuperDoc is a heavy editor runtime — loaded lazily; it is the workspace's only editor.
 const WordEditor = lazy(() => import('@/components/draft/word-editor'));
+
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -149,14 +136,10 @@ type ChatMsg = {
   citations?: AiAssistCitation[];
   chunks?: AiAssistChunk[];
   streaming?: boolean;
-  /** grounding state of the run that produced this assistant message */
   grounded?: boolean;
 };
 
-type ViewMode = 'edit' | 'review' | 'preview';
 type AssistantTab = 'chat' | 'changes' | 'checks';
-
-const DIRECT_APPLY_KEY = 'draft.directApplyTransforms';
 
 function DraftPage() {
   const { currentMatter } = useMatter();
@@ -164,46 +147,30 @@ function DraftPage() {
   const qc = useQueryClient();
   const { data: docs = [], isLoading } = useQuery(docsQuery(caseId));
 
-  // ---- editor state ----
+  // ---- document state (the canvas owns content; we track metadata + extracted text) ----
   const [activeId, setActiveId] = useState<string | null>(null);
   const [title, setTitle] = useState('Untitled document');
-  const [content, setContent] = useState('');
-  const [dirty, setDirty] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('edit');
-  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
-  const [transforming, setTransforming] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [savedTick, setSavedTick] = useState(0);
+  const [titleDirty, setTitleDirty] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const [railQuery, setRailQuery] = useState('');
   const [ground, setGround] = useState(true);
   const [activeTab, setActiveTab] = useState<AssistantTab>('chat');
   const [focusedSuggestionId, setFocusedSuggestionId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [directApply, setDirectApply] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem(DIRECT_APPLY_KEY) === '1';
-  });
-  const [placeholderGate, setPlaceholderGate] = useState<{
-    hits: PlaceholderHit[];
-    action: 'docx' | 'pdf' | 'md';
-  } | null>(null);
+  const [placeholderGate, setPlaceholderGate] = useState<{ hits: PlaceholderHit[] } | null>(null);
   const [importing, setImporting] = useState(false);
-  // Word mode (SuperDoc) — client-only, format === 'docx'
+  const [upgrading, setUpgrading] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [importChoice, setImportChoice] = useState<File | null>(null);
   const [wordApi, setWordApi] = useState<WordEditorApi | null>(null);
   const [wordSave, setWordSave] = useState<{ saving: boolean; lastSavedAt: number | null; dirty: boolean }>({ saving: false, lastSavedAt: null, dirty: false });
   const [wordText, setWordText] = useState('');
   useEffect(() => setMounted(true), []);
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const editorScrollRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const assistantApiRef = useRef<{ send: (text: string) => void } | null>(null);
-  const cursorRef = useRef<number>(0);
-  const footnoteCounterRef = useRef<number>(0);
-  const lastCiteKeyRef = useRef<string | null>(null);
+  // canvas application bookkeeping: suggestion id → native tracked-change/comment ids
+  const appliedRef = useRef(new Map<string, { changeIds: string[]; commentId?: string | null }>());
+  const applyAttemptedRef = useRef(new Set<string>());
 
   const redline = useRedline();
   const pendingSuggestions = useMemo(
@@ -222,24 +189,75 @@ function DraftPage() {
     [currentMatter],
   );
 
-  // Load the first document once available (or when the active one disappears).
+  const activeDoc = useMemo(() => docs.find((d) => d.id === activeId) ?? null, [docs, activeId]);
+
+  // ---- Word-only: legacy markdown documents are upgraded to .docx on open ----
+  const upgradeToDocx = useCallback(
+    async (d: WorkspaceDocument): Promise<WorkspaceDocument | null> => {
+      setUpgrading(true);
+      try {
+        const blob = buildDocx(markdownToBlocks(d.content?.trim() ? d.content : `# ${d.title || 'Untitled document'}\n\n `));
+        const path = `${caseId}/${crypto.randomUUID()}.docx`;
+        const { error: upErr } = await supabase.storage
+          .from(WORKSPACE_DOCX_BUCKET)
+          .upload(path, blob, { contentType: DOCX_MIME });
+        if (upErr) throw new Error(upErr.message);
+        const { data, error } = await supabase
+          .from('workspace_documents')
+          .update({ format: 'docx', storage_path: path })
+          .eq('id', d.id)
+          .select('*')
+          .single();
+        if (error) throw error;
+        qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
+        toast.success(`“${d.title}” upgraded to a Word document`);
+        return data as WorkspaceDocument;
+      } catch (e) {
+        toast.error(`Could not upgrade document: ${(e as Error).message}`);
+        return null;
+      } finally {
+        setUpgrading(false);
+      }
+    },
+    [caseId, qc],
+  );
+
+  const loadDoc = useCallback(
+    async (d: WorkspaceDocument) => {
+      redline.clear();
+      appliedRef.current.clear();
+      applyAttemptedRef.current.clear();
+      setFocusedSuggestionId(null);
+      setWordApi(null);
+      setWordText('');
+      setWordSave({ saving: false, lastSavedAt: null, dirty: false });
+      if (d.format === 'docx' && d.storage_path) {
+        setActiveId(d.id);
+        setTitle(d.title);
+        setTitleDirty(false);
+        return;
+      }
+      const upgraded = await upgradeToDocx(d);
+      if (upgraded) {
+        setActiveId(upgraded.id);
+        setTitle(upgraded.title);
+        setTitleDirty(false);
+      }
+    },
+    [redline, upgradeToDocx],
+  );
+
+  // load first document when available
   useEffect(() => {
     if (activeId && docs.some((d) => d.id === activeId)) return;
-    if (docs.length) loadDoc(docs[0]);
-    else { setActiveId(null); setTitle('Untitled document'); setContent(''); setDirty(false); }
+    if (docs.length) void loadDoc(docs[0]);
+    else {
+      setActiveId(null);
+      setTitle('Untitled document');
+      setTitleDirty(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs]);
-
-  const loadDoc = (d: WorkspaceDocument) => {
-    setActiveId(d.id);
-    setTitle(d.title);
-    setContent(d.content);
-    setDirty(false);
-    setSelection(null);
-    setViewMode('edit');
-    setFocusedSuggestionId(null);
-    redline.clear();
-  };
 
   // ---- mutations ----
   const createDoc = useMutation({
@@ -260,38 +278,9 @@ function DraftPage() {
     },
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
-      loadDoc(d);
+      void loadDoc(d);
     },
     onError: (e: Error) => toast.error(`Could not create document: ${e.message}`),
-  });
-
-  const saveDoc = useMutation({
-    mutationFn: async () => {
-      if (activeId) {
-        const { data, error } = await supabase
-          .from('workspace_documents')
-          .update({ title, content })
-          .eq('id', activeId)
-          .select('*')
-          .single();
-        if (error) throw error;
-        return data as WorkspaceDocument;
-      }
-      const { data, error } = await supabase
-        .from('workspace_documents')
-        .insert({ case_id: caseId, title, content })
-        .select('*')
-        .single();
-      if (error) throw error;
-      return data as WorkspaceDocument;
-    },
-    onSuccess: (d) => {
-      setActiveId(d.id);
-      setDirty(false);
-      setLastSavedAt(Date.now());
-      qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
-    },
-    onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
   });
 
   const deleteDoc = useMutation({
@@ -306,34 +295,48 @@ function DraftPage() {
     onError: (e: Error) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const newDocument = () => {
-    createDoc.mutate({ title: 'Untitled document', content: '' });
-  };
-
-  // ---- .docx import: two lanes ----
-  // memo lane: zero-dependency zip reader → markdown (full AI redlining available today)
-  const importAsMemo = async (file: File) => {
-    setImporting(true);
+  const newDocument = useCallback(async () => {
     try {
-      const result = await importDocx(file, file.name);
-      createDoc.mutate({ title: result.title || file.name.replace(/\.docx$/i, ''), content: result.markdown });
-      toast.success(`Imported “${file.name}” as a memo document`);
-      for (const w of result.warnings) toast.message('Import note', { description: w });
+      const blob = buildDocx(markdownToBlocks(' '));
+      const path = `${caseId}/${crypto.randomUUID()}.docx`;
+      const { error } = await supabase.storage.from(WORKSPACE_DOCX_BUCKET).upload(path, blob, { contentType: DOCX_MIME });
+      if (error) throw new Error(error.message);
+      createDoc.mutate({ title: 'Untitled document', content: '', format: 'docx', storage_path: path });
     } catch (e) {
-      toast.error(`Could not import: ${(e as Error).message}`);
-    } finally {
-      setImporting(false);
+      toast.error(`Could not create document: ${(e as Error).message}`);
     }
-  };
+  }, [caseId, createDoc]);
 
-  // word lane: store the binary untouched; SuperDoc renders it with full fidelity
-  const importAsWord = async (file: File) => {
+  // title autosave (canvas content autosaves inside the Word editor)
+  useEffect(() => {
+    if (!titleDirty || !activeId) return;
+    const t = setTimeout(async () => {
+      const { error } = await supabase.from('workspace_documents').update({ title }).eq('id', activeId);
+      if (!error) {
+        setTitleDirty(false);
+        qc.invalidateQueries({ queryKey: ['workspace-docs', caseId] });
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [title, titleDirty, activeId, caseId, qc]);
+
+  // keep last-extracted text mirrored to the row (search/versions) — throttled
+  const lastMirrored = useRef('');
+  useEffect(() => {
+    if (!activeId || !wordText || wordText === lastMirrored.current) return;
+    const t = setTimeout(() => {
+      lastMirrored.current = wordText;
+      void supabase.from('workspace_documents').update({ content: wordText }).eq('id', activeId);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [wordText, activeId]);
+
+  // ---- .docx import (always Word mode) ----
+  const importDocxFile = async (file: File) => {
     setImporting(true);
     try {
       const path = `${caseId}/${crypto.randomUUID()}.docx`;
-      const { error } = await supabase.storage.from(WORKSPACE_DOCX_BUCKET).upload(path, file, {
-        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
+      const { error } = await supabase.storage.from(WORKSPACE_DOCX_BUCKET).upload(path, file, { contentType: DOCX_MIME });
       if (error) throw new Error(error.message);
       createDoc.mutate({
         title: file.name.replace(/\.docx$/i, ''),
@@ -341,320 +344,130 @@ function DraftPage() {
         format: 'docx',
         storage_path: path,
       });
-      toast.success(`Opened “${file.name}” in Word mode`);
+      toast.success(`Opened “${file.name}”`);
     } catch (e) {
-      toast.error(`Could not open in Word mode: ${(e as Error).message}`);
+      toast.error(`Could not open: ${(e as Error).message}`);
     } finally {
       setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = '';
     }
   };
 
-  // ---- editor change tracking ----
-  const onContentChange = (v: string) => { setContent(v); setDirty(true); };
-
-  // ---- autosave (debounced) ----
+  // ---- verified redline → native tracked changes in the canvas ----
   useEffect(() => {
-    if (!dirty || !activeId || saveDoc.isPending) return;
-    const t = setTimeout(() => { saveDoc.mutate(); }, 1500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, activeId, title, content]);
+    if (!wordApi) return;
+    for (const s of redline.suggestions) {
+      if (s.status !== 'pending' || applyAttemptedRef.current.has(s.id)) continue;
+      applyAttemptedRef.current.add(s.id);
+      const result = wordApi.applyRedlineEdit(s);
+      if (result.ok) {
+        appliedRef.current.set(s.id, { changeIds: result.changeIds, commentId: result.commentId ?? null });
+      } else {
+        redline.failLocal(s.id, `canvas: ${result.reason ?? 'could not anchor'}`);
+      }
+    }
+  }, [redline.suggestions, wordApi, redline]);
 
-  // re-render every 15s so "Saved Xs ago" updates
-  useEffect(() => {
-    const id = setInterval(() => setSavedTick((n) => n + 1), 15000);
-    return () => clearInterval(id);
-  }, []);
-  void savedTick;
-
-  // auto-grow the textarea to its content (page scrolls, textarea doesn't)
-  useEffect(() => {
-    if (viewMode !== 'edit') return;
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(el.scrollHeight, 480)}px`;
-  }, [content, viewMode]);
-
-  // suggestions arriving → surface the review surfaces
+  // suggestions arriving → surface the review rail
   const hadSuggestions = useRef(0);
   useEffect(() => {
-    if (redline.suggestions.length > 0 && hadSuggestions.current === 0) {
-      setViewMode('review');
-      setActiveTab('changes');
-    }
+    if (redline.suggestions.length > 0 && hadSuggestions.current === 0) setActiveTab('changes');
     hadSuggestions.current = redline.suggestions.length;
   }, [redline.suggestions.length]);
 
-  const syncSelection = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-    cursorRef.current = el.selectionStart;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    if (end > start) setSelection({ start, end });
-    else setSelection(null);
-  };
-
-  // ---- selection transforms ----
-  const { run: runAssist } = useAiAssist();
-
-  const setDirectApplyPersist = (v: boolean) => {
-    setDirectApply(v);
-    try { window.localStorage.setItem(DIRECT_APPLY_KEY, v ? '1' : '0'); } catch { /* private mode */ }
-  };
-
-  const runTransform = async (instruction: string) => {
-    const el = textareaRef.current;
-    if (!el || !selection) return;
-    const { start, end } = selection;
-    const selected = content.slice(start, end);
-    if (!selected.trim()) return;
-    setTransforming(true);
-
-    if (directApply) {
-      // legacy behavior: stream the replacement straight into the document
-      const before = content.slice(0, start);
-      const after = content.slice(end);
-      let acc = '';
-      const result = await runAssist({
-        mode: 'transform',
+  const runMarkup = useCallback(
+    async (instruction: string, selectionText?: string | null) => {
+      const docText = wordApi?.extractText() || wordText;
+      if (!docText.trim()) {
+        toast.error('Nothing to review yet — the document is empty.');
+        return;
+      }
+      if (activeId) {
+        snapshotVersion({ documentId: activeId, caseId, content: docText, label: 'Before markup pass' }).catch(() => {});
+        qc.invalidateQueries({ queryKey: ['document-versions', activeId] });
+      }
+      let selection: { start: number; end: number } | null = null;
+      if (selectionText?.trim()) {
+        const loc = locateAnchor(docText, selectionText.trim().slice(0, 400));
+        if (loc) selection = loc;
+      }
+      setActiveTab('changes');
+      const ok = await redline.run({
         instruction,
-        selection: selected,
-        document: content,
+        document: docText,
+        selection,
+        ground,
         caseId,
         matter: matterScope,
-        onText: (delta) => {
-          acc += delta;
-          setContent(before + acc + after);
-        },
+        documentId: activeId,
       });
-      setTransforming(false);
-      setDirty(true);
-      const finalText = (result?.text ?? acc).trim() || selected;
-      setContent(before + finalText + after);
-      const newEnd = before.length + finalText.length;
-      requestAnimationFrame(() => {
-        el.focus();
-        el.setSelectionRange(before.length, newEnd);
-        setSelection({ start: before.length, end: newEnd });
-      });
-      if (result) toast.success('Selection updated');
-      return;
-    }
+      if (!ok && !redline.error) {
+        toast.message('No suggestions', { description: 'The reviewer found nothing to change for that instruction.' });
+      }
+    },
+    [wordApi, wordText, activeId, caseId, ground, matterScope, redline, qc],
+  );
 
-    // suggestion flow: the rewrite arrives as a reviewable tracked change
-    const result = await runAssist({
-      mode: 'transform',
-      instruction,
-      selection: selected,
-      document: content,
-      caseId,
-      matter: matterScope,
-    });
-    setTransforming(false);
-    const finalText = result?.text?.trim();
-    if (!finalText) {
-      toast.error('The transform produced no text — try again.');
-      return;
-    }
-    if (finalText === selected.trim()) {
-      toast.message('No change suggested', { description: 'The passage already reads as requested.' });
-      return;
-    }
-    const s: Suggestion = {
-      id: `t${Date.now().toString(36)}`,
-      dbId: crypto.randomUUID(),
-      op: 'replace',
-      anchor: selected,
-      occurrence: occurrenceAt(content, selected, start),
-      start,
-      end,
-      text: finalText,
-      rationale: TRANSFORMS.find((t) => t.instruction === instruction)?.label
-        ? `${TRANSFORMS.find((t) => t.instruction === instruction)!.label} (selection transform)`
-        : instruction.slice(0, 120),
-      cite: null,
-      confidence: 'high',
-      match_mode: 'exact',
-      status: 'pending',
-      source: 'transform',
-    };
-    redline.addLocal(s);
-    setFocusedSuggestionId(s.id);
-    setViewMode('review');
-    setActiveTab('changes');
-    toast.success('Suggestion ready for review');
-  };
-
-  // ---- markup passes (verified redline) ----
-  const runMarkup = async (instruction: string, scope: { start: number; end: number } | null) => {
-    if (!content.trim()) {
-      toast.error('Nothing to review yet — the document is empty.');
-      return;
-    }
-    if (activeId) {
-      // snapshot before the pass so "what did the machine change" is always answerable
-      snapshotVersion({ documentId: activeId, caseId, content, label: 'Before markup pass' }).catch(() => {});
-      qc.invalidateQueries({ queryKey: ['document-versions', activeId] });
-    }
-    setActiveTab('changes');
-    const ok = await redline.run({
-      instruction,
-      document: content,
-      selection: scope,
-      ground,
-      caseId,
-      matter: matterScope,
-      documentId: activeId,
-    });
-    if (!ok && !redline.error) toast.message('No suggestions', { description: 'The reviewer found nothing to change for that instruction.' });
-  };
-
-  // ---- suggestion resolution ----
+  // ---- suggestion resolution → native accept/reject ----
   const acceptSuggestion = (id: string) => {
-    const next = redline.resolve(id, 'accepted', content);
-    if (next === null) {
-      toast.error('Could not locate that anchor anymore — the text may have changed. Dismiss the suggestion or undo your edit.');
-      return;
-    }
-    if (next !== content) {
-      setContent(next);
-      setDirty(true);
-    }
+    const m = appliedRef.current.get(id);
+    if (m && m.changeIds.length > 0) wordApi?.decideTracked(m.changeIds, 'accept');
+    // comments: accepting keeps the margin note in the document
+    redline.resolveExternal(id, 'accepted');
     setFocusedSuggestionId(null);
   };
 
   const rejectSuggestion = (id: string) => {
-    redline.resolve(id, 'rejected', content);
+    const m = appliedRef.current.get(id);
+    if (m?.commentId) wordApi?.removeComment(m.commentId);
+    if (m && m.changeIds.length > 0) wordApi?.decideTracked(m.changeIds, 'reject');
+    redline.resolveExternal(id, 'rejected');
     setFocusedSuggestionId(null);
   };
 
   const acceptAllSuggestions = () => {
-    const { next, applied, skipped } = redline.acceptAll(content);
-    if (applied > 0) {
-      setContent(next);
-      setDirty(true);
-      toast.success(`Accepted ${applied} suggestion${applied === 1 ? '' : 's'}${skipped ? ` · ${skipped} could not be located` : ''}`);
-    } else if (skipped > 0) {
-      toast.error('None of the pending suggestions could be located — the document has changed too much.');
+    let n = 0;
+    for (const s of pendingSuggestions) {
+      acceptSuggestion(s.id);
+      n++;
     }
+    if (n) toast.success(`Accepted ${n} suggestion${n === 1 ? '' : 's'}`);
   };
 
   const rejectAllSuggestions = () => {
-    redline.rejectAll();
+    for (const s of pendingSuggestions) rejectSuggestion(s.id);
     toast.message('Suggestions dismissed');
   };
 
   // ---- export (placeholder gate first) ----
-  const doExport = (action: 'docx' | 'pdf' | 'md') => {
-    if (action === 'docx') {
-      downloadDocx(`${currentMatter.short_name}-${title}`.slice(0, 80), markdownToBlocks(content || `# ${title}`));
-      toast.success('Exported to Word (.docx)');
-    } else if (action === 'pdf') {
-      const ok = printDocument({
-        title: title || 'Document',
-        metaLine: `<span class="matter">${currentMatter.short_name}</span> · MDL ${currentMatter.mdl_number}`,
-        bodyHtml: blocksToHtml(markdownToBlocks(content || `# ${title}`)),
-      });
-      if (!ok) toast.error('Allow pop-ups to print / save as PDF');
-    } else {
-      downloadBlob(exportFilename(`${currentMatter.short_name}-${title}`, 'md'), new Blob([content], { type: 'text/markdown;charset=utf-8' }));
-      toast.success('Exported Markdown (.md)');
-    }
+  const exportDocx = () => {
+    const text = wordApi?.extractText() ?? wordText;
+    const hits = scanPlaceholdersLocal(text);
+    if (hits.length > 0) setPlaceholderGate({ hits });
+    else void wordApi?.exportDocx(`${currentMatter.short_name}-${title}`.slice(0, 80));
   };
 
-  const guardedExport = (action: 'docx' | 'pdf' | 'md') => {
-    const hits = scanPlaceholdersLocal(content);
-    if (hits.length > 0) setPlaceholderGate({ hits, action });
-    else doExport(action);
-  };
-
-  // ---- insertion from chat ----
-  const appendToDoc = (text: string) => {
-    if (isWordDoc) {
-      navigator.clipboard?.writeText(text).then(() => {
-        toast.message('Copied to clipboard', { description: 'Paste into the Word canvas where you need it.' });
-      });
-      return;
-    }
-    const next = content ? `${content}\n\n${text}` : text;
-    setContent(next);
-    setDirty(true);
-    toast.success('Appended to document');
-  };
-
-  // Insert a citation in one of three Bluebook forms; auto-substitute *Id.* on repeats.
-  const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
-    const key = citeSourceKey(c);
-    if (variant === 'footnote') {
-      const n = ++footnoteCounterRef.current;
-      const { marker, definition } = formatFootnoteCite(c, n);
-      const pos = Math.min(cursorRef.current, content.length);
-      const withMarker = content.slice(0, pos) + marker + content.slice(pos);
-      const withDef = withMarker.trimEnd() + `\n\n${definition}\n`;
-      setContent(withDef);
-      setDirty(true);
-      lastCiteKeyRef.current = key;
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (el) {
-          const newPos = pos + marker.length;
-          el.focus();
-          el.setSelectionRange(newPos, newPos);
-          cursorRef.current = newPos;
-        }
-      });
-      toast.success(`Inserted footnote [^${n}]`);
-      return;
-    }
-    let text: string;
-    if (lastCiteKeyRef.current === key) {
-      const pos = Math.min(cursorRef.current, content.length);
-      const tail = content.slice(Math.max(0, pos - 4), pos);
-      if (/[).”"]\s*$/.test(tail) || /\)\s*\.?\s*$/.test(tail)) {
-        text = c.page ? ` (*Id.* at ${formatPagePin(c.page)})` : ' (*Id.*)';
-      } else {
-        text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-      }
-    } else {
-      text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-    }
-    lastCiteKeyRef.current = key;
-    const pos = Math.min(cursorRef.current, content.length);
-    const next = content.slice(0, pos) + text + content.slice(pos);
-    setContent(next);
-    setDirty(true);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(pos + text.length, pos + text.length);
-        cursorRef.current = pos + text.length;
-      }
+  const exportPdf = () => {
+    const text = wordApi?.extractText() ?? wordText;
+    const ok = printDocument({
+      title: title || 'Document',
+      metaLine: `<span class="matter">${currentMatter.short_name}</span> · MDL ${currentMatter.mdl_number}`,
+      bodyHtml: blocksToHtml(markdownToBlocks(text || `# ${title}`)),
     });
-    toast.success('Citation inserted');
+    if (!ok) toast.error('Allow pop-ups to print / save as PDF');
   };
 
-  // jump from a check finding into the editor at a character range
-  const jumpToRange = (start: number, end: number) => {
-    if (isWordDoc) {
-      toast.message('Finding located in extracted text', {
-        description: 'Jump-to-range lands with Word-mode markup; use the canvas search for now.',
-      });
-      return;
-    }
-    setViewMode('edit');
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(start, Math.min(end, el.value.length));
-      cursorRef.current = start;
-      setSelection({ start, end: Math.min(end, el.value.length) });
-      // nudge the browser to scroll the caret into view
-      el.blur();
-      el.focus();
+  // ---- chat helpers ----
+  const appendToDoc = (text: string) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      toast.message('Copied to clipboard', { description: 'Paste into the document where you need it.' });
+    });
+  };
+
+  const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
+    const text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
+    navigator.clipboard?.writeText(text.trim()).then(() => {
+      toast.success('Citation copied — paste at the cursor');
     });
   };
 
@@ -666,22 +479,21 @@ function DraftPage() {
     [],
   );
 
-  const activeDoc = useMemo(() => docs.find((d) => d.id === activeId) ?? null, [docs, activeId]);
-  const isWordDoc = !!activeDoc && activeDoc.format === 'docx' && !!activeDoc.storage_path;
-  const assistantDocText = isWordDoc ? wordText : content;
-
   const wordCount = useMemo(() => {
-    const t = (isWordDoc ? wordText : content).trim();
+    const t = wordText.trim();
     return t ? t.split(/\s+/).length : 0;
-  }, [content, wordText, isWordDoc]);
+  }, [wordText]);
+
+  const canvasReady = !!activeDoc?.storage_path && activeDoc.format === 'docx';
 
   return (
     <AppShell>
       <PageHeader
         title="Drafting Workspace"
-        description="Draft with an assistant grounded in the matter's record. AI edits arrive as tracked changes — every suggestion anchored to text verified to exist in the document."
+        description="A Word-grade canvas with Claude inside — select any passage to ask the record, and AI edits arrive as tracked changes, every one anchored to text verified to exist."
       >
         <div className="flex items-center gap-2">
+          <ClaudeBadge variant="chip" className="hidden xl:inline-flex" />
           <Button
             variant="ghost"
             size="sm"
@@ -692,7 +504,7 @@ function DraftPage() {
             {railOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
           </Button>
           <div className="lg:hidden">
-            <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
+            <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => void loadDoc(d)} onNew={() => void newDocument()} />
           </div>
           <Button
             variant="ghost"
@@ -705,49 +517,33 @@ function DraftPage() {
             <span className="text-[11px] font-sans">⌘K</span>
           </Button>
           <SaveStatus
-            dirty={isWordDoc ? wordSave.dirty : dirty}
-            saving={isWordDoc ? wordSave.saving : saveDoc.isPending}
-            lastSavedAt={isWordDoc ? wordSave.lastSavedAt : lastSavedAt}
+            dirty={wordSave.dirty || titleDirty}
+            saving={wordSave.saving}
+            lastSavedAt={wordSave.lastSavedAt}
             hasActive={!!activeId}
-            onSave={() => { if (!isWordDoc) saveDoc.mutate(); }}
           />
-          {!isWordDoc && (
-            <VersionHistory
-              documentId={activeId}
-              caseId={caseId}
-              currentContent={content}
-              onRestore={(c) => {
-                setContent(c);
-                setDirty(true);
-                setViewMode('edit');
-              }}
-            />
-          )}
-
-          {isWordDoc ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              disabled={!wordApi}
-              onClick={() => wordApi?.exportDocx(`${currentMatter.short_name}-${title}`.slice(0, 80))}
-            >
-              <ArrowDownToLine className="h-4 w-4" /> Export .docx
-            </Button>
-          ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
-                  <ArrowDownToLine className="h-4 w-4" /> Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onClick={() => guardedExport('docx')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word document (.docx)</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => guardedExport('pdf')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / Save as PDF</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => guardedExport('md')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Markdown (.md)</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <VersionHistory
+            documentId={activeId}
+            caseId={caseId}
+            currentContent={wordText}
+            allowRestore={false}
+            onRestore={() => {}}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2" disabled={!canvasReady}>
+                <ArrowDownToLine className="h-4 w-4" /> Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={exportDocx} className="gap-2 cursor-pointer">
+                <FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word document (.docx)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportPdf} className="gap-2 cursor-pointer">
+                <FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / Save as PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {activeId && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -777,54 +573,68 @@ function DraftPage() {
             isLoading={isLoading}
             query={railQuery}
             setQuery={setRailQuery}
-            onPick={loadDoc}
-            onNew={newDocument}
+            onPick={(d) => void loadDoc(d)}
+            onNew={() => void newDocument()}
             onImport={() => importInputRef.current?.click()}
             importing={importing}
           />
         )}
 
-        {/* EDITOR */}
+        {/* THE WORD CANVAS */}
         <div className="lg:flex-[3] min-w-0 flex flex-col mb-5 lg:mb-0">
-          <Card className="p-0 flex flex-col flex-1 overflow-hidden bg-secondary/25">
-            {/* editor toolbar */}
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card">
+          <Card className="p-0 flex flex-col flex-1 overflow-hidden">
+            {/* document title strip — Word-blue */}
+            <div className="flex items-center gap-3 border-b border-[hsl(215_45%_86%)] bg-[hsl(215_62%_40%)] px-4 py-2">
+              <FileTextIcon className="h-4 w-4 shrink-0 text-white/85" />
               <Input
                 value={title}
-                onChange={(e) => { setTitle(e.target.value); setDirty(true); }}
+                onChange={(e) => { setTitle(e.target.value); setTitleDirty(true); }}
                 placeholder="Document title…"
-                className="h-8 border-0 shadow-none px-0 font-serif text-base font-semibold focus-visible:ring-0 bg-transparent"
+                className="h-7 border-0 shadow-none px-0 font-sans text-[13.5px] font-medium focus-visible:ring-0 bg-transparent text-white placeholder:text-white/50"
               />
-              <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                <span className="text-[11px] text-muted-foreground tabular-nums font-sans mr-1">{wordCount} words</span>
-                {!isWordDoc && (
-                  <>
-                    <Button variant={viewMode === 'edit' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('edit')}>
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </Button>
-                    <Button
-                      variant={viewMode === 'review' ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="h-7 gap-1.5 text-xs relative"
-                      onClick={() => setViewMode('review')}
-                    >
-                      <FileDiff className="h-3.5 w-3.5" /> Review
-                      {pendingSuggestions.length > 0 && (
-                        <span className="ml-0.5 rounded-full bg-accent text-accent-foreground px-1.5 py-px text-[10px] font-sans tabular-nums leading-[1.4]">
-                          {pendingSuggestions.length}
-                        </span>
-                      )}
-                    </Button>
-                    <Button variant={viewMode === 'preview' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('preview')}>
-                      <Eye className="h-3.5 w-3.5" /> Preview
-                    </Button>
-                  </>
+              <div className="ml-auto flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-white/75 tabular-nums font-sans">{wordCount.toLocaleString()} words</span>
+                {pendingSuggestions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('changes')}
+                    className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10.5px] font-sans text-white hover:bg-white/25 transition"
+                  >
+                    <FileDiff className="h-3 w-3" /> {pendingSuggestions.length} suggested change{pendingSuggestions.length === 1 ? '' : 's'}
+                  </button>
                 )}
+                <ClaudeBadge variant="chip" className="border-white/25 bg-white/10 text-white/90" />
               </div>
             </div>
 
-            {/* Word mode: the SuperDoc canvas (own pagination + toolbar) */}
-            {isWordDoc && mounted && activeDoc?.storage_path && (
+            {(upgrading || (!canvasReady && docs.length > 0 && isLoading === false && activeId)) && (
+              <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Preparing Word document…
+              </div>
+            )}
+
+            {!activeId && !upgrading && (
+              <div className="flex flex-1 items-center justify-center p-10">
+                <div className="text-center max-w-sm">
+                  <FileUp className="h-6 w-6 mx-auto mb-3 text-accent/60" strokeWidth={1.5} />
+                  <p className="font-serif text-[16px] text-foreground/85 mb-1.5">Open the record, or start clean.</p>
+                  <p className="text-[12px] leading-relaxed text-muted-foreground mb-4">
+                    Open a .docx exactly as filed — pagination, styles, tables intact — or start a new
+                    document from a litigation skill. Claude works inside the page.
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <Button size="sm" className="gap-1.5" onClick={() => importInputRef.current?.click()}>
+                      <FileUp className="h-3.5 w-3.5" /> Open .docx
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void newDocument()}>
+                      <Plus className="h-3.5 w-3.5" /> New document
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {canvasReady && mounted && (
               <Suspense
                 fallback={
                   <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
@@ -833,70 +643,16 @@ function DraftPage() {
                 }
               >
                 <WordEditor
-                  key={activeDoc.storage_path}
-                  storagePath={activeDoc.storage_path}
+                  key={activeDoc!.storage_path!}
+                  storagePath={activeDoc!.storage_path!}
+                  caseId={caseId}
+                  matter={matterScope}
                   onSaveStateChange={setWordSave}
                   onTextChange={setWordText}
                   onApi={setWordApi}
+                  onSuggestEdits={(selText, instruction) => void runMarkup(instruction, selText)}
                 />
               </Suspense>
-            )}
-
-            {/* memo mode: the page */}
-            {!isWordDoc && (
-            <div ref={editorScrollRef} className="relative flex-1 overflow-y-auto">
-              <div className="mx-auto my-5 w-[min(100%-2rem,54rem)] min-h-[70%] rounded-sm border border-border/70 bg-card px-8 py-8 lg:px-14 lg:py-12 shadow-[0_1px_2px_rgba(23,37,60,0.06),0_10px_30px_-18px_rgba(23,37,60,0.35)]">
-                {viewMode === 'preview' && (
-                  <div className="answer-prose max-w-none font-serif">
-                    {content.trim() ? (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">Nothing to preview yet.</p>
-                    )}
-                  </div>
-                )}
-                {viewMode === 'review' && (
-                  <RedlineView
-                    doc={content}
-                    suggestions={redline.suggestions}
-                    focusedId={focusedSuggestionId}
-                    onFocus={(id) => {
-                      setFocusedSuggestionId(id);
-                      setActiveTab('changes');
-                    }}
-                  />
-                )}
-                {viewMode === 'edit' && (
-                  <Textarea
-                    ref={textareaRef}
-                    value={content}
-                    onChange={(e) => onContentChange(e.target.value)}
-                    onSelect={syncSelection}
-                    onKeyUp={syncSelection}
-                    onClick={syncSelection}
-                    placeholder={docs.length === 0 && !content
-                      ? 'Start writing, open a .docx from the record, or draft from a litigation skill…'
-                      : 'Start writing, or ask the assistant to draft a section for you…'}
-                    className="w-full resize-none overflow-hidden border-0 shadow-none focus-visible:ring-0 rounded-none font-serif text-[15px] leading-[1.75] p-0 bg-transparent min-h-[60vh]"
-                    spellCheck
-                  />
-                )}
-              </div>
-
-              {/* floating selection menu (edit mode only) */}
-              {viewMode === 'edit' && (
-                <SelectionMenu
-                  textareaRef={textareaRef}
-                  containerRef={editorScrollRef}
-                  selection={selection}
-                  busy={transforming || redline.running}
-                  directApply={directApply}
-                  onDirectApplyChange={setDirectApplyPersist}
-                  onTransform={runTransform}
-                  onSuggestEdits={(instr) => runMarkup(instr, selection)}
-                />
-              )}
-            </div>
             )}
           </Card>
         </div>
@@ -905,8 +661,7 @@ function DraftPage() {
         <AssistantPane
           caseId={caseId}
           matter={matterScope}
-          documentText={assistantDocText}
-          wordMode={isWordDoc}
+          documentText={wordText}
           ground={ground}
           setGround={setGround}
           activeTab={activeTab}
@@ -919,10 +674,9 @@ function DraftPage() {
           onReject={rejectSuggestion}
           onAcceptAll={acceptAllSuggestions}
           onRejectAll={rejectAllSuggestions}
-          onRunMarkup={(instr) => runMarkup(instr, null)}
+          onRunMarkup={(instr) => void runMarkup(instr, null)}
           onAppend={appendToDoc}
           onInsertCite={insertCitation}
-          onJumpTo={jumpToRange}
           apiRef={assistantApiRef}
         />
       </div>
@@ -935,8 +689,8 @@ function DraftPage() {
         activeId={activeId}
         templates={paletteTemplates}
         ground={ground}
-        onPickDoc={loadDoc}
-        onNew={newDocument}
+        onPickDoc={(d) => void loadDoc(d)}
+        onNew={() => void newDocument()}
         onImport={() => importInputRef.current?.click()}
         onRunTemplate={(t) => {
           if (t.category === 'Markup') void runMarkup(t.prompt, null);
@@ -946,9 +700,9 @@ function DraftPage() {
           }
         }}
         onToggleGround={() => setGround((g) => !g)}
-        onExportDocx={() => guardedExport('docx')}
-        onExportPdf={() => guardedExport('pdf')}
-        onExportMd={() => guardedExport('md')}
+        onExportDocx={exportDocx}
+        onExportPdf={exportPdf}
+        onExportMd={exportPdf}
         onOpenChecks={() => setActiveTab('checks')}
       />
 
@@ -961,23 +715,15 @@ function DraftPage() {
               {placeholderGate?.hits.length} unresolved placeholder{placeholderGate?.hits.length === 1 ? '' : 's'}
             </DialogTitle>
             <DialogDescription>
-              These blanks are still in the document. Filings shouldn't leave the building with
-              placeholders — jump to each one, or export anyway.
+              These blanks are still in the document — filings shouldn't leave the building with
+              placeholders. Find them with the canvas search, or export anyway.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-56 overflow-y-auto rounded-md border border-border">
             {placeholderGate?.hits.map((h, i) => (
-              <button
-                key={i}
-                type="button"
-                className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-1.5 text-left last:border-b-0 hover:bg-secondary/40"
-                onClick={() => {
-                  setPlaceholderGate(null);
-                  jumpToRange(h.start, h.end);
-                }}
-              >
+              <div key={i} className="border-b border-border/50 px-3 py-1.5 last:border-b-0">
                 <span className="font-mono text-[12px] text-amber-800">{h.quote}</span>
-              </button>
+              </div>
             ))}
           </div>
           <DialogFooter>
@@ -985,9 +731,8 @@ function DraftPage() {
             <Button
               variant="outline"
               onClick={() => {
-                const g = placeholderGate;
                 setPlaceholderGate(null);
-                if (g) doExport(g.action);
+                void wordApi?.exportDocx(`${currentMatter.short_name}-${title}`.slice(0, 80));
               }}
             >
               Export anyway
@@ -996,58 +741,15 @@ function DraftPage() {
         </DialogContent>
       </Dialog>
 
-      {/* import lane choice */}
-      <Dialog open={!!importChoice} onOpenChange={(v) => !v && setImportChoice(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-serif">Open “{importChoice?.name}”</DialogTitle>
-            <DialogDescription>Choose how to work with this Word document.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <button
-              type="button"
-              className="w-full rounded-md border border-accent/40 bg-accent/5 px-3.5 py-3 text-left transition hover:border-accent"
-              onClick={() => {
-                const f = importChoice;
-                setImportChoice(null);
-                if (f) void importAsWord(f);
-              }}
-            >
-              <div className="text-[13px] font-medium text-foreground">Word mode — full fidelity</div>
-              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
-                Opens the .docx exactly as filed: pagination, styles, tables, headers. Native
-                tracked changes and comments. AI markup for this mode is coming next.
-              </p>
-            </button>
-            <button
-              type="button"
-              className="w-full rounded-md border border-border bg-card px-3.5 py-3 text-left transition hover:border-accent/50"
-              onClick={() => {
-                const f = importChoice;
-                setImportChoice(null);
-                if (f) void importAsMemo(f);
-              }}
-            >
-              <div className="text-[13px] font-medium text-foreground">Memo mode — verified AI redlining</div>
-              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
-                Converts the text to the workspace format. Full markup passes, checks, transforms,
-                and version history — heavy layout is flattened.
-              </p>
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* hidden .docx input */}
       <input
         ref={importInputRef}
         type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept={`.docx,${DOCX_MIME}`}
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) setImportChoice(f);
-          if (importInputRef.current) importInputRef.current.value = '';
+          if (f) void importDocxFile(f);
         }}
       />
     </AppShell>
@@ -1105,7 +807,6 @@ function AssistantPane({
   caseId,
   matter,
   documentText,
-  wordMode,
   ground,
   setGround,
   activeTab,
@@ -1121,13 +822,11 @@ function AssistantPane({
   onRunMarkup,
   onAppend,
   onInsertCite,
-  onJumpTo,
   apiRef,
 }: {
   caseId: string;
   matter: AiAssistMatter;
   documentText: string;
-  wordMode: boolean;
   ground: boolean;
   setGround: (v: boolean) => void;
   activeTab: AssistantTab;
@@ -1143,7 +842,6 @@ function AssistantPane({
   onRunMarkup: (instruction: string) => void;
   onAppend: (text: string) => void;
   onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
-  onJumpTo: (start: number, end: number) => void;
   apiRef: React.MutableRefObject<{ send: (text: string) => void } | null>;
 }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -1227,7 +925,6 @@ function AssistantPane({
           </label>
         </div>
 
-        {/* playbook chip — visible proof the practice profile was consulted */}
         {profile && (
           <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/60 bg-secondary/30">
             <BookOpen className="h-3 w-3 text-accent" />
@@ -1275,17 +972,7 @@ function AssistantPane({
 
         {activeTab === 'changes' && (
           <div className="flex-1 overflow-y-auto min-h-[40vh]">
-            {wordMode ? (
-              <div className="border-b border-border bg-secondary/30 px-3 py-2.5">
-                <p className="text-[11.5px] leading-snug text-muted-foreground">
-                  <span className="text-foreground/80 font-medium">Word mode:</span> verified AI markup
-                  for the native .docx canvas lands next. To run tracked-change passes today, re-open
-                  this document in memo mode (Open .docx → “Memo mode”).
-                </p>
-              </div>
-            ) : (
-              <MarkupComposer running={redline.running} hasDoc={!!documentText.trim()} ground={ground} onRun={onRunMarkup} onStop={redline.stop} />
-            )}
+            <MarkupComposer running={redline.running} hasDoc={!!documentText.trim()} ground={ground} onRun={onRunMarkup} onStop={redline.stop} />
             {redline.error && (
               <div className="mx-3 mb-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11.5px] text-amber-800">
                 {redline.error}
@@ -1310,7 +997,16 @@ function AssistantPane({
 
         {activeTab === 'checks' && (
           <div className="flex-1 overflow-y-auto min-h-[40vh]">
-            <ChecksPanel document={documentText} caseId={caseId} matter={matter} onJump={onJumpTo} />
+            <ChecksPanel
+              document={documentText}
+              caseId={caseId}
+              matter={matter}
+              onJump={() => {
+                toast.message('Located in the extracted text', {
+                  description: 'Use the canvas search (Ctrl+F in the toolbar) to jump to it in the page.',
+                });
+              }}
+            />
           </div>
         )}
       </Card>
@@ -1379,7 +1075,7 @@ function MarkupComposer({
         )}
       </div>
       <p className="mt-1 px-0.5 text-[10px] text-muted-foreground/80 font-sans">
-        Suggestions arrive as tracked changes, verbatim-anchored{ground ? ' · grounded in the record' : ''}.
+        Suggestions land in the page as native tracked changes, verbatim-anchored{ground ? ' · grounded in the record' : ''}.
       </p>
     </div>
   );
@@ -1423,7 +1119,6 @@ function ChatBubble({
   };
   return (
     <div className="space-y-2">
-      {/* reviewer note — the citation-trust mechanic when grounding was off */}
       {msg.grounded === false && !msg.streaming && msg.content && (
         <div className="flex items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50/70 px-2.5 py-1.5">
           <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
@@ -1469,7 +1164,7 @@ function ChatBubble({
       {!msg.streaming && msg.content && (
         <div className="flex items-center gap-1.5 px-1">
           <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onAppend(msg.content)}>
-            <Plus className="h-3 w-3" /> Append
+            <Copy className="h-3 w-3" /> Copy for document
           </Button>
           <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={copy}>
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} {copied ? 'Copied' : 'Copy'}
@@ -1484,10 +1179,6 @@ function CitationChip({
   c, onInsertCite,
 }: { c: CiteChip; onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void }) {
   const label = c.order_label ?? c.title ?? 'Source';
-  const copyBluebook = () => {
-    const text = formatShortCite(c).trim();
-    navigator.clipboard?.writeText(text).then(() => toast.success('Bluebook cite copied'));
-  };
   return (
     <span
       className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
@@ -1511,7 +1202,7 @@ function CitationChip({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            title="Insert this citation"
+            title="Copy this citation"
             className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
           >
             <Plus className="h-2.5 w-2.5" />
@@ -1519,7 +1210,7 @@ function CitationChip({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60 text-[12px]">
           <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
-            Insert at cursor
+            Copy for the document
           </DropdownMenuLabel>
           <DropdownMenuItem onClick={() => onInsertCite(c, 'short')} className="flex flex-col items-start gap-0.5">
             <span className="font-medium">Short form</span>
@@ -1528,14 +1219,6 @@ function CitationChip({
           <DropdownMenuItem onClick={() => onInsertCite(c, 'full')} className="flex flex-col items-start gap-0.5">
             <span className="font-medium">Full citation</span>
             <span className="font-serif italic text-muted-foreground text-[11px] line-clamp-2">{formatFullCite(c).trim()}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onInsertCite(c, 'footnote')} className="flex flex-col items-start gap-0.5">
-            <span className="font-medium">Footnote</span>
-            <span className="font-serif italic text-muted-foreground text-[11px]">Inline [^n] + definition at doc end</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={copyBluebook}>
-            <Copy className="h-3 w-3 mr-2" /> Copy Bluebook cite
           </DropdownMenuItem>
           {c.cited_text && (
             <>
@@ -1557,37 +1240,31 @@ function CitationChip({
 }
 
 function SaveStatus({
-  dirty, saving, lastSavedAt, hasActive, onSave,
+  dirty, saving, lastSavedAt, hasActive,
 }: {
   dirty: boolean;
   saving: boolean;
   lastSavedAt: number | null;
   hasActive: boolean;
-  onSave: () => void;
 }) {
   const ago = useRelativeTime(lastSavedAt);
   let status: { label: string; cls: string };
   if (saving) status = { label: 'Saving…', cls: 'text-muted-foreground' };
-  else if (!hasActive) status = { label: 'Not saved', cls: 'text-muted-foreground' };
-  else if (dirty) status = { label: 'Unsaved changes', cls: 'text-amber-600' };
+  else if (!hasActive) status = { label: 'No document', cls: 'text-muted-foreground' };
+  else if (dirty) status = { label: 'Editing…', cls: 'text-muted-foreground' };
   else if (lastSavedAt) status = { label: `Saved ${ago}`, cls: 'text-muted-foreground' };
   else status = { label: 'Saved', cls: 'text-muted-foreground' };
 
   return (
-    <button
-      type="button"
-      onClick={onSave}
-      disabled={saving || (!dirty && hasActive)}
-      title={dirty ? 'Save now' : 'Up to date'}
+    <span
       className={cn(
-        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-card text-[11.5px] font-sans tabular-nums transition',
-        'hover:border-accent/40 disabled:opacity-70 disabled:cursor-default',
+        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-card text-[11.5px] font-sans tabular-nums',
         status.cls,
       )}
     >
       {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
       {status.label}
-    </button>
+    </span>
   );
 }
 
@@ -1684,7 +1361,7 @@ function DocumentRail({
                 <>
                   <p className="mb-2">No documents yet.</p>
                   <p className="text-muted-foreground/80">
-                    Start from a litigation skill, or open the .docx opposing counsel just sent.
+                    Open the .docx opposing counsel just sent, or start from a litigation skill.
                   </p>
                 </>
               ) : (
@@ -1715,11 +1392,9 @@ function DocumentRail({
                       <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
                         {d.title || 'Untitled document'}
                       </span>
-                      {d.format === 'docx' && (
-                        <span className="shrink-0 rounded border border-[hsl(215_60%_40%)]/30 bg-[hsl(215_60%_40%)]/5 px-1 py-px text-[8.5px] font-sans font-medium uppercase tracking-wide text-[hsl(215_60%_40%)]">
-                          docx
-                        </span>
-                      )}
+                      <span className="shrink-0 rounded border border-[hsl(215_60%_40%)]/30 bg-[hsl(215_60%_40%)]/5 px-1 py-px text-[8.5px] font-sans font-medium uppercase tracking-wide text-[hsl(215_60%_40%)]">
+                        docx
+                      </span>
                     </span>
                     <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
                       {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

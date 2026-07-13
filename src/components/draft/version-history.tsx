@@ -48,11 +48,14 @@ export function VersionHistory({
   caseId,
   currentContent,
   onRestore,
+  allowRestore = true,
 }: {
   documentId: string | null;
   caseId: string;
   currentContent: string;
   onRestore: (content: string) => void;
+  /** Word mode snapshots are text extractions — compare works, restore doesn't. */
+  allowRestore?: boolean;
 }) {
   const qc = useQueryClient();
   const [compareWith, setCompareWith] = useState<DocumentVersion | null>(null);
@@ -139,14 +142,16 @@ export function VersionHistory({
                 >
                   <GitCompare className="h-3.5 w-3.5" />
                 </Button>
-                <Button
-                  variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-accent"
-                  title="Restore this version"
-                  disabled={restore.isPending}
-                  onClick={() => restore.mutate(v)}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </Button>
+                {allowRestore && (
+                  <Button
+                    variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-accent"
+                    title="Restore this version"
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate(v)}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             ))}
             {!isLoading && versions.length === 0 && (
