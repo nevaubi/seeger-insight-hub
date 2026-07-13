@@ -297,23 +297,23 @@ function Composer({
         className="relative"
       >
         <div
-          className="relative flex items-center bg-card rounded-lg border border-border focus-within:border-accent/70 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_45%,transparent)] transition-[box-shadow,border-color]"
+          className="relative flex items-center bg-card rounded-xl border border-border/70 focus-within:border-accent/60 focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_35%,transparent),0_1px_0_rgba(0,0,0,0.02)] shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-[box-shadow,border-color]"
           style={{ transitionDuration: 'var(--dur-base)', transitionTimingFunction: 'var(--ease-out-soft)' }}
         >
-          <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <SearchIcon className="absolute left-4 h-4 w-4 text-muted-foreground/70 pointer-events-none" strokeWidth={1.75} />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={placeholder}
-            className="flex-1 bg-transparent pl-11 pr-28 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/70 placeholder:font-sans placeholder:text-[14px] outline-none rounded-lg"
+            className="flex-1 bg-transparent pl-11 pr-24 h-[52px] text-[15px] font-serif placeholder:text-muted-foreground/60 placeholder:font-sans placeholder:text-[13.5px] outline-none rounded-xl"
           />
-          <div className="absolute right-2 flex items-center gap-1">
+          <div className="absolute right-1.5 flex items-center gap-1">
             {running && onStop && (
               <button
                 type="button"
                 onClick={onStop}
-                className="h-9 px-3 text-xs rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                className="h-8 px-2.5 text-[11px] uppercase tracking-wider rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"
               >
                 Stop
               </button>
@@ -323,16 +323,16 @@ function Composer({
               disabled={!q.trim() || running}
               aria-label="Ask the record"
               className={cn(
-                'h-9 w-9 inline-flex items-center justify-center rounded-md transition-colors',
+                'h-9 w-9 inline-flex items-center justify-center rounded-lg transition-[background-color,color,transform] duration-150',
                 q.trim() && !running
-                  ? 'bg-accent text-accent-foreground hover:brightness-110'
-                  : 'bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-60',
+                  ? 'bg-accent text-accent-foreground hover:brightness-110 active:scale-[0.97]'
+                  : 'bg-secondary/60 text-muted-foreground/70 disabled:opacity-70',
               )}
             >
               {running ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <ArrowUp className="h-4 w-4" />
+                <ArrowUp className="h-4 w-4" strokeWidth={2} />
               )}
             </button>
           </div>
