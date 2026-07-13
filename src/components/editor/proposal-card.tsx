@@ -77,7 +77,7 @@ export function ProposalCard({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-start gap-2 px-3 py-2.5 text-left"
+        className="w-full flex items-start gap-2.5 px-4 py-3 text-left"
       >
         <div className="mt-0.5 shrink-0">
           {p.streaming ? (
@@ -87,8 +87,8 @@ export function ProposalCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-[10px] uppercase tracking-[0.12em] font-sans text-muted-foreground truncate">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-[0.12em] font-sans text-muted-foreground">
               {p.scopeLabel ?? 'Claude'}
             </span>
             {cites.length > 0 && (
@@ -97,7 +97,7 @@ export function ProposalCard({
               </span>
             )}
           </div>
-          <div className="text-[13px] font-serif text-foreground/90 leading-snug line-clamp-2 mt-0.5">
+          <div className="text-[13.5px] font-serif text-foreground/90 leading-snug line-clamp-2 mt-0.5">
             {label || (p.streaming ? 'Thinking…' : 'Response')}
           </div>
         </div>
@@ -110,8 +110,8 @@ export function ProposalCard({
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-2.5">
-          <div className="answer-prose text-[13.5px] leading-[1.65] font-serif border-t border-border/60 pt-2.5">
+        <div className="px-4 pb-3.5 space-y-2.5">
+          <div className="answer-prose max-w-none text-[14px] leading-[1.7] font-serif border-t border-border/60 pt-3 [text-wrap:pretty] hyphens-auto">
             {p.content ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.content}</ReactMarkdown>
             ) : p.streaming ? (
@@ -127,7 +127,7 @@ export function ProposalCard({
               <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5">
                 Citations
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-x-1.5 gap-y-1.5">
                 {cites.map((c, i) => (
                   <CitationChip
                     key={i}
