@@ -335,7 +335,9 @@ function blockToDocxXml(b: DocBlock): string {
     case 'heading': {
       const half = b.level === 1 ? 32 : b.level === 2 ? 28 : 24;
       const before = b.level === 1 ? 360 : 240;
-      return `<w:p><w:pPr><w:keepNext/><w:spacing w:before="${before}" w:after="120"/></w:pPr>${b.runs.map((r) => headingRunXml(r, half)).join('')}</w:p>`;
+      // real Heading styles (not just sized runs) so Word's navigation pane, TOC
+      // generation, and style-aware importers see the document structure
+      return `<w:p><w:pPr><w:pStyle w:val="Heading${b.level}"/><w:keepNext/><w:spacing w:before="${before}" w:after="120"/></w:pPr>${b.runs.map((r) => headingRunXml(r, half)).join('')}</w:p>`;
     }
     case 'bullet':
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: '• ' })}${b.runs.map(runXml).join('')}</w:p>`;
@@ -393,11 +395,25 @@ function tableXml(b: { header: Run[][]; rows: Run[][][]; align: TableAlign[] }):
   return `<w:tbl>${tblPr}${grid}${headerRow}${bodyRows}</w:tbl><w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>`;
 }
 
+function headingStyleXml(level: 1 | 2 | 3, half: number): string {
+  return (
+    `<w:style w:type="paragraph" w:styleId="Heading${level}">` +
+    `<w:name w:val="heading ${level}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>` +
+    `<w:pPr><w:keepNext/><w:outlineLvl w:val="${level - 1}"/></w:pPr>` +
+    `<w:rPr><w:b/><w:sz w:val="${half}"/><w:szCs w:val="${half}"/></w:rPr>` +
+    `</w:style>`
+  );
+}
+
 const DOCX_STYLES =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
   `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
   `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault>` +
   `<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>` +
+  `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+  headingStyleXml(1, 32) +
+  headingStyleXml(2, 28) +
+  headingStyleXml(3, 24) +
   `</w:styles>`;
 
 export function buildDocx(blocks: DocBlock[]): Blob {

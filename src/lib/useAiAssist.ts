@@ -45,7 +45,14 @@ export type AiAssistRequest = {
   onText?: (delta: string) => void;
   onCitation?: (c: AiAssistCitation) => void;
   onChunks?: (chunks: AiAssistChunk[]) => void;
-  onMeta?: (m: { grounded: boolean; passages: number }) => void;
+  onMeta?: (m: AiAssistMeta) => void;
+};
+
+export type AiAssistMeta = {
+  grounded: boolean;
+  passages: number;
+  /** v12: practice profile injected server-side, when one exists for the matter */
+  profile?: { name: string | null; updated_at: string | null } | null;
 };
 
 export type AiAssistResult = {
@@ -123,7 +130,11 @@ export function useAiAssist() {
           try { evt = JSON.parse(payload); } catch { continue; }
           switch (evt.type) {
             case 'meta':
-              req.onMeta?.({ grounded: !!evt.grounded, passages: evt.passages ?? 0 });
+              req.onMeta?.({
+                grounded: !!evt.grounded,
+                passages: evt.passages ?? 0,
+                profile: evt.profile ?? null,
+              });
               break;
             case 'chunks':
               if (Array.isArray(evt.chunks)) {
