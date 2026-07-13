@@ -4,8 +4,6 @@ import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
-import Underline from '@tiptap/extension-underline';
-import Link from '@tiptap/extension-link';
 import Highlight from '@tiptap/extension-highlight';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
@@ -105,18 +103,18 @@ export function LegalEditor({
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4] },
         codeBlock: { HTMLAttributes: { class: 'legal-codeblock' } },
+        link: { openOnClick: true, HTMLAttributes: { rel: 'noreferrer', target: '_blank' } },
       }),
       Placeholder.configure({
         placeholder: 'Start writing, or ask Claude to draft a section for you…',
       }),
       Typography,
-      Underline,
-      Link.configure({ openOnClick: true, HTMLAttributes: { rel: 'noreferrer', target: '_blank' } }),
       Highlight.configure({ multicolor: false }),
       HoverParagraphExtension,
       Insertion,
       Deletion,
     ],
+
     [],
   );
 
