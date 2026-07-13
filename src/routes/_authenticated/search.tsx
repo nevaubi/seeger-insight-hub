@@ -646,13 +646,24 @@ function SynthesisPanel({
   const showAnswer = answerStarted || finalRound != null;
   const traceSteps = searches.length + notes.length + Object.keys(expansions).length;
 
-  // Collapse the timeline the moment the writer is called; keep it open while researching.
+  // Collapse the timeline shortly after the writer is called; keep it mounted
+  // long enough for the grid-row transition to finish so the fold reads as motion,
+  // not a snap. Delay the trigger so the final check-mark visibly settles first.
+  const [showTimeline, setShowTimeline] = useState(true);
   useEffect(() => {
-    if (writerActive) setTimelineOpen(false);
+    if (writerActive) {
+      const closeT = setTimeout(() => setTimelineOpen(false), 350);
+      const unmountT = setTimeout(() => setShowTimeline(false), 350 + 620);
+      return () => { clearTimeout(closeT); clearTimeout(unmountT); };
+    }
   }, [writerActive]);
   useEffect(() => {
-    if (running && !writerActive) setTimelineOpen(true);
+    if (running && !writerActive) {
+      setTimelineOpen(true);
+      setShowTimeline(true);
+    }
   }, [submitted, running, writerActive]);
+
 
 
   // auto-scroll reasoning panel as new thinking streams
@@ -898,24 +909,31 @@ function SynthesisPanel({
               <TraceToggle open={timelineOpen} onToggle={() => setTimelineOpen((o) => !o)} steps={traceSteps} elapsedMs={elapsedMs} />
             )}
 
-            <RunCard
-              running={running}
-              searches={searches}
-              notes={notes}
-              currentRound={currentRound}
-              finalRound={finalRound}
-              citations={citations}
-              timelineOpen={timelineOpen}
-              reasoningRounds={reasoningRounds}
-              reasoningScrollRef={reasoningScrollRef}
-              expansions={expansions}
-              writerRound={writerRound}
-              plan={plan}
-              webResults={webResults}
-              verify={verify}
-            />
+            {showTimeline && (
+              <div className="timeline-collapse" data-open={timelineOpen}>
+                <div className="timeline-collapse-inner">
+                  <RunCard
+                    running={running}
+                    searches={searches}
+                    notes={notes}
+                    currentRound={currentRound}
+                    finalRound={finalRound}
+                    citations={citations}
+                    timelineOpen={timelineOpen}
+                    reasoningRounds={reasoningRounds}
+                    reasoningScrollRef={reasoningScrollRef}
+                    expansions={expansions}
+                    writerRound={writerRound}
+                    plan={plan}
+                    webResults={webResults}
+                    verify={verify}
+                  />
+                </div>
+              </div>
+            )}
 
             {showWriting && <WritingIndicator />}
+
 
             {showAnswer && (
               <div className="motion-fade-rise relative pl-5 pr-1 py-2">
@@ -1180,9 +1198,35 @@ function classifyTool(text: string): { kind: Kind; name: string; label: string }
   return { kind: 'index', name: 'Record index', label: text };
 }
 
+// Split streamed text into stable "seen" words and freshly appended "new" words,
+// so newly arrived words can play a one-shot shimmer while old words stay solid.
+function useRevealedWords(text: string): Array<{ key: string; text: string; fresh: boolean }> {
+  const prevLenRef = useRef(0);
+  const freshUntilRef = useRef(0);
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const grewBy = Math.max(0, text.length - prevLenRef.current);
+  if (grewBy > 0) freshUntilRef.current = now + 420; // one word-shimmer duration
+  prevLenRef.current = text.length;
+  const stableCut = Math.max(0, text.length - grewBy);
+  // walk backward to snap to whitespace boundary so we don't split a word mid-token
+  let cut = stableCut;
+  while (cut > 0 && cut < text.length && !/\s/.test(text[cut - 1] ?? '')) cut--;
+  const stable = text.slice(0, cut);
+  const fresh = text.slice(cut);
+  const chunks: Array<{ key: string; text: string; fresh: boolean }> = [];
+  if (stable) chunks.push({ key: 's', text: stable, fresh: false });
+  // Split fresh tail into word tokens so each new word animates individually.
+  if (fresh) {
+    const tokens = fresh.match(/\S+\s*|\s+/g) ?? [fresh];
+    tokens.forEach((t, i) => chunks.push({ key: `f-${cut}-${i}`, text: t, fresh: true }));
+  }
+  return chunks;
+}
+
 // Round header: numbered circle on the rail + eyebrow + one-line reasoning.
 function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning: string; streaming: boolean }) {
-  const shown = useSmoothText(reasoning, streaming, 140);
+  const shown = useSmoothText(reasoning, streaming, 220);
+  const words = useRevealedWords(shown);
   return (
     <div className="flex items-start gap-3 motion-stream-in">
       <div className="flex shrink-0 justify-center" style={{ width: NODE_COL }}>
@@ -1196,7 +1240,13 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
         </div>
         {shown ? (
           <p className="font-serif text-[13.5px] leading-[1.55] text-foreground/85">
-            {shown}
+            {words.map((w) =>
+              w.fresh ? (
+                <span key={w.key} className="word-reveal word-sheen">{w.text}</span>
+              ) : (
+                <span key={w.key}>{w.text}</span>
+              ),
+            )}
             {streaming && <span className="motion-stream-caret" aria-hidden />}
           </p>
         ) : streaming ? (
@@ -1206,6 +1256,7 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
     </div>
   );
 }
+
 
 // Status node — 14px, done = filled navy check, running = thin rotating ring.
 function StatusNode({ done, tone = 'primary' }: { done: boolean; tone?: 'primary' | 'accent' }) {
@@ -1303,7 +1354,7 @@ function InterimNoteRow({ text }: { text: string }) {
 
 function WriterReasoning({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
-  const shown = useSmoothText(text, streaming, 180);
+  const shown = useSmoothText(text, streaming, 260);
   return (
     <div className="mt-2">
       <button type="button" onClick={() => setOpen((v) => !v)} className="group flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
@@ -1322,10 +1373,11 @@ function WriterReasoning({ text, streaming }: { text: string; streaming: boolean
   );
 }
 
+
 // The single shimmering phrase shown the instant the writer is called, until the first answer token streams.
 function WritingIndicator() {
   return (
-    <div className="motion-fade-rise flex items-center justify-center py-12">
+    <div className="motion-fade-rise flex items-center justify-center py-12" style={{ animationDelay: '260ms', animationDuration: '420ms' }}>
       <span className="inline-flex items-center gap-2.5">
         <PenLine className="h-4 w-4 text-accent" strokeWidth={1.75} />
         <span className="font-serif text-[17px] tracking-[-0.01em] shimmer-text">Writing…</span>
@@ -1333,6 +1385,7 @@ function WritingIndicator() {
     </div>
   );
 }
+
 
 // Post-completion re-expander for the research trace.
 function TraceToggle({ open, onToggle, steps, elapsedMs }: { open: boolean; onToggle: () => void; steps: number; elapsedMs: number }) {
@@ -1679,7 +1732,7 @@ function AnswerStream({
   }, [activeRound, isFinal, citationsByBlock]);
 
   // Smooth-stream the raw markdown (sentinels pass through untouched).
-  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 1100);
+  const smoothMarkdown = useSmoothText(fullMarkdown, running && isFinal, 1600);
   const markdown = running && isFinal ? smoothMarkdown : fullMarkdown;
 
   const components: Components = useMemo(() => {
