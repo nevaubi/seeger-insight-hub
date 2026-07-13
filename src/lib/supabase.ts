@@ -12,6 +12,7 @@ export const TABULAR_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-ing
 export const TABULAR_EXTRACT_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-extract`;
 export const TABULAR_STANDARDIZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-standardize`;
 export const REVIEW_FILES_BUCKET = 'review-files';
+export const WORKSPACE_DOCX_BUCKET = 'workspace-docx';
 export const DEPO_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ingest`;
 export const DEPO_ANALYZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-analyze`;
 export const DEPO_ASK_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ask`;

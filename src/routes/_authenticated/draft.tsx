@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PenLine,
   Plus,
@@ -66,7 +66,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { supabase, type WorkspaceDocument } from '@/lib/supabase';
+import { supabase, WORKSPACE_DOCX_BUCKET, type WorkspaceDocument } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
 import {
   useAiAssist,
@@ -115,6 +115,10 @@ import {
   TemplateLauncher,
   type DraftTemplate,
 } from '@/components/draft/templates';
+import type { WordEditorApi } from '@/components/draft/word-editor';
+
+// SuperDoc is a heavy editor runtime — loaded only when a Word-mode document is opened.
+const WordEditor = lazy(() => import('@/components/draft/word-editor'));
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -185,6 +189,13 @@ function DraftPage() {
     action: 'docx' | 'pdf' | 'md';
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  // Word mode (SuperDoc) — client-only, format === 'docx'
+  const [mounted, setMounted] = useState(false);
+  const [importChoice, setImportChoice] = useState<File | null>(null);
+  const [wordApi, setWordApi] = useState<WordEditorApi | null>(null);
+  const [wordSave, setWordSave] = useState<{ saving: boolean; lastSavedAt: number | null; dirty: boolean }>({ saving: false, lastSavedAt: null, dirty: false });
+  const [wordText, setWordText] = useState('');
+  useEffect(() => setMounted(true), []);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const editorScrollRef = useRef<HTMLDivElement | null>(null);
@@ -232,10 +243,16 @@ function DraftPage() {
 
   // ---- mutations ----
   const createDoc = useMutation({
-    mutationFn: async (doc: { title: string; content: string }) => {
+    mutationFn: async (doc: { title: string; content: string; format?: string; storage_path?: string }) => {
       const { data, error } = await supabase
         .from('workspace_documents')
-        .insert({ case_id: caseId, title: doc.title, content: doc.content })
+        .insert({
+          case_id: caseId,
+          title: doc.title,
+          content: doc.content,
+          ...(doc.format ? { format: doc.format } : {}),
+          ...(doc.storage_path ? { storage_path: doc.storage_path } : {}),
+        })
         .select('*')
         .single();
       if (error) throw error;
@@ -293,19 +310,42 @@ function DraftPage() {
     createDoc.mutate({ title: 'Untitled document', content: '' });
   };
 
-  // ---- .docx import (zero-dependency zip reader → markdown) ----
-  const onImportFile = async (file: File) => {
+  // ---- .docx import: two lanes ----
+  // memo lane: zero-dependency zip reader → markdown (full AI redlining available today)
+  const importAsMemo = async (file: File) => {
     setImporting(true);
     try {
       const result = await importDocx(file, file.name);
       createDoc.mutate({ title: result.title || file.name.replace(/\.docx$/i, ''), content: result.markdown });
-      toast.success(`Imported “${file.name}”`);
+      toast.success(`Imported “${file.name}” as a memo document`);
       for (const w of result.warnings) toast.message('Import note', { description: w });
     } catch (e) {
       toast.error(`Could not import: ${(e as Error).message}`);
     } finally {
       setImporting(false);
-      if (importInputRef.current) importInputRef.current.value = '';
+    }
+  };
+
+  // word lane: store the binary untouched; SuperDoc renders it with full fidelity
+  const importAsWord = async (file: File) => {
+    setImporting(true);
+    try {
+      const path = `${caseId}/${crypto.randomUUID()}.docx`;
+      const { error } = await supabase.storage.from(WORKSPACE_DOCX_BUCKET).upload(path, file, {
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      if (error) throw new Error(error.message);
+      createDoc.mutate({
+        title: file.name.replace(/\.docx$/i, ''),
+        content: '',
+        format: 'docx',
+        storage_path: path,
+      });
+      toast.success(`Opened “${file.name}” in Word mode`);
+    } catch (e) {
+      toast.error(`Could not open in Word mode: ${(e as Error).message}`);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -532,6 +572,12 @@ function DraftPage() {
 
   // ---- insertion from chat ----
   const appendToDoc = (text: string) => {
+    if (isWordDoc) {
+      navigator.clipboard?.writeText(text).then(() => {
+        toast.message('Copied to clipboard', { description: 'Paste into the Word canvas where you need it.' });
+      });
+      return;
+    }
     const next = content ? `${content}\n\n${text}` : text;
     setContent(next);
     setDirty(true);
@@ -592,6 +638,12 @@ function DraftPage() {
 
   // jump from a check finding into the editor at a character range
   const jumpToRange = (start: number, end: number) => {
+    if (isWordDoc) {
+      toast.message('Finding located in extracted text', {
+        description: 'Jump-to-range lands with Word-mode markup; use the canvas search for now.',
+      });
+      return;
+    }
     setViewMode('edit');
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -614,7 +666,14 @@ function DraftPage() {
     [],
   );
 
-  const wordCount = useMemo(() => (content.trim() ? content.trim().split(/\s+/).length : 0), [content]);
+  const activeDoc = useMemo(() => docs.find((d) => d.id === activeId) ?? null, [docs, activeId]);
+  const isWordDoc = !!activeDoc && activeDoc.format === 'docx' && !!activeDoc.storage_path;
+  const assistantDocText = isWordDoc ? wordText : content;
+
+  const wordCount = useMemo(() => {
+    const t = (isWordDoc ? wordText : content).trim();
+    return t ? t.split(/\s+/).length : 0;
+  }, [content, wordText, isWordDoc]);
 
   return (
     <AppShell>
@@ -646,35 +705,49 @@ function DraftPage() {
             <span className="text-[11px] font-sans">⌘K</span>
           </Button>
           <SaveStatus
-            dirty={dirty}
-            saving={saveDoc.isPending}
-            lastSavedAt={lastSavedAt}
+            dirty={isWordDoc ? wordSave.dirty : dirty}
+            saving={isWordDoc ? wordSave.saving : saveDoc.isPending}
+            lastSavedAt={isWordDoc ? wordSave.lastSavedAt : lastSavedAt}
             hasActive={!!activeId}
-            onSave={() => saveDoc.mutate()}
+            onSave={() => { if (!isWordDoc) saveDoc.mutate(); }}
           />
-          <VersionHistory
-            documentId={activeId}
-            caseId={caseId}
-            currentContent={content}
-            onRestore={(c) => {
-              setContent(c);
-              setDirty(true);
-              setViewMode('edit');
-            }}
-          />
+          {!isWordDoc && (
+            <VersionHistory
+              documentId={activeId}
+              caseId={caseId}
+              currentContent={content}
+              onRestore={(c) => {
+                setContent(c);
+                setDirty(true);
+                setViewMode('edit');
+              }}
+            />
+          )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
-                <ArrowDownToLine className="h-4 w-4" /> Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onClick={() => guardedExport('docx')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word document (.docx)</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => guardedExport('pdf')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / Save as PDF</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => guardedExport('md')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Markdown (.md)</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {isWordDoc ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={!wordApi}
+              onClick={() => wordApi?.exportDocx(`${currentMatter.short_name}-${title}`.slice(0, 80))}
+            >
+              <ArrowDownToLine className="h-4 w-4" /> Export .docx
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
+                  <ArrowDownToLine className="h-4 w-4" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={() => guardedExport('docx')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word document (.docx)</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => guardedExport('pdf')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / Save as PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => guardedExport('md')} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Markdown (.md)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {activeId && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
@@ -724,29 +797,53 @@ function DraftPage() {
               />
               <div className="ml-auto flex items-center gap-1.5 shrink-0">
                 <span className="text-[11px] text-muted-foreground tabular-nums font-sans mr-1">{wordCount} words</span>
-                <Button variant={viewMode === 'edit' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('edit')}>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </Button>
-                <Button
-                  variant={viewMode === 'review' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs relative"
-                  onClick={() => setViewMode('review')}
-                >
-                  <FileDiff className="h-3.5 w-3.5" /> Review
-                  {pendingSuggestions.length > 0 && (
-                    <span className="ml-0.5 rounded-full bg-accent text-accent-foreground px-1.5 py-px text-[10px] font-sans tabular-nums leading-[1.4]">
-                      {pendingSuggestions.length}
-                    </span>
-                  )}
-                </Button>
-                <Button variant={viewMode === 'preview' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('preview')}>
-                  <Eye className="h-3.5 w-3.5" /> Preview
-                </Button>
+                {!isWordDoc && (
+                  <>
+                    <Button variant={viewMode === 'edit' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('edit')}>
+                      <Pencil className="h-3.5 w-3.5" /> Edit
+                    </Button>
+                    <Button
+                      variant={viewMode === 'review' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      className="h-7 gap-1.5 text-xs relative"
+                      onClick={() => setViewMode('review')}
+                    >
+                      <FileDiff className="h-3.5 w-3.5" /> Review
+                      {pendingSuggestions.length > 0 && (
+                        <span className="ml-0.5 rounded-full bg-accent text-accent-foreground px-1.5 py-px text-[10px] font-sans tabular-nums leading-[1.4]">
+                          {pendingSuggestions.length}
+                        </span>
+                      )}
+                    </Button>
+                    <Button variant={viewMode === 'preview' ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setViewMode('preview')}>
+                      <Eye className="h-3.5 w-3.5" /> Preview
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* the page */}
+            {/* Word mode: the SuperDoc canvas (own pagination + toolbar) */}
+            {isWordDoc && mounted && activeDoc?.storage_path && (
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading Word editor…
+                  </div>
+                }
+              >
+                <WordEditor
+                  key={activeDoc.storage_path}
+                  storagePath={activeDoc.storage_path}
+                  onSaveStateChange={setWordSave}
+                  onTextChange={setWordText}
+                  onApi={setWordApi}
+                />
+              </Suspense>
+            )}
+
+            {/* memo mode: the page */}
+            {!isWordDoc && (
             <div ref={editorScrollRef} className="relative flex-1 overflow-y-auto">
               <div className="mx-auto my-5 w-[min(100%-2rem,54rem)] min-h-[70%] rounded-sm border border-border/70 bg-card px-8 py-8 lg:px-14 lg:py-12 shadow-[0_1px_2px_rgba(23,37,60,0.06),0_10px_30px_-18px_rgba(23,37,60,0.35)]">
                 {viewMode === 'preview' && (
@@ -800,6 +897,7 @@ function DraftPage() {
                 />
               )}
             </div>
+            )}
           </Card>
         </div>
 
@@ -807,7 +905,8 @@ function DraftPage() {
         <AssistantPane
           caseId={caseId}
           matter={matterScope}
-          documentText={content}
+          documentText={assistantDocText}
+          wordMode={isWordDoc}
           ground={ground}
           setGround={setGround}
           activeTab={activeTab}
@@ -897,6 +996,48 @@ function DraftPage() {
         </DialogContent>
       </Dialog>
 
+      {/* import lane choice */}
+      <Dialog open={!!importChoice} onOpenChange={(v) => !v && setImportChoice(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif">Open “{importChoice?.name}”</DialogTitle>
+            <DialogDescription>Choose how to work with this Word document.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="w-full rounded-md border border-accent/40 bg-accent/5 px-3.5 py-3 text-left transition hover:border-accent"
+              onClick={() => {
+                const f = importChoice;
+                setImportChoice(null);
+                if (f) void importAsWord(f);
+              }}
+            >
+              <div className="text-[13px] font-medium text-foreground">Word mode — full fidelity</div>
+              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                Opens the .docx exactly as filed: pagination, styles, tables, headers. Native
+                tracked changes and comments. AI markup for this mode is coming next.
+              </p>
+            </button>
+            <button
+              type="button"
+              className="w-full rounded-md border border-border bg-card px-3.5 py-3 text-left transition hover:border-accent/50"
+              onClick={() => {
+                const f = importChoice;
+                setImportChoice(null);
+                if (f) void importAsMemo(f);
+              }}
+            >
+              <div className="text-[13px] font-medium text-foreground">Memo mode — verified AI redlining</div>
+              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+                Converts the text to the workspace format. Full markup passes, checks, transforms,
+                and version history — heavy layout is flattened.
+              </p>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* hidden .docx input */}
       <input
         ref={importInputRef}
@@ -905,7 +1046,8 @@ function DraftPage() {
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) void onImportFile(f);
+          if (f) setImportChoice(f);
+          if (importInputRef.current) importInputRef.current.value = '';
         }}
       />
     </AppShell>
@@ -963,6 +1105,7 @@ function AssistantPane({
   caseId,
   matter,
   documentText,
+  wordMode,
   ground,
   setGround,
   activeTab,
@@ -984,6 +1127,7 @@ function AssistantPane({
   caseId: string;
   matter: AiAssistMatter;
   documentText: string;
+  wordMode: boolean;
   ground: boolean;
   setGround: (v: boolean) => void;
   activeTab: AssistantTab;
@@ -1131,7 +1275,17 @@ function AssistantPane({
 
         {activeTab === 'changes' && (
           <div className="flex-1 overflow-y-auto min-h-[40vh]">
-            <MarkupComposer running={redline.running} hasDoc={!!documentText.trim()} ground={ground} onRun={onRunMarkup} onStop={redline.stop} />
+            {wordMode ? (
+              <div className="border-b border-border bg-secondary/30 px-3 py-2.5">
+                <p className="text-[11.5px] leading-snug text-muted-foreground">
+                  <span className="text-foreground/80 font-medium">Word mode:</span> verified AI markup
+                  for the native .docx canvas lands next. To run tracked-change passes today, re-open
+                  this document in memo mode (Open .docx → “Memo mode”).
+                </p>
+              </div>
+            ) : (
+              <MarkupComposer running={redline.running} hasDoc={!!documentText.trim()} ground={ground} onRun={onRunMarkup} onStop={redline.stop} />
+            )}
             {redline.error && (
               <div className="mx-3 mb-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11.5px] text-amber-800">
                 {redline.error}
@@ -1557,8 +1711,15 @@ function DocumentRail({
                         : 'border-transparent hover:bg-secondary/40 hover:border-border',
                     )}
                   >
-                    <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
-                      {d.title || 'Untitled document'}
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
+                        {d.title || 'Untitled document'}
+                      </span>
+                      {d.format === 'docx' && (
+                        <span className="shrink-0 rounded border border-[hsl(215_60%_40%)]/30 bg-[hsl(215_60%_40%)]/5 px-1 py-px text-[8.5px] font-sans font-medium uppercase tracking-wide text-[hsl(215_60%_40%)]">
+                          docx
+                        </span>
+                      )}
                     </span>
                     <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
                       {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
