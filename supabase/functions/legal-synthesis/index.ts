@@ -1836,7 +1836,7 @@ Deno.serve(async (req: Request) => {
       let plannedFacets: Facet[] = [];
       let plannerRationale = "";
       try {
-        const p = await runPlanner(question, matter);
+        const p = await runPlanner(question, matter, emit);
         plannedFacets = p.facets;
         plannerRationale = p.rationale;
         emit({
