@@ -135,11 +135,76 @@ function DraftPage() {
     }
   }, [railOpen]);
   const [railQuery, setRailQuery] = useState('');
+  const [railMode, setRailMode] = useState<'docs' | 'outline'>('docs');
   const [sidecarOpen, setSidecarOpen] = useState(true);
   const footnoteCounterRef = useRef(0);
   const lastCiteKeyRef = useRef<string | null>(null);
   const cursorRef = useRef<number>(0);
   const editorRef = useRef<Editor | null>(null);
+
+  // Track-changes state
+  const [suggestionsOn, setSuggestionsOn] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('draft.suggestions') !== '0';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.suggestions', suggestionsOn ? '1' : '0');
+    }
+  }, [suggestionsOn]);
+  const [activeChangeId, setActiveChangeId] = useState<ChangeId | null>(null);
+  const [changeStreaming, setChangeStreaming] = useState(false);
+  const [pendingChangeCount, setPendingChangeCount] = useState(0);
+  const lastTransformRef = useRef<{
+    instruction: string;
+    selectionText: string;
+    changeId: ChangeId;
+  } | null>(null);
+
+  // Editorial polish state
+  const [focusMode, setFocusMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('draft.focus') === '1';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.focus', focusMode ? '1' : '0');
+    }
+  }, [focusMode]);
+  // ⌘. keyboard toggle for focus mode
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+        e.preventDefault();
+        setFocusMode((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Derived: live word count + reading time
+  const stats = useMemo(() => {
+    const plain = content
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[#*_>`~[\]()\-!]/g, ' ');
+    const words = plain.trim() ? plain.trim().split(/\s+/).length : 0;
+    const readMin = Math.max(1, Math.round(words / 220));
+    return { words, readMin };
+  }, [content]);
+
+  // Track pending suggestion count from the editor
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const update = () => setPendingChangeCount(listChangeIds(ed).length);
+    update();
+    ed.on('transaction', update);
+    return () => {
+      ed.off('transaction', update);
+    };
+  }, [editorRef.current]);
+
 
   const matterScope = useMemo(
     () => ({
