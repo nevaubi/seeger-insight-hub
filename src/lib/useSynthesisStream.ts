@@ -449,9 +449,23 @@ function reducer(state: SynthState, action: Action): SynthState {
             ],
           };
         }
+        case 'plan_start':
+          return {
+            ...state,
+            planStreaming: true,
+            planReasoning: '',
+            planModel: evt.model ?? state.planModel,
+          };
+        case 'plan_reasoning':
+          return {
+            ...state,
+            planStreaming: true,
+            planReasoning: state.planReasoning + (evt.text ?? ''),
+          };
         case 'plan':
           return {
             ...state,
+            planStreaming: false,
             plan: { rationale: evt.rationale ?? '', facets: evt.facets ?? [] },
           };
         case 'web_result':
