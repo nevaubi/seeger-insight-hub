@@ -27,10 +27,15 @@ export interface QuestionSuggestion {
   generated_at: string;
 }
 
+// TODO: flip to true once the `v_question_suggestions` view is provisioned by
+// the cron pipeline. Until then, short-circuit to avoid noisy 404s in the console.
+const SUGGESTIONS_VIEW_ENABLED = false;
+
 // Reads the latest 20 curated starter questions for a matter from the
 // cron-populated view. Returns [] if the view doesn't exist yet or the pool
 // is empty — callers should fall back to hardcoded seeds in that case.
 export async function fetchQuestionSuggestions(matterSlug: string): Promise<QuestionSuggestion[]> {
+  if (!SUGGESTIONS_VIEW_ENABLED) return [];
   try {
     const { data, error } = await supabase
       .from('v_question_suggestions')
@@ -44,6 +49,7 @@ export async function fetchQuestionSuggestions(matterSlug: string): Promise<Ques
     return [];
   }
 }
+
 
 export type OrderType = 'PTO' | 'CMO' | 'CBO' | 'JPML';
 
