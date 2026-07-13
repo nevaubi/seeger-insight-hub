@@ -288,8 +288,71 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: shimmer-text 1.9s linear infinite;
+  animation: shimmer-text 1.4s linear infinite;
 }
+
+/* Per-word reveal used for streamed reasoning — each new word shimmers in once,
+   then settles to solid foreground. Wrap words in <span class="word-reveal">. */
+@keyframes word-reveal {
+  0%   { opacity: 0.15; filter: blur(1.5px); transform: translateY(1px); }
+  55%  { opacity: 1; filter: blur(0); transform: translateY(0); }
+  100% { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+@keyframes word-sheen {
+  0%   { background-position: 180% center; }
+  100% { background-position: -80% center; }
+}
+.word-reveal {
+  display: inline;
+  animation: word-reveal 380ms var(--ease-out-soft) both;
+}
+.word-reveal.word-sheen {
+  background-image: linear-gradient(
+    100deg,
+    var(--foreground) 0%,
+    var(--foreground) 42%,
+    color-mix(in oklab, var(--accent) 85%, var(--foreground)) 50%,
+    var(--foreground) 58%,
+    var(--foreground) 100%
+  );
+  background-size: 220% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: word-reveal 380ms var(--ease-out-soft) both, word-sheen 620ms linear both;
+}
+
+/* Timeline collapse — grid-template-rows 1fr → 0fr trick keeps the child
+   naturally sized and animates cleanly without JS height measurement. */
+.timeline-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 520ms var(--ease-out-soft),
+    opacity 340ms var(--ease-out-soft),
+    transform 520ms var(--ease-out-soft),
+    margin 520ms var(--ease-out-soft);
+  opacity: 1;
+  transform: translateY(0);
+}
+.timeline-collapse > .timeline-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.timeline-collapse[data-open="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-4px);
+  margin-top: 0;
+  margin-bottom: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .word-reveal, .word-reveal.word-sheen { animation: none !important; opacity: 1; color: inherit; -webkit-text-fill-color: currentColor; background: none; }
+  .timeline-collapse { transition: none; }
+}
+
 
 @keyframes agent-spin {
   0%   { transform: rotate(0deg); }
