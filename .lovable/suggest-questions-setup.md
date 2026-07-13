@@ -35,7 +35,7 @@ Add `SUGGEST_QUESTIONS_SECRET` (any long random string) to the Supabase
 edge-function secrets. `ANTHROPIC_API_KEY` and the standard
 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are already present.
 
-## 3. Cron — every 6 hours
+## 3. Cron — every 48 hours + immediate first run
 
 Enable extensions if not already:
 
@@ -44,12 +44,16 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 ```
 
-Schedule (replace `<SECRET>` with the value from step 2):
+Reschedule (replace `<SECRET>` with the value from step 2):
 
 ```sql
+-- Drop the old 6h schedule if it exists (safe if it doesn't)
+select cron.unschedule('suggest-questions-6h');
+
+-- New 48h schedule — runs at 00:17 UTC every other day
 select cron.schedule(
-  'suggest-questions-6h',
-  '17 */6 * * *',
+  'suggest-questions-48h',
+  '17 0 */2 * *',
   $$
   select net.http_post(
     url := 'https://blhcucozljrojnvqosyi.supabase.co/functions/v1/suggest-questions',
@@ -61,16 +65,20 @@ select cron.schedule(
   );
   $$
 );
+
+-- Fire the first run immediately so the cards populate now
+select net.http_post(
+  url := 'https://blhcucozljrojnvqosyi.supabase.co/functions/v1/suggest-questions',
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'x-cron-secret', '<SECRET>'
+  ),
+  body := '{}'::jsonb
+);
 ```
 
-## 4. Backfill (run once so the frontend has content immediately)
-
-```bash
-curl -X POST 'https://blhcucozljrojnvqosyi.supabase.co/functions/v1/suggest-questions' \
-  -H 'x-cron-secret: <SECRET>' \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-```
+Verify: `select jobname, schedule from cron.job where jobname like 'suggest-questions%';`
+should show only `suggest-questions-48h`.
 
 The frontend gracefully falls back to hardcoded example prompts until the
 first successful run populates the table.
