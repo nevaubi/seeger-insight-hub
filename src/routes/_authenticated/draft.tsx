@@ -504,8 +504,9 @@ function DraftPage() {
   return (
     <AppShell>
       <PageHeader
+        slim
         title="Drafting Workspace"
-        description="A Word-grade canvas with Claude inside — select any passage to ask the record, and AI edits arrive as tracked changes, every one anchored to text verified to exist."
+        description="Word canvas · select any passage for Claude · AI edits arrive as tracked changes"
       >
         <div className="flex items-center gap-2">
           <ClaudeBadge variant="chip" className="hidden xl:inline-flex" />
