@@ -288,7 +288,7 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: shimmer-text 2.4s linear infinite;
+  animation: shimmer-text 1.9s linear infinite;
 }
 
 @keyframes agent-spin {
