@@ -247,21 +247,21 @@
 }
 @utility composer-halo {
   position: absolute;
-  inset: -28px;
-  border-radius: 24px;
+  inset: -22px;
+  border-radius: 22px;
   pointer-events: none;
   z-index: 0;
   background: conic-gradient(
     from 0deg,
     color-mix(in oklab, var(--accent) 0%, transparent),
-    color-mix(in oklab, var(--accent) 18%, transparent),
-    color-mix(in oklab, var(--gold) 14%, transparent),
+    color-mix(in oklab, var(--accent) 12%, transparent),
+    color-mix(in oklab, var(--gold) 9%, transparent),
     color-mix(in oklab, var(--accent) 0%, transparent)
   );
-  filter: blur(28px);
-  opacity: 0.22;
-  animation: halo-spin 14s linear infinite;
-  mask-image: radial-gradient(ellipse at center, black 50%, transparent 75%);
+  filter: blur(22px);
+  opacity: 0.14;
+  animation: halo-spin 18s linear infinite;
+  mask-image: radial-gradient(ellipse at center, black 45%, transparent 75%);
 }
 @utility composer-mask-top {
   background: linear-gradient(to bottom,
