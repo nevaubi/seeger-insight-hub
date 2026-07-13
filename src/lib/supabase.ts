@@ -12,7 +12,6 @@ export const TABULAR_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-ing
 export const TABULAR_EXTRACT_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-extract`;
 export const TABULAR_STANDARDIZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/tabular-standardize`;
 export const REVIEW_FILES_BUCKET = 'review-files';
-export const WORKSPACE_DOCX_BUCKET = 'workspace-docx';
 export const DEPO_INGEST_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ingest`;
 export const DEPO_ANALYZE_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-analyze`;
 export const DEPO_ASK_ENDPOINT = `${SUPABASE_URL}/functions/v1/depo-ask`;
@@ -247,21 +246,8 @@ export interface WorkspaceDocument {
   case_id: string;
   title: string;
   content: string;
-  format?: 'md' | 'docx' | string;
-  storage_path?: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface DocumentVersion {
-  id: string;
-  document_id: string;
-  case_id: string | null;
-  label: string | null;
-  content: string;
-  author: string | null;
-  word_count: number | null;
-  created_at: string;
 }
 
 export const TAG_LABELS: Record<string, string> = {

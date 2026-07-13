@@ -152,9 +152,6 @@ type SsePlan = { type: 'plan'; rationale?: string; facets?: PlanFacet[] };
 type SseWebResult = { type: 'web_result'; round: number; title?: string | null; url?: string | null; published?: string | null };
 type SseVerify = { type: 'verify'; unsupported: number; notes: string; model?: string };
 type SseFollowups = { type: 'followups'; suggestions: string[] };
-/** v33: emitted the instant the writer finishes — the answer is complete; anything after
- *  (the advisory verifier) is background work and must not read as "still writing". */
-type SseAnswerEnd = { type: 'answer_end'; rounds?: number; citation_count?: number };
 type SseError = { type: 'error'; message: string };
 type SseDone = { type: 'done' };
 
@@ -174,7 +171,6 @@ export type SynthEvent =
   | SseWebResult
   | SseVerify
   | SseFollowups
-  | SseAnswerEnd
   | SseError
   | SseDone;
 
@@ -201,8 +197,6 @@ export type SynthState = {
   webResults: WebResult[];
   verify: VerifyEvt | null;
   followups: string[];
-  /** v33: the writer finished — the answer is complete even while the verifier tail runs */
-  answerComplete: boolean;
   // transient tool-start timestamps keyed by `${round}:${tool}` so we can
   // compute per-step durations when the matching `done` frame arrives.
   _toolStarts: Record<string, number>;
@@ -228,7 +222,6 @@ const INITIAL: SynthState = {
   webResults: [],
   verify: null,
   followups: [],
-  answerComplete: false,
   _toolStarts: {},
 };
 
@@ -481,12 +474,10 @@ function reducer(state: SynthState, action: Action): SynthState {
           };
         case 'search_error':
           return { ...state, error: `Search error (round ${evt.round}): ${evt.message}` };
-        case 'answer_end':
-          return { ...state, answerComplete: true };
         case 'error':
           return { ...state, error: evt.message ?? 'Unknown error' };
         case 'done':
-          return { ...state, running: false, embedding: false, answerComplete: true };
+          return { ...state, running: false, embedding: false };
         default:
           // Unknown/future event type: ignore it rather than returning
           // undefined (which would blank the reducer state and crash render).

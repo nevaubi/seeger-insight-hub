@@ -614,7 +614,6 @@ function SynthesisPanel({
     webResults,
     verify,
     followups,
-    answerComplete,
   } = state;
 
   const [timelineOpen, setTimelineOpen] = useState(true);
@@ -636,7 +635,7 @@ function SynthesisPanel({
           ? 'routing'
           : 'searching';
 
-  const writerActive = running && !answerComplete && writerRound != null && currentRound === writerRound;
+  const writerActive = running && writerRound != null && currentRound === writerRound;
   const answerStarted = useMemo(() => {
     if (writerRound == null) return false;
     const wr = rounds[writerRound];
@@ -904,7 +903,7 @@ function SynthesisPanel({
             )}
 
             <RunCard
-              running={running && !answerComplete}
+              running={running}
               searches={searches}
               notes={notes}
               currentRound={currentRound}
@@ -923,18 +922,10 @@ function SynthesisPanel({
             {showWriting && <WritingIndicator />}
 
             {showAnswer && (
-              <Card className="p-5 lg:p-6 border-border shadow-none motion-fade-rise">
+              <Card className="p-7 border-border shadow-none motion-fade-rise">
                 <div className="flex items-baseline justify-between mb-3">
-                  <div className="flex items-baseline gap-2.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
-                    {running && answerComplete && !verify && (
-                      <span className="inline-flex items-center gap-1.5 text-[10.5px] font-sans text-muted-foreground/80">
-                        <span className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse" />
-                        verifying citations in the background…
-                      </span>
-                    )}
-                  </div>
-                  {(!running || answerComplete) && finalRound != null && rounds[finalRound] && (
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Answer</div>
+                  {!running && finalRound != null && rounds[finalRound] && (
                     <AnswerExportMenu
                       question={submitted ?? 'Research memorandum'}
                       round={rounds[finalRound]}
@@ -947,7 +938,7 @@ function SynthesisPanel({
                   <AnswerStream
                     activeRound={activeRound}
                     isFinal={isFinalActive}
-                    running={running && !answerComplete}
+                    running={running}
                     submitted={!!submitted}
                     citationsByBlock={citationsByBlock}
                     citationByNum={citationByNum}
@@ -1201,7 +1192,7 @@ function RoundHeader({ round, reasoning, streaming }: { round: number; reasoning
       </div>
       <div className="min-w-0 flex-1 pt-[2px]">
         <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 mb-1">
-          Research round {round}
+          Round {round} phase
         </div>
         {shown ? (
           <p className="font-serif text-[13.5px] leading-[1.55] text-foreground/85">
