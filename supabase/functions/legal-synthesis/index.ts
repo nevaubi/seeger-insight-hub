@@ -675,7 +675,7 @@ const STRUCTURED_TOOLS = new Set(["list_orders", "lookup_counsel", "list_deadlin
 function splitSentences(text: string): string[] {
   const norm = (text ?? "").replace(/\s+/g, " ").trim();
   if (!norm) return [];
-  const raw = norm.split(/(?<=[.?!])\s+(?=[A-Z("'\u201c])/);
+  const raw = norm.split(/(?<=[.?!])\s+(?=[A-Z("'“])/);
   const out: string[] = [];
   for (const piece of raw) {
     const t = piece.trim();
@@ -693,7 +693,7 @@ function orderLabel(c: any): string {
 
 function pageCite(c: any): string {
   if (c.page_start == null) return "";
-  return c.page_start === c.page_end ? `p.${c.page_start}` : `p.${c.page_start}\u2013${c.page_end}`;
+  return c.page_start === c.page_end ? `p.${c.page_start}` : `p.${c.page_start}–${c.page_end}`;
 }
 
 function mergeFilters(initial: any, model: any): any {
@@ -724,7 +724,7 @@ function mapRow(r: any, extra: Record<string, unknown> = {}): { searchResult: an
   const sentences = splitSentences(r.content);
   const label = orderLabel(r);
   const page = pageCite(r);
-  const title = `${label}${page ? " \u00b7 " + page : ""}`;
+  const title = `${label}${page ? " · " + page : ""}`;
   const source = r.pdf_url || `mdl:${r.id}`;
   const searchResult = {
     type: "search_result",
@@ -890,10 +890,10 @@ async function clFetch(path: string, params: Record<string, string | undefined>)
 // field syntax, or special characters (observed live). Sanitize before sending: normalize
 // smart quotes, drop unbalanced quoting, strip Solr operators, collapse whitespace, cap.
 function sanitizeClQuery(q: string): string {
-  let s = (q ?? "").replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  let s = (q ?? "").replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
   const quoteCount = (s.match(/"/g) ?? []).length;
   if (quoteCount % 2 !== 0) s = s.replace(/"/g, " ");
-  s = s.replace(/[:{}\[\]^~\\\/!*?()<>|&+=%#@$\u00a7;,]/g, " ");
+  s = s.replace(/[:{}\[\]^~\\\/!*?()<>|&+=%#@$§;,]/g, " ");
   return s.replace(/\s+/g, " ").trim().slice(0, 256);
 }
 
@@ -1993,7 +1993,7 @@ Deno.serve(async (req: Request) => {
               searchesLog.push({ round, tool: "search_caselaw", args: s.c.input, returned: s.cl.count });
               emit({ type: "chunks", round, chunks: s.cl.chunks });
               emit({ type: "tool", round, tool: "search_caselaw", count: s.cl.count, done: true });
-              const lines = s.cl.chunks.map((c: any) => `- ${c.full_citation}${c.cite_count != null ? ` (cited ${c.cite_count}\u00d7)` : ""}`);
+              const lines = s.cl.chunks.map((c: any) => `- ${c.full_citation}${c.cite_count != null ? ` (cited ${c.cite_count}×)` : ""}`);
               const moreNote = s.cl.total > s.cl.count ? ` of ${s.cl.total} matching` : "";
               resultBlocks.push(
                 s.cl.count

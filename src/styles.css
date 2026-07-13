@@ -346,5 +346,11 @@
   border-bottom: 1px solid hsl(215 42% 87%);
 }
 .word-editor-shell .superdoc-toolbar .sd-toolbar-item { flex-shrink: 0; }
-/* overflow chevron is redundant once the toolbar wraps */
-.word-editor-shell .superdoc-toolbar-overflow { display: none; }
+/* keep separators tidy when rows wrap */
+.word-editor-shell .superdoc-toolbar .sd-toolbar-item-ctn { flex-shrink: 0; }
+.word-editor-shell .superdoc-toolbar .button-group {
+  flex-wrap: wrap;
+  height: auto;
+  min-width: 0;
+  row-gap: 2px;
+}

@@ -590,12 +590,6 @@ export default function WordEditor({
           documentMode="editing"
           user={CLAUDE_AUTHOR}
           fonts={superdocFonts}
-          modules={{
-            toolbar: {
-              hideButtons: false,
-              responsiveToContainer: true,
-            },
-          }}
           contained
           className="h-full"
           renderLoading={() => (
@@ -606,6 +600,21 @@ export default function WordEditor({
           onReady={() => {
             setReady(true);
             pushText();
+            // Show every toolbar tool (wrapped onto extra rows via CSS) instead of hiding
+            // overflow behind the breakpoint filter. Passing this through modules.toolbar
+            // at construction clobbers the react wrapper's injected toolbar selector and
+            // stalls the layout engine (v1.44), so it is applied at runtime instead.
+            try {
+              const tb = (ref.current?.getInstance() as any)?.toolbar;
+              if (tb?.config) {
+                tb.config.hideButtons = false;
+                tb.config.responsiveToContainer = true;
+                tb.updateToolbarState?.();
+                tb.onToolbarResize?.();
+              }
+            } catch (e) {
+              console.warn('toolbar unhide failed', e);
+            }
           }}
           onEditorCreate={(e) => {
             editorRef.current = e.editor;
