@@ -289,6 +289,42 @@ export function useRedline() {
     setSuggestions(current.map((s) => (s.status === 'pending' ? { ...s, status: 'rejected' as const } : s)));
   }, [setSuggestions]);
 
+  /** Mark a suggestion resolved WITHOUT applying it to any text — used when an external
+   *  surface (the Word canvas) owns the actual mutation via native tracked changes. */
+  const resolveExternal = useCallback(
+    (id: string, status: 'accepted' | 'rejected') => {
+      const current = suggestionsRef.current;
+      const target = current.find((s) => s.id === id && s.status === 'pending');
+      if (!target) return;
+      persistResolution(target.dbId, status);
+      setSuggestions(current.map((s) => (s.id === id ? { ...s, status } : s)));
+    },
+    [setSuggestions],
+  );
+
+  /** Demote a pending suggestion to the failed rail (e.g. the canvas could not anchor it). */
+  const failLocal = useCallback(
+    (id: string, reason: string) => {
+      const current = suggestionsRef.current;
+      const target = current.find((s) => s.id === id);
+      if (!target) return;
+      setSuggestions(current.filter((s) => s.id !== id));
+      setFailed((prev) => [
+        ...prev,
+        {
+          id: target.id,
+          op: target.op,
+          anchor: target.anchor,
+          reason,
+          count: null,
+          rationale: target.rationale,
+          cite: target.cite,
+        },
+      ]);
+    },
+    [setSuggestions],
+  );
+
   return {
     running,
     error,
@@ -302,6 +338,8 @@ export function useRedline() {
     clear,
     addLocal,
     resolve,
+    resolveExternal,
+    failLocal,
     acceptAll,
     rejectAll,
   };
