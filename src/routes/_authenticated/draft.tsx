@@ -714,6 +714,15 @@ function DocumentBar({
   isLoading,
   onPickDoc,
   onNewDoc,
+  suggestionsOn,
+  onToggleSuggestions,
+  pendingChangeCount,
+  onAcceptAll,
+  onRejectAll,
+  focusMode,
+  onToggleFocus,
+  wordCount,
+  readMin,
 }: {
   title: string;
   onTitleChange: (v: string) => void;
@@ -738,6 +747,15 @@ function DocumentBar({
   isLoading: boolean;
   onPickDoc: (d: WorkspaceDocument) => void;
   onNewDoc: () => void;
+  suggestionsOn: boolean;
+  onToggleSuggestions: () => void;
+  pendingChangeCount: number;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+  focusMode: boolean;
+  onToggleFocus: () => void;
+  wordCount: number;
+  readMin: number;
 }) {
   return (
     <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
@@ -776,6 +794,69 @@ function DocumentBar({
       />
 
       <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {/* Live counts */}
+        <div className="hidden xl:flex items-center gap-2 text-[10.5px] font-sans tabular-nums text-muted-foreground px-1.5">
+          <span>{wordCount.toLocaleString()} words</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span>{readMin} min read</span>
+        </div>
+
+        {/* Suggestions review cluster */}
+        <div className="hidden md:flex items-center h-8 rounded-md border border-border bg-card/60 pl-1 pr-0.5 gap-0.5">
+          <button
+            type="button"
+            onClick={onToggleSuggestions}
+            className={cn(
+              'inline-flex items-center gap-1.5 h-7 px-2 rounded text-[11px] font-sans transition',
+              suggestionsOn ? 'text-accent' : 'text-muted-foreground hover:text-foreground',
+            )}
+            title={
+              suggestionsOn
+                ? 'Suggestions on — edits land as tracked changes'
+                : 'Suggestions off — edits apply directly'
+            }
+          >
+            <GitPullRequestArrow className="h-3.5 w-3.5" />
+            Suggest
+            {pendingChangeCount > 0 && (
+              <span className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-accent/15 text-accent text-[9.5px] font-medium tabular-nums">
+                {pendingChangeCount}
+              </span>
+            )}
+          </button>
+          {pendingChangeCount > 0 && (
+            <>
+              <span className="h-4 w-px bg-border" />
+              <button
+                type="button"
+                onClick={onAcceptAll}
+                className="inline-flex items-center gap-1 h-7 px-1.5 rounded text-[11px] font-sans text-emerald-700 hover:bg-emerald-500/10"
+                title="Accept all suggestions"
+              >
+                <Check className="h-3 w-3" /> All
+              </button>
+              <button
+                type="button"
+                onClick={onRejectAll}
+                className="inline-flex items-center gap-1 h-7 px-1.5 rounded text-[11px] font-sans text-rose-700 hover:bg-rose-500/10"
+                title="Reject all suggestions"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </>
+          )}
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleFocus}
+          className={cn('h-8 w-8 p-0 hidden md:inline-flex', focusMode && 'text-accent')}
+          title={focusMode ? 'Focus mode on (⌘.)' : 'Focus mode (⌘.)'}
+        >
+          <Focus className="h-3.5 w-3.5" />
+        </Button>
+
         <SaveStatus
           dirty={dirty}
           saving={saving}
@@ -783,6 +864,7 @@ function DocumentBar({
           hasActive={hasActive}
           onSave={onSave}
         />
+
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
