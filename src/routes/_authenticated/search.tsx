@@ -461,7 +461,8 @@ function SuggestionDeck({
   const { data, isLoading } = useQuery({
     queryKey: ['question-suggestions', matterSlug],
     queryFn: () => fetchQuestionSuggestions(matterSlug),
-    staleTime: 5 * 60_000,
+    staleTime: 6 * 60 * 60_000, // 6h — cron refreshes every 48h
+    gcTime: 24 * 60 * 60_000,
     retry: false,
     refetchOnWindowFocus: false,
   });

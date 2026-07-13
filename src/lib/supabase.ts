@@ -27,9 +27,8 @@ export interface QuestionSuggestion {
   generated_at: string;
 }
 
-// TODO: flip to true once the `v_question_suggestions` view is provisioned by
-// the cron pipeline. Until then, short-circuit to avoid noisy 404s in the console.
-const SUGGESTIONS_VIEW_ENABLED = false;
+// Backed by the `suggest-questions` edge function on a 48h cron.
+const SUGGESTIONS_VIEW_ENABLED = true;
 
 // Reads the latest 20 curated starter questions for a matter from the
 // cron-populated view. Returns [] if the view doesn't exist yet or the pool

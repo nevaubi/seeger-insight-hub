@@ -1,59 +1,25 @@
+## Wire suggestion cards to the 48-hour cron
 
-# Suggestion refresh — 48h cadence, immediate first run
+Now that the `suggest-questions` cron runs every 48h and populates `v_question_suggestions`, flip the frontend off the fallback path so cards read the live pool.
 
-The "Try a question" cards on the agent chat launcher are backed by the `suggest-questions` edge function on the external Supabase project (`blhcucozljrojnvqosyi`), scheduled via `pg_cron`. Today it fires every 6 hours. Switch to every 48 hours, and kick off the first run immediately.
+### Edits
 
-## Changes
+**1. `src/lib/supabase.ts`**
+- Flip `SUGGESTIONS_VIEW_ENABLED` from `false` → `true`.
+- Remove the stale TODO comment above it.
+- Keep the `try/catch` + `return []` fallback so a missing view still degrades to hardcoded seeds instead of throwing.
 
-### 1. Edge function — extend prune window
-`supabase/functions/suggest-questions/index.ts`
+**2. `src/routes/_authenticated/search.tsx` — `SuggestionDeck`**
+- Bump React Query `staleTime` from `5 * 60_000` to `6 * 60 * 60_000` (6h). The cron writes new batches every 48h, so refetching more than a few times per day is wasted work; 6h keeps tabs opened mid-cycle reasonably fresh.
+- Add `gcTime: 24 * 60 * 60_000` so the cached pool survives navigation between routes within a session.
+- Leave `retry: false` and `refetchOnWindowFocus: false` as-is (silent fallback, no focus thrash).
+- Keep the sessionStorage offset + Shuffle behavior unchanged — it already cycles through the 20-item pool 4 at a time.
 
-- The current `persist()` deletes rows older than 48h. With a 48h cadence, a delayed cron run could briefly leave the table empty. Extend the prune cutoff to **96h** so the previous batch remains readable until the new one lands.
-- No other logic changes. Model, prompt, categories, and count (20) stay the same.
+### Not changing
+- The edge function, cron SQL, or fallback seed list.
+- `FollowUpChips` (post-answer suggestions, unrelated to the starter pool).
 
-### 2. Cron reschedule (external Supabase — SQL to run once)
-Update `.lovable/suggest-questions-setup.md` and provide the SQL for the user to run on the external project:
-
-```sql
--- Drop the old 6h schedule if it exists
-select cron.unschedule('suggest-questions-6h');
-
--- New 48h schedule (runs at 17 minutes past the hour, every 2 days at 00:17 UTC)
-select cron.schedule(
-  'suggest-questions-48h',
-  '17 0 */2 * *',
-  $$
-  select net.http_post(
-    url := 'https://blhcucozljrojnvqosyi.supabase.co/functions/v1/suggest-questions',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-cron-secret', '<SECRET>'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-
--- Fire the first run immediately (don't wait up to 48h)
-select net.http_post(
-  url := 'https://blhcucozljrojnvqosyi.supabase.co/functions/v1/suggest-questions',
-  headers := jsonb_build_object(
-    'Content-Type', 'application/json',
-    'x-cron-secret', '<SECRET>'
-  ),
-  body := '{}'::jsonb
-);
-```
-
-Notes:
-- `17 0 */2 * *` = 00:17 UTC every other day. If you prefer a strict "every 48 hours from now" wall clock, `pg_cron` can't express that directly; the every-other-day schedule is the standard idiom.
-- The immediate `net.http_post` call at the end serves as the "first run right now".
-
-### 3. Frontend — no changes
-`SuggestionDeck` in `src/routes/_authenticated/search.tsx` already reads the latest N rows from `v_question_suggestions` and falls back to hardcoded prompts when empty, so the cadence change is transparent to the UI. The Shuffle button continues to reroll the visible 4 from the pool.
-
-## Verification
-- Deploy the edge function.
-- Run the SQL block above on the external Supabase project.
-- Confirm `select * from cron.job where jobname = 'suggest-questions-48h';` returns one row and the old `suggest-questions-6h` is gone.
-- Reload the search page; the 4 suggestion cards should populate from the fresh batch within seconds.
+### Verification
+- Load `/search` on a fresh session → network tab shows one `v_question_suggestions` request returning up to 20 rows; 4 cards render.
+- Click Shuffle → next 4 rotate in without a refetch.
+- Reload within 6h → no new request (served from cache).
