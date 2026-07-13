@@ -1665,57 +1665,96 @@ function DocumentRail({
       </button>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        {groups.length === 0 && !isLoading && (
-          <div className="p-4 text-[12px] text-muted-foreground">
-            {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
-          </div>
-        )}
-        {groups.map((g) => (
-          <div key={g.label} className="py-1.5">
-            <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
-              {g.label}
+        {mode === 'outline' ? (
+          outline.length === 0 ? (
+            <div className="p-4 text-[12px] text-muted-foreground">
+              No headings yet. Use H1 / H2 / H3 to structure the document.
             </div>
-            {g.items.map((d) => {
-              const active = d.id === activeId;
-              return (
+          ) : (
+            <div className="py-1.5">
+              {outline.map((h, i) => (
                 <button
-                  key={d.id}
+                  key={`${h.pos}-${i}`}
                   type="button"
-                  onClick={() => onPick(d)}
-                  className={cn(
-                    'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
-                    active
-                      ? 'bg-secondary/70 border-accent'
-                      : 'border-transparent hover:bg-secondary/40 hover:border-border',
-                  )}
+                  onClick={() => {
+                    if (!editor) return;
+                    editor.chain().focus().setTextSelection(h.pos + 1).scrollIntoView().run();
+                  }}
+                  className="w-full text-left px-3 py-1.5 border-l-2 border-transparent hover:bg-secondary/40 hover:border-border transition"
+                  style={{ paddingLeft: `${12 + (h.level - 1) * 10}px` }}
                 >
                   <span
                     className={cn(
-                      'truncate text-[12.5px]',
-                      active
-                        ? 'font-semibold text-foreground'
-                        : 'font-medium text-foreground/90',
+                      'block truncate',
+                      h.level === 1
+                        ? 'text-[12.5px] font-serif font-semibold text-foreground'
+                        : h.level === 2
+                          ? 'text-[12px] font-serif text-foreground/90'
+                          : 'text-[11.5px] text-muted-foreground',
                     )}
                   >
-                    {d.title || 'Untitled document'}
-                  </span>
-                  <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
-                    {new Date(d.updated_at).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {h.text}
                   </span>
                 </button>
-              );
-            })}
-          </div>
-        ))}
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            {groups.length === 0 && !isLoading && (
+              <div className="p-4 text-[12px] text-muted-foreground">
+                {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
+              </div>
+            )}
+            {groups.map((g) => (
+              <div key={g.label} className="py-1.5">
+                <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
+                  {g.label}
+                </div>
+                {g.items.map((d) => {
+                  const active = d.id === activeId;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => onPick(d)}
+                      className={cn(
+                        'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                        active
+                          ? 'bg-secondary/70 border-accent'
+                          : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'truncate text-[12.5px]',
+                          active
+                            ? 'font-semibold text-foreground'
+                            : 'font-medium text-foreground/90',
+                        )}
+                      >
+                        {d.title || 'Untitled document'}
+                      </span>
+                      <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
+                        {new Date(d.updated_at).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </aside>
   );
 }
+
 
 // ============================================================
 // Bluebook cite formatting (retained)
