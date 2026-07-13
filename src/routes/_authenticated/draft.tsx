@@ -367,6 +367,56 @@ function DraftPage() {
     toast.success('Citation appended');
   };
 
+  const acceptActive = () => {
+    const ed = editorRef.current;
+    if (!ed || !activeChangeId) return;
+    if (acceptChange(ed, activeChangeId)) {
+      setActiveChangeId(null);
+      setDirty(true);
+    }
+  };
+  const rejectActive = () => {
+    const ed = editorRef.current;
+    if (!ed || !activeChangeId) return;
+    if (rejectChange(ed, activeChangeId)) {
+      setActiveChangeId(null);
+      setDirty(true);
+    }
+  };
+  const regenerateActive = async () => {
+    const ed = editorRef.current;
+    const last = lastTransformRef.current;
+    if (!ed || !activeChangeId || !last) return;
+    // Clear existing insertion, then re-stream into the same change slot.
+    const insR = findMarkRange(ed, 'insertion', activeChangeId);
+    if (insR) {
+      const tr = ed.state.tr.delete(insR.from, insR.to);
+      ed.view.dispatch(tr);
+    }
+    await streamIntoChange(activeChangeId, last.instruction, last.selectionText);
+  };
+
+  const handleAcceptAll = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const n = acceptAll(ed);
+    if (n) {
+      setActiveChangeId(null);
+      setDirty(true);
+      toast.success(`Accepted ${n} suggestion${n === 1 ? '' : 's'}`);
+    }
+  };
+  const handleRejectAll = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const n = rejectAll(ed);
+    if (n) {
+      setActiveChangeId(null);
+      setDirty(true);
+      toast.success(`Rejected ${n} suggestion${n === 1 ? '' : 's'}`);
+    }
+  };
+
   return (
     <AppShell>
       {/* Compact top bar — replaces PageHeader, saves ~110px of vertical space */}
@@ -397,12 +447,23 @@ function DraftPage() {
         isLoading={isLoading}
         onPickDoc={loadDoc}
         onNewDoc={newDocument}
+        suggestionsOn={suggestionsOn}
+        onToggleSuggestions={() => setSuggestionsOn((v) => !v)}
+        pendingChangeCount={pendingChangeCount}
+        onAcceptAll={handleAcceptAll}
+        onRejectAll={handleRejectAll}
+        focusMode={focusMode}
+        onToggleFocus={() => setFocusMode((v) => !v)}
+        wordCount={stats.words}
+        readMin={stats.readMin}
       />
 
       <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
         <DocumentRail
           open={railOpen}
           onToggle={() => setRailOpen((v) => !v)}
+          mode={railMode}
+          onModeChange={setRailMode}
           docs={docs}
           activeId={activeId}
           isLoading={isLoading}
@@ -410,10 +471,16 @@ function DraftPage() {
           setQuery={setRailQuery}
           onPick={loadDoc}
           onNew={newDocument}
+          editor={editorRef.current}
         />
 
         {/* Editor */}
-        <div className="lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)]">
+        <div
+          className={cn(
+            'lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)] relative',
+            focusMode && 'legal-focus-mode',
+          )}
+        >
           <LegalEditor
             value={content}
             onChange={onContentChange}
@@ -430,6 +497,14 @@ function DraftPage() {
               await runInlineTransform(payload);
             }}
             className="flex-1 min-h-0"
+          />
+          <ChangePill
+            editor={editorRef.current}
+            changeId={activeChangeId}
+            streaming={changeStreaming}
+            onAccept={acceptActive}
+            onReject={rejectActive}
+            onRegenerate={regenerateActive}
           />
         </div>
 
