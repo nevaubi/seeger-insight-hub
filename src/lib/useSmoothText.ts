@@ -11,7 +11,7 @@ import { prefersReducedMotion } from './motion';
  * @param running whether the upstream stream is still active
  * @param cps    characters per second to reveal (default ~600)
  */
-export function useSmoothText(full: string, running: boolean, cps = 600): string {
+export function useSmoothText(full: string, running: boolean, cps = 900): string {
   const [shown, setShown] = useState('');
   const shownRef = useRef('');
   const fullRef = useRef('');
