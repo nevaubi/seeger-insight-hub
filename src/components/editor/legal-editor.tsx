@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useEditor, EditorContent, BubbleMenu, type Editor } from '@tiptap/react';
+import { useEditor, EditorContent, type Editor } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Typography from '@tiptap/extension-typography';
@@ -159,7 +160,7 @@ export function LegalEditor({
           <BubbleMenu
             editor={editor}
             options={{ placement: 'top' }}
-            shouldShow={({ from, to }) => to > from}
+            shouldShow={({ from, to }: { from: number; to: number }) => to > from}
             className="bubble-menu"
           >
             <div className="flex items-center gap-0.5 rounded-md border border-border bg-popover shadow-sm px-1 py-1">
