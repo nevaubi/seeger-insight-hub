@@ -457,16 +457,31 @@ function DraftPage() {
     if (!ok) toast.error('Allow pop-ups to print / save as PDF');
   };
 
-  // ---- chat helpers ----
+  // ---- chat helpers: real inserts into the Word canvas ----
   const appendToDoc = (text: string) => {
+    if (wordApi?.insertMarkdown) {
+      const ok = wordApi.insertMarkdown(text, 'cursor');
+      if (ok) {
+        toast.success('Inserted at cursor', { description: 'Placed in the document at the current caret.' });
+        return;
+      }
+      toast.error('Editor rejected the insertion — copied to clipboard instead.');
+    }
     navigator.clipboard?.writeText(text).then(() => {
       toast.message('Copied to clipboard', { description: 'Paste into the document where you need it.' });
     });
   };
 
   const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
-    const text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-    navigator.clipboard?.writeText(text.trim()).then(() => {
+    const text = (variant === 'full' ? formatFullCite(c) : formatShortCite(c)).trim();
+    if (wordApi?.insertPlain) {
+      const ok = wordApi.insertPlain(text, 'cursor');
+      if (ok) {
+        toast.success('Citation inserted at cursor');
+        return;
+      }
+    }
+    navigator.clipboard?.writeText(text).then(() => {
       toast.success('Citation copied — paste at the cursor');
     });
   };
@@ -489,8 +504,9 @@ function DraftPage() {
   return (
     <AppShell>
       <PageHeader
+        slim
         title="Drafting Workspace"
-        description="A Word-grade canvas with Claude inside — select any passage to ask the record, and AI edits arrive as tracked changes, every one anchored to text verified to exist."
+        description="Word canvas · select any passage for Claude · AI edits arrive as tracked changes"
       >
         <div className="flex items-center gap-2">
           <ClaudeBadge variant="chip" className="hidden xl:inline-flex" />
@@ -564,7 +580,7 @@ function DraftPage() {
         </div>
       </PageHeader>
 
-      <div className="px-6 lg:px-8 py-5 lg:h-[calc(100vh-9.5rem)] lg:flex lg:gap-5 lg:overflow-hidden">
+      <div className="px-6 lg:px-8 py-2 lg:h-[calc(100vh-5.25rem)] lg:flex lg:gap-4 lg:overflow-hidden">
         {/* DOCUMENT RAIL */}
         {railOpen && (
           <DocumentRail
@@ -1163,8 +1179,8 @@ function ChatBubble({
 
       {!msg.streaming && msg.content && (
         <div className="flex items-center gap-1.5 px-1">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onAppend(msg.content)}>
-            <Copy className="h-3 w-3" /> Copy for document
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1 text-accent hover:text-accent" onClick={() => onAppend(msg.content)} title="Insert this response into the Word canvas at the cursor">
+            <PenLine className="h-3 w-3" /> Insert into document
           </Button>
           <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={copy}>
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} {copied ? 'Copied' : 'Copy'}

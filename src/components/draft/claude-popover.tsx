@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { BookOpen, Check, Copy, CornerDownLeft, Loader2, MessageSquarePlus, PenLine, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,15 +10,18 @@ import { useAiAssist, type AiAssistCitation, type AiAssistChunk, type AiAssistMa
 import { dedupeCitations, formatPagePin } from '@/lib/bluebook';
 import { cn } from '@/lib/utils';
 
-// The in-canvas Claude affordance: select text in the Word editor and a small Claude
-// mark appears beside the selection; open it to ask grounded questions about the
-// passage. Answers are record-grounded (hybrid retrieval over the matter's controlling
-// orders) with pin-cited chips — source and page aware, never from thin air.
+// The in-canvas Claude affordance: select text in the Word editor and a Claude
+// pill appears just above the selection. Both the pill and the expanded card
+// are portalled to <body> in viewport coordinates so SuperDoc's overflow-hidden
+// canvas can't clip them.
 
 export interface PopoverAnchor {
-  x: number; // px within the word-editor container
+  /** viewport-space (clientX/Y) of the selection's top-right corner */
+  x: number;
   y: number;
   selectionText: string;
+  /** if true, open the card directly instead of showing the pill first (⌘K / right-click) */
+  forceOpen?: boolean;
 }
 
 export function ClaudePopover({
@@ -45,15 +49,15 @@ export function ClaudePopover({
   const { run, running } = useAiAssist();
   const cardRef = useRef<HTMLDivElement | null>(null);
 
-  // reset when the selection anchor changes
+  // reset when the selection anchor changes; auto-expand when the caller forces it
   useEffect(() => {
-    setExpanded(false);
+    setExpanded(Boolean(anchor?.forceOpen));
     setQuestion('');
     setAnswer('');
     setCitations([]);
     setChunks([]);
     setGrounded(null);
-  }, [anchor?.selectionText, anchor?.x, anchor?.y]);
+  }, [anchor?.selectionText, anchor?.x, anchor?.y, anchor?.forceOpen]);
 
   if (!anchor) return null;
 
@@ -95,26 +99,49 @@ export function ClaudePopover({
     });
   };
 
-  // collapsed: just the mark, floating by the selection
+  // clamp to viewport
+  const vw = typeof window === 'undefined' ? 1400 : window.innerWidth;
+  const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
+
+  // collapsed: readable pill above the selection
   if (!expanded) {
-    return (
+    const pillW = 128;
+    const pillH = 28;
+    const left = Math.max(8, Math.min(anchor.x - pillW / 2, vw - pillW - 8));
+    // above the selection when there's room, otherwise below
+    const above = anchor.y - pillH - 10;
+    const top = above > 12 ? above : anchor.y + 22;
+    return createPortal(
       <button
         type="button"
+        data-claude-ui="true"
+        onMouseDown={(e) => e.preventDefault()}
         onClick={() => setExpanded(true)}
-        className="absolute z-30 flex h-7 w-7 items-center justify-center rounded-full border border-[#C96442]/35 bg-white shadow-[0_2px_10px_-2px_rgba(201,100,66,0.45)] transition hover:scale-110 hover:border-[#C96442]/60 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-90 motion-safe:duration-150"
-        style={{ left: anchor.x, top: anchor.y }}
-        title="Ask Claude about this selection — answers grounded in the record"
+        className="fixed z-[100] flex items-center gap-1.5 rounded-full border border-[#C96442]/40 bg-white pl-2 pr-2.5 py-1 shadow-[0_6px_20px_-6px_rgba(201,100,66,0.55)] transition hover:border-[#C96442] hover:shadow-[0_8px_22px_-6px_rgba(201,100,66,0.7)] motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150"
+        style={{ left, top, height: pillH }}
+        title="Ask Claude about this selection (⌘K)"
       >
-        <ClaudeMark className="h-4 w-4" />
-      </button>
+        <ClaudeMark className="h-3.5 w-3.5" />
+        <span className="text-[11.5px] font-sans font-medium text-foreground/85">Ask Claude</span>
+        <kbd className="ml-0.5 rounded border border-border/70 bg-secondary/60 px-1 py-px text-[9px] font-sans text-muted-foreground">⌘K</kbd>
+      </button>,
+      document.body,
     );
   }
 
-  return (
+  // expanded card
+  const cardW = 380;
+  const cardH = 340;
+  const left = Math.max(8, Math.min(anchor.x - cardW / 2, vw - cardW - 8));
+  const below = anchor.y + 12;
+  const top = below + cardH < vh - 8 ? below : Math.max(8, anchor.y - cardH - 12);
+
+  return createPortal(
     <div
       ref={cardRef}
-      className="absolute z-30 w-[380px] max-w-[calc(100%-2rem)] rounded-lg border border-border bg-popover shadow-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-150"
-      style={{ left: Math.max(8, Math.min(anchor.x - 40, 9999)), top: anchor.y + 8 }}
+      data-claude-ui="true"
+      className="fixed z-[100] w-[380px] max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-150"
+      style={{ left, top }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {/* header */}
@@ -128,7 +155,7 @@ export function ClaudePopover({
           type="button"
           className="ml-auto rounded p-0.5 text-muted-foreground hover:text-foreground"
           onClick={onClose}
-          title="Close"
+          title="Close (Esc)"
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -267,6 +294,7 @@ export function ClaudePopover({
           {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <CornerDownLeft className="h-3 w-3" />}
         </Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

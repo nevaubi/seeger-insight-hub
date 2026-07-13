@@ -256,11 +256,33 @@ export function PageHeader({
   title,
   description,
   children,
+  slim = false,
 }: {
   title: string;
   description?: string;
   children?: ReactNode;
+  /** Compact single-row header — for dense workspaces like the drafting canvas. */
+  slim?: boolean;
 }) {
+  if (slim) {
+    return (
+      <div className="border-b border-border bg-card px-6 lg:px-8 py-2">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex items-baseline gap-3">
+            <h1 className="font-serif text-[18px] leading-tight font-semibold tracking-[-0.01em] text-foreground truncate">
+              {title}
+            </h1>
+            {description && (
+              <p className="hidden xl:block font-sans text-[11.5px] text-muted-foreground truncate">
+                {description}
+              </p>
+            )}
+          </div>
+          {children && <div className="flex items-center gap-2 shrink-0">{children}</div>}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="border-b border-border bg-card px-8 py-8">
       <div className="flex items-start justify-between gap-6">
