@@ -2,43 +2,33 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  PenLine,
   Plus,
   Save,
   Trash2,
   FileText as FileTextIcon,
-  Eye,
-  Pencil,
-  Sparkles,
-  Wand2,
   Loader2,
   ChevronDown,
   CornerDownLeft,
   BookOpen,
-  ExternalLink,
   ArrowDownToLine,
-  Copy,
-  Check,
   Mail,
   ListChecks,
   CalendarClock,
   Gavel,
   Search,
-  PanelLeftClose,
-  PanelLeftOpen,
   FileSignature,
   FileSearch,
   ClipboardList,
-  Quote,
+  Sparkles,
+  MoreHorizontal,
+  Layers,
+  X,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { AppShell, PageHeader } from '@/components/app-shell';
+import { AppShell } from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import {
   DropdownMenu,
@@ -59,14 +49,21 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import {
-  supabase,
-  type WorkspaceDocument,
-} from '@/lib/supabase';
+import { supabase, type WorkspaceDocument } from '@/lib/supabase';
 import { useMatter } from '@/lib/matter-context';
-import { useAiAssist, type AiAssistCitation, type AiAssistChunk } from '@/lib/useAiAssist';
-import { downloadDocx, printDocument, blocksToHtml, markdownToBlocks, downloadBlob, exportFilename } from '@/lib/file-export';
+import { useAiAssist } from '@/lib/useAiAssist';
+import {
+  downloadDocx,
+  printDocument,
+  blocksToHtml,
+  markdownToBlocks,
+  downloadBlob,
+  exportFilename,
+} from '@/lib/file-export';
 import { cn } from '@/lib/utils';
+import { LegalEditor } from '@/components/editor/legal-editor';
+import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
+import { VOICE_ACTIONS } from '@/components/editor/voice-actions';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -85,27 +82,16 @@ const docsQuery = (caseId: string) =>
 export const Route = createFileRoute('/_authenticated/draft')({
   component: DraftPage,
   errorComponent: ({ error }) => (
-    <AppShell><div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div></AppShell>
+    <AppShell>
+      <div className="p-8 text-sm text-destructive">Failed to load: {error.message}</div>
+    </AppShell>
   ),
-  notFoundComponent: () => <AppShell><div className="p-8">Not found.</div></AppShell>,
+  notFoundComponent: () => (
+    <AppShell>
+      <div className="p-8">Not found.</div>
+    </AppShell>
+  ),
 });
-
-// Quick inline-transform commands for a text selection.
-const TRANSFORMS: { key: string; label: string; instruction: string }[] = [
-  { key: 'improve', label: 'Improve', instruction: 'Improve the clarity, precision, and flow of this passage without changing its meaning.' },
-  { key: 'formal', label: 'Formalize', instruction: 'Rewrite this passage in a more formal, polished litigation register.' },
-  { key: 'concise', label: 'Shorten', instruction: 'Make this passage more concise while preserving every substantive point.' },
-  { key: 'expand', label: 'Expand', instruction: 'Expand this passage with appropriate detail and supporting reasoning, matching the surrounding style.' },
-];
-
-type ChatMsg = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: AiAssistCitation[];
-  chunks?: AiAssistChunk[];
-  streaming?: boolean;
-};
 
 function DraftPage() {
   const { currentMatter } = useMatter();
@@ -113,22 +99,18 @@ function DraftPage() {
   const qc = useQueryClient();
   const { data: docs = [], isLoading } = useQuery(docsQuery(caseId));
 
-  // ---- editor state ----
   const [activeId, setActiveId] = useState<string | null>(null);
   const [title, setTitle] = useState('Untitled document');
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
-  const [preview, setPreview] = useState(false);
-  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
-  const [transforming, setTransforming] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [railOpen, setRailOpen] = useState(true);
   const [railQuery, setRailQuery] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const cursorRef = useRef<number>(0);
-  const footnoteCounterRef = useRef<number>(0);
+  const [sidecarOpen, setSidecarOpen] = useState(true);
+  const footnoteCounterRef = useRef(0);
   const lastCiteKeyRef = useRef<string | null>(null);
+  const cursorRef = useRef<number>(0);
 
   const matterScope = useMemo(
     () => ({
@@ -141,11 +123,15 @@ function DraftPage() {
     [currentMatter],
   );
 
-  // Load the first document once available (or when the active one disappears).
   useEffect(() => {
     if (activeId && docs.some((d) => d.id === activeId)) return;
     if (docs.length) loadDoc(docs[0]);
-    else { setActiveId(null); setTitle('Untitled document'); setContent(''); setDirty(false); }
+    else {
+      setActiveId(null);
+      setTitle('Untitled document');
+      setContent('');
+      setDirty(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs]);
 
@@ -154,10 +140,8 @@ function DraftPage() {
     setTitle(d.title);
     setContent(d.content);
     setDirty(false);
-    setSelection(null);
   };
 
-  // ---- mutations ----
   const createDoc = useMutation({
     mutationFn: async (doc: { title: string; content: string }) => {
       const { data, error } = await supabase
@@ -216,81 +200,33 @@ function DraftPage() {
     onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
   });
 
-  const newDocument = () => {
-    createDoc.mutate({ title: 'Untitled document', content: '' });
-  };
+  const newDocument = () => createDoc.mutate({ title: 'Untitled document', content: '' });
 
-  // ---- editor change tracking ----
-  const onContentChange = (v: string) => { setContent(v); setDirty(true); };
+  const onContentChange = useCallback((v: string) => {
+    setContent(v);
+    setDirty(true);
+  }, []);
 
-  // ---- autosave (debounced) ----
+  // autosave
   useEffect(() => {
     if (!dirty || !activeId || saveDoc.isPending) return;
-    const t = setTimeout(() => { saveDoc.mutate(); }, 1500);
+    const t = setTimeout(() => saveDoc.mutate(), 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, activeId, title, content]);
 
-  // re-render every 15s so "Saved Xs ago" updates
   useEffect(() => {
     const id = setInterval(() => setSavedTick((n) => n + 1), 15000);
     return () => clearInterval(id);
   }, []);
   void savedTick;
 
-  const syncSelection = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-    cursorRef.current = el.selectionStart;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    if (end > start) setSelection({ start, end });
-    else setSelection(null);
-  };
-
-  // ---- inline transform of the current selection (streams into the editor) ----
-  const { run: runAssist, running: assistRunning } = useAiAssist();
-
-  const runTransform = async (instruction: string) => {
-    const el = textareaRef.current;
-    if (!el || !selection) return;
-    const { start, end } = selection;
-    const selected = content.slice(start, end);
-    if (!selected.trim()) return;
-    const before = content.slice(0, start);
-    const after = content.slice(end);
-    setTransforming(true);
-    let acc = '';
-    const result = await runAssist({
-      mode: 'transform',
-      instruction,
-      selection: selected,
-      document: content,
-      caseId,
-      matter: matterScope,
-      onText: (delta) => {
-        acc += delta;
-        setContent(before + acc + after);
-      },
-    });
-    setTransforming(false);
-    setDirty(true);
-    const finalText = (result?.text ?? acc).trim() || selected;
-    setContent(before + finalText + after);
-    // re-select the replaced range
-    const newEnd = before.length + finalText.length;
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(before.length, newEnd);
-      setSelection({ start: before.length, end: newEnd });
-    });
-    if (result) toast.success('Selection updated');
-  };
-
-
-  // ---- export ----
+  // export
   const exportDocx = () => {
-    downloadDocx(`${currentMatter.short_name}-${title}`.slice(0, 80), markdownToBlocks(content || `# ${title}`));
+    downloadDocx(
+      `${currentMatter.short_name}-${title}`.slice(0, 80),
+      markdownToBlocks(content || `# ${title}`),
+    );
     toast.success('Exported to Word (.docx)');
   };
   const exportPdf = () => {
@@ -302,11 +238,13 @@ function DraftPage() {
     if (!ok) toast.error('Allow pop-ups to print / save as PDF');
   };
   const exportMarkdown = () => {
-    downloadBlob(exportFilename(`${currentMatter.short_name}-${title}`, 'md'), new Blob([content], { type: 'text/markdown;charset=utf-8' }));
+    downloadBlob(
+      exportFilename(`${currentMatter.short_name}-${title}`, 'md'),
+      new Blob([content], { type: 'text/markdown;charset=utf-8' }),
+    );
     toast.success('Exported Markdown (.md)');
   };
 
-  // ---- insertion from chat ----
   const appendToDoc = (text: string) => {
     const next = content ? `${content}\n\n${text}` : text;
     setContent(next);
@@ -314,126 +252,60 @@ function DraftPage() {
     toast.success('Appended to document');
   };
 
-  // Insert a citation in one of three Bluebook forms; auto-substitute *Id.* on repeats.
   const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
     const key = citeSourceKey(c);
     if (variant === 'footnote') {
       const n = ++footnoteCounterRef.current;
       const { marker, definition } = formatFootnoteCite(c, n);
-      // marker at cursor, definition appended to doc end
-      const pos = Math.min(cursorRef.current, content.length);
-      const withMarker = content.slice(0, pos) + marker + content.slice(pos);
-      const withDef = withMarker.trimEnd() + `\n\n${definition}\n`;
+      const withMarker = content.trimEnd() + ' ' + marker;
+      const withDef = withMarker + `\n\n${definition}\n`;
       setContent(withDef);
       setDirty(true);
       lastCiteKeyRef.current = key;
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (el) {
-          const newPos = pos + marker.length;
-          el.focus();
-          el.setSelectionRange(newPos, newPos);
-          cursorRef.current = newPos;
-        }
-      });
       toast.success(`Inserted footnote [^${n}]`);
       return;
     }
-    // Inline (short or full). Substitute *Id.* when the immediately preceding cite is the same source.
-    let text: string;
-    if (lastCiteKeyRef.current === key) {
-      // Look at the last ~6 chars before cursor: if a recent ")" suggests an immediately preceding cite, emit Id.
-      const pos = Math.min(cursorRef.current, content.length);
-      const tail = content.slice(Math.max(0, pos - 4), pos);
-      if (/[).”"]\s*$/.test(tail) || /\)\s*\.?\s*$/.test(tail)) {
-        // need a previous chip to diff page; without prior chip object we just emit *Id.* at <page>
-        text = c.page ? ` (*Id.* at ${formatPagePin(c.page)})` : ' (*Id.*)';
-      } else {
-        text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-      }
-    } else {
-      text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
-    }
+    const text = variant === 'full' ? formatFullCite(c) : formatShortCite(c);
     lastCiteKeyRef.current = key;
-    const pos = Math.min(cursorRef.current, content.length);
-    const next = content.slice(0, pos) + text + content.slice(pos);
+    const next = content.trimEnd() + text;
     setContent(next);
     setDirty(true);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.focus();
-        el.setSelectionRange(pos + text.length, pos + text.length);
-        cursorRef.current = pos + text.length;
-      }
-    });
-    toast.success('Citation inserted');
+    toast.success('Citation appended');
   };
-
-
-  const wordCount = useMemo(() => (content.trim() ? content.trim().split(/\s+/).length : 0), [content]);
 
   return (
     <AppShell>
-      <PageHeader
-        title="Drafting Workspace"
-        description="Draft litigation documents with an AI assistant grounded in the matter's record — highlight any passage to refine it, or generate new sections by chat."
-      >
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setRailOpen((v) => !v)}
-            className="gap-1.5 hidden lg:inline-flex"
-            title={railOpen ? 'Hide document list' : 'Show document list'}
-          >
-            {railOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-          </Button>
-          <div className="lg:hidden">
-            <DocumentMenu docs={docs} activeId={activeId} isLoading={isLoading} onPick={(d) => loadDoc(d)} onNew={newDocument} />
-          </div>
-          <SaveStatus
-            dirty={dirty}
-            saving={saveDoc.isPending}
-            lastSavedAt={lastSavedAt}
-            hasActive={!!activeId}
-            onSave={() => saveDoc.mutate()}
-          />
+      {/* Compact top bar — replaces PageHeader, saves ~110px of vertical space */}
+      <DocumentBar
+        title={title}
+        onTitleChange={(v) => {
+          setTitle(v);
+          setDirty(true);
+        }}
+        dirty={dirty}
+        saving={saveDoc.isPending}
+        lastSavedAt={lastSavedAt}
+        hasActive={!!activeId}
+        onSave={() => saveDoc.mutate()}
+        onExportDocx={exportDocx}
+        onExportPdf={exportPdf}
+        onExportMd={exportMarkdown}
+        canExport={!!content.trim()}
+        onDelete={activeId ? () => deleteDoc.mutate(activeId) : undefined}
+        matterShort={currentMatter.short_name}
+        mdlNumber={currentMatter.mdl_number}
+        railOpen={railOpen}
+        onToggleRail={() => setRailOpen((v) => !v)}
+        sidecarOpen={sidecarOpen}
+        onToggleSidecar={() => setSidecarOpen((v) => !v)}
+        docs={docs}
+        activeId={activeId}
+        isLoading={isLoading}
+        onPickDoc={loadDoc}
+        onNewDoc={newDocument}
+      />
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2" disabled={!content.trim()}>
-                <ArrowDownToLine className="h-4 w-4" /> Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onClick={exportDocx} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word document (.docx)</DropdownMenuItem>
-              <DropdownMenuItem onClick={exportPdf} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / Save as PDF</DropdownMenuItem>
-              <DropdownMenuItem onClick={exportMarkdown} className="gap-2 cursor-pointer"><FileTextIcon className="h-4 w-4 text-muted-foreground" /> Markdown (.md)</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {activeId && (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete this document?</AlertDialogTitle>
-                  <AlertDialogDescription>“{title}” will be permanently removed. This cannot be undone.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => activeId && deleteDoc.mutate(activeId)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          )}
-        </div>
-      </PageHeader>
-
-      <div className="px-6 lg:px-8 py-5 lg:h-[calc(100vh-9.5rem)] lg:flex lg:gap-5 lg:overflow-hidden">
-        {/* DOCUMENT RAIL */}
+      <div className="lg:h-[calc(100vh-6.75rem)] lg:flex lg:overflow-hidden">
         {railOpen && (
           <DocumentRail
             docs={docs}
@@ -445,93 +317,276 @@ function DraftPage() {
             onNew={newDocument}
           />
         )}
-        {/* EDITOR */}
-        <div className="lg:flex-[3] min-w-0 flex flex-col mb-5 lg:mb-0">
 
-          <Card className="p-0 flex flex-col flex-1 overflow-hidden">
-            {/* editor toolbar */}
-            <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-card/60">
-              <Input
-                value={title}
-                onChange={(e) => { setTitle(e.target.value); setDirty(true); }}
-                placeholder="Document title…"
-                className="h-8 border-0 shadow-none px-0 font-serif text-base font-semibold focus-visible:ring-0 bg-transparent"
-              />
-              <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                <span className="text-[11px] text-muted-foreground tabular-nums font-sans mr-1">{wordCount} words</span>
-                <Button variant={preview ? 'ghost' : 'secondary'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setPreview(false)}>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </Button>
-                <Button variant={preview ? 'secondary' : 'ghost'} size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setPreview(true)}>
-                  <Eye className="h-3.5 w-3.5" /> Preview
-                </Button>
-              </div>
-            </div>
-
-            {/* selection transform bar */}
-            {!preview && (
-              <div className={cn(
-                'flex items-center gap-1.5 px-4 py-2 border-b border-border bg-secondary/40 transition-opacity',
-                selection ? 'opacity-100' : 'opacity-50',
-              )}>
-                <Wand2 className="h-3.5 w-3.5 text-accent shrink-0" />
-                <span className="text-[11px] text-muted-foreground font-sans mr-1 shrink-0">
-                  {selection ? `${selection.end - selection.start} chars selected` : 'Select text to refine'}
-                </span>
-                {TRANSFORMS.map((t) => (
-                  <Button key={t.key} variant="outline" size="sm" className="h-6 px-2 text-[11px]" disabled={!selection || transforming} onClick={() => runTransform(t.instruction)}>
-                    {t.label}
-                  </Button>
-                ))}
-                <CustomTransform disabled={!selection || transforming} onRun={(instr) => runTransform(instr)} />
-                {transforming && <Loader2 className="h-3.5 w-3.5 animate-spin text-accent ml-1" />}
-              </div>
-            )}
-
-            {/* editor body */}
-            <div className="flex-1 overflow-y-auto">
-              {preview ? (
-                <div className="answer-prose max-w-[72ch] mx-auto px-6 py-6 font-serif">
-                  {content.trim() ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">Nothing to preview yet.</p>
-                  )}
-                </div>
-              ) : (
-                <Textarea
-                  ref={textareaRef}
-                  value={content}
-                  onChange={(e) => onContentChange(e.target.value)}
-                  onSelect={syncSelection}
-                  onKeyUp={syncSelection}
-                  onClick={syncSelection}
-                  placeholder="Start writing, or ask the assistant to draft a section for you…"
-                  className="w-full h-full min-h-[50vh] resize-none border-0 shadow-none focus-visible:ring-0 rounded-none font-serif text-[15px] leading-[1.7] px-6 py-5 bg-transparent"
-                  spellCheck
-                />
-              )}
-            </div>
-
-          </Card>
+        {/* Editor */}
+        <div className="lg:flex-1 min-w-0 flex flex-col bg-background">
+          <LegalEditor
+            value={content}
+            onChange={onContentChange}
+            onAskClaude={({ text, kind }) => {
+              setSidecarOpen(true);
+              window.dispatchEvent(
+                new CustomEvent('legal-ask-claude', { detail: { text, kind } }),
+              );
+            }}
+            onVoiceAction={async (instruction, sel) => {
+              // Streamed transform runs against the whole document; we replace the first
+              // occurrence of the selected text with the model output.
+              await runInlineTransform(instruction, sel);
+            }}
+            className="flex-1"
+          />
         </div>
 
-        {/* ASSISTANT */}
-        <AssistantPane
-          caseId={caseId}
-          matter={matterScope}
-          documentText={content}
-          onAppend={appendToDoc}
-          onInsertCite={insertCitation}
-        />
+        {sidecarOpen && (
+          <ClaudeSidecar
+            caseId={caseId}
+            matter={matterScope}
+            documentText={content}
+            onAppend={appendToDoc}
+            onInsertCite={insertCitation}
+            onClose={() => setSidecarOpen(false)}
+          />
+        )}
       </div>
     </AppShell>
   );
+
+  async function runInlineTransform(instruction: string, selected: string) {
+    if (!selected.trim()) return;
+    const idx = content.indexOf(selected);
+    if (idx === -1) {
+      // fallback: append the transform result
+      const t = toast.loading('Refining…');
+      let acc = '';
+      const res = await runAssistDirect({
+        mode: 'transform',
+        instruction,
+        selection: selected,
+        document: content,
+        caseId,
+        matter: matterScope,
+        onText: (delta) => {
+          acc += delta;
+        },
+      });
+      toast.dismiss(t);
+      const finalText = (res?.text ?? acc).trim();
+      if (finalText) {
+        setContent(content + '\n\n' + finalText);
+        setDirty(true);
+        toast.success('Refined below');
+      }
+      return;
+    }
+    const before = content.slice(0, idx);
+    const after = content.slice(idx + selected.length);
+    const t = toast.loading('Refining selection…');
+    let acc = '';
+    const res = await runAssistDirect({
+      mode: 'transform',
+      instruction,
+      selection: selected,
+      document: content,
+      caseId,
+      matter: matterScope,
+      onText: (delta) => {
+        acc += delta;
+        setContent(before + acc + after);
+      },
+    });
+    toast.dismiss(t);
+    const finalText = (res?.text ?? acc).trim() || selected;
+    setContent(before + finalText + after);
+    setDirty(true);
+    toast.success('Selection updated');
+  }
 }
 
+// ------- module-local runner so inline transform doesn't need its own hook instance --------
+
+let sharedRunAssist: ReturnType<typeof useAiAssist>['run'] | null = null;
+function useShareRunner() {
+  const { run } = useAiAssist();
+  useEffect(() => {
+    sharedRunAssist = run;
+  }, [run]);
+}
+async function runAssistDirect(req: Parameters<NonNullable<typeof sharedRunAssist>>[0]) {
+  if (!sharedRunAssist) return null;
+  return sharedRunAssist(req);
+}
+
+// ============================================================
+// Document bar (replaces PageHeader on this route)
+// ============================================================
+
+function DocumentBar({
+  title,
+  onTitleChange,
+  dirty,
+  saving,
+  lastSavedAt,
+  hasActive,
+  onSave,
+  onExportDocx,
+  onExportPdf,
+  onExportMd,
+  canExport,
+  onDelete,
+  matterShort,
+  mdlNumber,
+  railOpen,
+  onToggleRail,
+  sidecarOpen,
+  onToggleSidecar,
+  docs,
+  activeId,
+  isLoading,
+  onPickDoc,
+  onNewDoc,
+}: {
+  title: string;
+  onTitleChange: (v: string) => void;
+  dirty: boolean;
+  saving: boolean;
+  lastSavedAt: number | null;
+  hasActive: boolean;
+  onSave: () => void;
+  onExportDocx: () => void;
+  onExportPdf: () => void;
+  onExportMd: () => void;
+  canExport: boolean;
+  onDelete?: () => void;
+  matterShort: string;
+  mdlNumber: string;
+  railOpen: boolean;
+  onToggleRail: () => void;
+  sidecarOpen: boolean;
+  onToggleSidecar: () => void;
+  docs: WorkspaceDocument[];
+  activeId: string | null;
+  isLoading: boolean;
+  onPickDoc: (d: WorkspaceDocument) => void;
+  onNewDoc: () => void;
+}) {
+  return (
+    <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleRail}
+        className="h-8 w-8 p-0 hidden lg:inline-flex"
+        title={railOpen ? 'Hide documents' : 'Show documents'}
+      >
+        <Layers className="h-4 w-4" />
+      </Button>
+      <div className="lg:hidden">
+        <DocumentMenu
+          docs={docs}
+          activeId={activeId}
+          isLoading={isLoading}
+          onPick={onPickDoc}
+          onNew={onNewDoc}
+        />
+      </div>
+
+      <div className="hidden md:flex items-center gap-1.5 text-[10.5px] font-sans uppercase tracking-[0.14em] text-muted-foreground px-1.5">
+        <span className="text-accent/80">{matterShort}</span>
+        <span className="text-muted-foreground/50">·</span>
+        <span>MDL {mdlNumber}</span>
+      </div>
+
+      <div className="h-5 w-px bg-border mx-1 hidden md:block" />
+
+      <Input
+        value={title}
+        onChange={(e) => onTitleChange(e.target.value)}
+        placeholder="Document title…"
+        className="h-8 border-0 shadow-none px-1 font-serif text-[15px] font-semibold focus-visible:ring-0 bg-transparent min-w-[10ch] max-w-[38ch]"
+      />
+
+      <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        <SaveStatus
+          dirty={dirty}
+          saving={saving}
+          lastSavedAt={lastSavedAt}
+          hasActive={hasActive}
+          onSave={onSave}
+        />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={!canExport}>
+              <ArrowDownToLine className="h-3.5 w-3.5" /> Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem onClick={onExportDocx} className="gap-2 cursor-pointer">
+              <FileTextIcon className="h-4 w-4 text-[hsl(215_60%_40%)]" /> Word (.docx)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportPdf} className="gap-2 cursor-pointer">
+              <FileTextIcon className="h-4 w-4 text-muted-foreground" /> Print / PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportMd} className="gap-2 cursor-pointer">
+              <FileTextIcon className="h-4 w-4 text-muted-foreground" /> Markdown (.md)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleSidecar}
+          className={cn('h-8 gap-1.5', sidecarOpen && 'text-accent')}
+          title={sidecarOpen ? 'Hide Claude' : 'Show Claude'}
+        >
+          <ClaudeLogo className="h-4 w-4" />
+          <span className="hidden md:inline">Claude</span>
+        </Button>
+
+        {onDelete && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                title="Delete document"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete this document?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  "{title}" will be permanently removed. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={onDelete}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function DocumentMenu({
-  docs, activeId, isLoading, onPick, onNew,
+  docs,
+  activeId,
+  isLoading,
+  onPick,
+  onNew,
 }: {
   docs: WorkspaceDocument[];
   activeId: string | null;
@@ -543,7 +598,7 @@ function DocumentMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2 max-w-[260px]">
+        <Button variant="outline" size="sm" className="gap-2 max-w-[220px] h-8">
           <FileTextIcon className="h-4 w-4 shrink-0" />
           <span className="truncate">{active?.title ?? 'Documents'}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
@@ -559,15 +614,31 @@ function DocumentMenu({
         </DropdownMenuLabel>
         <div className="max-h-72 overflow-y-auto">
           {docs.map((d) => (
-            <DropdownMenuItem key={d.id} onClick={() => onPick(d)} className={cn('flex flex-col items-start gap-0.5 cursor-pointer', d.id === activeId && 'bg-secondary')}>
-              <span className="truncate w-full font-medium">{d.title || 'Untitled document'}</span>
+            <DropdownMenuItem
+              key={d.id}
+              onClick={() => onPick(d)}
+              className={cn(
+                'flex flex-col items-start gap-0.5 cursor-pointer',
+                d.id === activeId && 'bg-secondary',
+              )}
+            >
+              <span className="truncate w-full font-medium">
+                {d.title || 'Untitled document'}
+              </span>
               <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
-                {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                {new Date(d.updated_at).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
               </span>
             </DropdownMenuItem>
           ))}
           {!isLoading && docs.length === 0 && (
-            <div className="px-2 py-3 text-xs text-muted-foreground">No documents yet — create one.</div>
+            <div className="px-2 py-3 text-xs text-muted-foreground">
+              No documents yet — create one.
+            </div>
           )}
         </div>
       </DropdownMenuContent>
@@ -575,44 +646,253 @@ function DocumentMenu({
   );
 }
 
-function CustomTransform({ disabled, onRun }: { disabled: boolean; onRun: (instruction: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [text, setText] = useState('');
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] gap-1" disabled={disabled}>
-          <Sparkles className="h-3 w-3" /> Custom
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72 p-2">
-        <div className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1.5 px-1">Custom instruction</div>
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="e.g. Rewrite this in the third person and cite the controlling order"
-          className="text-[13px] min-h-[72px] resize-none"
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
-              e.preventDefault();
-              onRun(text.trim());
-              setText('');
-              setOpen(false);
+// ============================================================
+// Sidecar (proposal cards, composer, quick voice actions)
+// ============================================================
+
+function ClaudeSidecar({
+  caseId,
+  matter,
+  documentText,
+  onAppend,
+  onInsertCite,
+  onClose,
+}: {
+  caseId: string;
+  matter: { name: string; short_name: string; mdl_number: string; court: string; judge: string };
+  documentText: string;
+  onAppend: (text: string) => void;
+  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
+  onClose: () => void;
+}) {
+  useShareRunner();
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [input, setInput] = useState('');
+  const [ground, setGround] = useState(true);
+  const { run, running } = useAiAssist();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const idRef = useRef(0);
+  const [scopeText, setScopeText] = useState<string | null>(null);
+  const [scopeKind, setScopeKind] = useState<'selection' | 'paragraph' | null>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [proposals]);
+
+  // Wire the editor's "Ask Claude" affordance
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ text: string; kind: 'selection' | 'paragraph' }>).detail;
+      if (!detail?.text) return;
+      setScopeText(detail.text);
+      setScopeKind(detail.kind);
+    };
+    window.addEventListener('legal-ask-claude', handler);
+    return () => window.removeEventListener('legal-ask-claude', handler);
+  }, []);
+
+  const send = async (override?: string, opts?: { prependScope?: boolean }) => {
+    const raw = (override ?? input).trim();
+    if (!raw || running) return;
+    if (!override) setInput('');
+    let prompt = raw;
+    const scope = scopeText;
+    if (opts?.prependScope && scope) {
+      prompt = `Regarding this ${scopeKind ?? 'passage'}:\n\n"""\n${scope}\n"""\n\n${raw}`;
+    }
+    const id = `p${idRef.current++}`;
+    const scopeLabel = scope
+      ? `Claude · on ${scopeKind === 'selection' ? 'selection' : '¶'}`
+      : 'Claude';
+    setProposals((ps) => [
+      ...ps,
+      { id, prompt: raw, content: '', streaming: true, scopeLabel },
+    ]);
+    setScopeText(null);
+    setScopeKind(null);
+
+    const result = await run({
+      mode: 'draft',
+      instruction: prompt,
+      document: documentText,
+      ground,
+      caseId,
+      matter,
+      onText: (delta) =>
+        setProposals((ps) =>
+          ps.map((x) => (x.id === id ? { ...x, content: x.content + delta } : x)),
+        ),
+    });
+
+    setProposals((ps) =>
+      ps.map((x) =>
+        x.id === id
+          ? {
+              ...x,
+              streaming: false,
+              content: result?.text ?? x.content,
+              citations: result?.citations,
+              chunks: result?.chunks,
             }
-          }}
-        />
-        <div className="flex justify-end mt-2">
-          <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={!text.trim()} onClick={() => { onRun(text.trim()); setText(''); setOpen(false); }}>
-            Apply <CornerDownLeft className="h-3 w-3" />
+          : x,
+      ),
+    );
+  };
+
+  return (
+    <aside className="hidden lg:flex lg:w-[440px] shrink-0 flex-col border-l border-border bg-card">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card/60 shrink-0">
+        <ClaudeLogo className="h-4 w-4" />
+        <span className="text-[13px] font-sans font-medium">Claude</span>
+        <span className="text-[10px] font-sans uppercase tracking-[0.12em] text-muted-foreground border border-border rounded px-1.5 py-0.5">
+          Beta
+        </span>
+        <label className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground font-sans cursor-pointer">
+          <BookOpen className="h-3.5 w-3.5" /> Ground
+          <Switch checked={ground} onCheckedChange={setGround} />
+        </label>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={onClose}
+          title="Close Claude"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 min-h-0">
+        {proposals.length === 0 && (
+          <TemplateLauncher disabled={running} onPick={(t) => send(t.prompt)} />
+        )}
+        {proposals.map((p) => (
+          <ProposalCard
+            key={p.id}
+            p={p}
+            onApply={onAppend}
+            onInsertCite={onInsertCite}
+            formatShortCite={formatShortCite}
+            formatFullCite={formatFullCite}
+            expandLabel={expandLabel}
+            formatPagePin={formatPagePin}
+          />
+        ))}
+      </div>
+
+      <div className="border-t border-border bg-card px-3 py-2.5 shrink-0">
+        {scopeText && (
+          <div className="mb-2 flex items-start gap-2 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5">
+            <span className="text-[10px] uppercase tracking-[0.12em] font-sans text-accent shrink-0 mt-0.5">
+              {scopeKind === 'selection' ? 'Selection' : 'Paragraph'}
+            </span>
+            <p className="text-[12px] font-serif italic text-foreground/80 line-clamp-2 flex-1">
+              "{scopeText}"
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setScopeText(null);
+                setScopeKind(null);
+              }}
+              className="text-muted-foreground hover:text-foreground"
+              title="Clear scope"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+        <div className="relative">
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                send(undefined, { prependScope: !!scopeText });
+              }
+            }}
+            placeholder={
+              scopeText
+                ? 'Ask about the highlighted passage…'
+                : 'Ask Claude to draft or revise…'
+            }
+            className="resize-none min-h-[60px] max-h-[140px] pr-11 text-[13.5px] border-border/70 focus-visible:border-accent/50"
+            disabled={running}
+          />
+          <Button
+            size="sm"
+            className="absolute bottom-2 right-2 h-7 w-7 p-0"
+            disabled={!input.trim() || running}
+            onClick={() => send(undefined, { prependScope: !!scopeText })}
+          >
+            {running ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CornerDownLeft className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <div className="flex items-center justify-between mt-1.5 px-0.5">
+          <span className="text-[10.5px] text-muted-foreground font-sans">
+            Enter to send · ⇧Enter newline{ground ? ' · grounded' : ''}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 px-1.5 text-[10.5px] font-sans text-muted-foreground"
+                disabled={!scopeText}
+                title={scopeText ? 'Apply a voice action to the scoped passage' : 'Highlight text first'}
+              >
+                <Sparkles className="h-3 w-3" /> Voice
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.12em] font-sans text-muted-foreground">
+                Rewrite scoped passage
+              </DropdownMenuLabel>
+              {VOICE_ACTIONS.map((a) => {
+                const Icon = a.icon;
+                return (
+                  <DropdownMenuItem
+                    key={a.key}
+                    onClick={() => {
+                      if (!scopeText) return;
+                      send(a.instruction, { prependScope: true });
+                    }}
+                    className="gap-2"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-accent" />
+                    <div className="flex flex-col">
+                      <span className="text-[12.5px]">{a.label}</span>
+                      <span className="text-[10.5px] text-muted-foreground">{a.hint}</span>
+                    </div>
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </aside>
   );
 }
 
+// ============================================================
+// Templates (retained from previous version, categorised)
+// ============================================================
+
 type DraftTemplate = {
-  category: 'Correspondence' | 'Motions & Briefs' | 'Discovery' | 'Case Management' | 'Hearing Prep' | 'Leadership / PSC';
+  category:
+    | 'Correspondence'
+    | 'Motions & Briefs'
+    | 'Discovery'
+    | 'Case Management'
+    | 'Hearing Prep'
+    | 'Leadership / PSC';
   icon: typeof Mail;
   title: string;
   docType: string;
@@ -621,135 +901,139 @@ type DraftTemplate = {
 };
 
 const DRAFT_TEMPLATES: DraftTemplate[] = [
-  // ---------- Correspondence ----------
   {
-    category: 'Correspondence', icon: Mail, title: 'Meet-and-confer letter', docType: 'Letter',
+    category: 'Correspondence',
+    icon: Mail,
+    title: 'Meet-and-confer letter',
+    docType: 'Letter',
     summary: 'Discovery deficiencies, numbered, tied to the controlling order.',
-    prompt: 'Draft a meet-and-confer letter from Seeger Weiss LLP to defense liaison counsel addressing outstanding discovery deficiencies. Use full letter form: date line, addressee block, "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — Outstanding Discovery Deficiencies" line, salutation, body organized as numbered deficiency items each citing the controlling discovery order and the specific request at issue, a proposal of meet-and-confer times within the next seven days, and a closing signature block for [ATTORNEY NAME], Seeger Weiss LLP. Reserve all rights. Insert [BRACKETED ALL-CAPS] placeholders for any fact not in the record.',
+    prompt:
+      'Draft a meet-and-confer letter from Seeger Weiss LLP to defense liaison counsel addressing outstanding discovery deficiencies. Full letter form: date line, addressee block, "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — Outstanding Discovery Deficiencies" line, salutation, body organized as numbered deficiency items each citing the controlling discovery order and the specific request at issue, a proposal of meet-and-confer times within the next seven days, and a closing signature block for [ATTORNEY NAME], Seeger Weiss LLP. Reserve all rights. Insert [BRACKETED ALL-CAPS] placeholders for any fact not in the record.',
   },
   {
-    category: 'Correspondence', icon: Mail, title: 'Rule 26(f) follow-up letter', docType: 'Letter',
-    summary: 'Memorialize 26(f) topics and open items for joint report.',
-    prompt: 'Draft a Rule 26(f) follow-up letter from Seeger Weiss LLP to defense liaison counsel memorializing the parties\' discussion of the Fed. R. Civ. P. 26(f) topics. Letter form with caption "Re:" line referencing MDL No. 3140. Numbered sections: initial disclosures, ESI protocol status, protective order, discovery sequencing, anticipated motion practice, and proposed deadlines for the joint Rule 26(f) report. Flag points of disagreement neutrally. Signature block with [ATTORNEY NAME].',
-  },
-  {
-    category: 'Correspondence', icon: Mail, title: 'Letter to Magistrate Cannon', docType: 'Letter',
+    category: 'Correspondence',
+    icon: Mail,
+    title: 'Letter to Magistrate Cannon',
+    docType: 'Letter',
     summary: 'Pre-motion discovery dispute letter per the operative procedure.',
-    prompt: 'Draft a pre-motion discovery dispute letter to Magistrate Judge Hope T. Cannon following the procedure set out in the operative discovery management order. Brief letter form: date, "The Honorable Hope T. Cannon, United States Magistrate Judge, United States District Court, Northern District of Florida, Pensacola Division", "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — [SUBJECT]", salutation, three to four short numbered paragraphs stating (1) the dispute, (2) what plaintiffs sought and when, (3) defendants\' position and the parties\' meet-and-confer efforts, and (4) the limited relief requested. Cite the controlling order. Sign-off "Respectfully submitted," with [ATTORNEY NAME], Seeger Weiss LLP, on behalf of Plaintiffs\' co-lead counsel.',
+    prompt:
+      'Draft a pre-motion discovery dispute letter to Magistrate Judge Hope T. Cannon following the procedure set out in the operative discovery management order. Brief letter form with subject line "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — [SUBJECT]", three to four short numbered paragraphs stating (1) the dispute, (2) what plaintiffs sought and when, (3) defendants\' position and meet-and-confer efforts, and (4) the limited relief requested. Cite the controlling order. Sign "Respectfully submitted," with [ATTORNEY NAME], Seeger Weiss LLP.',
   },
   {
-    category: 'Correspondence', icon: Mail, title: 'Litigation-hold reminder', docType: 'Notice',
-    summary: 'Refresher hold to client group, scoped to known custodians.',
-    prompt: 'Draft a litigation-hold reminder memorandum from Seeger Weiss LLP to participating plaintiffs\' counsel and named-plaintiff clients. Memorandum form (TO / FROM / DATE / RE), referencing In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Sections: scope of duty to preserve, categories of materials to preserve (medical records, prescription history, communications with prescribers, social media, device data), preservation steps, prohibition on auto-deletion, and contact for questions. Place [BRACKETED ALL-CAPS] placeholders where facts vary by client.',
-  },
-
-  // ---------- Motions & Briefs ----------
-  {
-    category: 'Motions & Briefs', icon: Gavel, title: 'Motion to compel — outline', docType: 'Motion',
+    category: 'Motions & Briefs',
+    icon: Gavel,
+    title: 'Motion to compel — outline',
+    docType: 'Motion',
     summary: 'Argument headings, governing standard, and proposed relief.',
-    prompt: 'Draft a detailed outline for Plaintiffs\' Motion to Compel Discovery. Begin with the full court caption (UNITED STATES DISTRICT COURT, NORTHERN DISTRICT OF FLORIDA, PENSACOLA DIVISION; In re Depo-Provera caption; MDL No. 3140; Judge Rodgers; Magistrate Judge Cannon). Title: "PLAINTIFFS\' MOTION TO COMPEL DISCOVERY". Sections: Introduction; Background (meet-and-confer history, pin-cited to letters); Legal Standard (Fed. R. Civ. P. 26(b)(1), 37(a), Eleventh Circuit authority); Argument with numbered headings (I., II., A., B.) addressing each disputed request; Conclusion / Proposed Relief; signature block for Plaintiffs\' Co-Lead Counsel; Certificate of Service. Use [BRACKETED ALL-CAPS] placeholders for case-specific facts.',
+    prompt:
+      'Draft a detailed outline for Plaintiffs\' Motion to Compel Discovery. Full court caption; title "PLAINTIFFS\' MOTION TO COMPEL DISCOVERY". Sections: Introduction; Background (meet-and-confer history, pin-cited); Legal Standard (Fed. R. Civ. P. 26(b)(1), 37(a), Eleventh Circuit authority); Argument with numbered headings (I., II., A., B.); Conclusion / Proposed Relief; signature block; Certificate of Service. Use [BRACKETED ALL-CAPS] placeholders for case-specific facts.',
   },
   {
-    category: 'Motions & Briefs', icon: Gavel, title: 'Daubert / Rule 702 response section', docType: 'Brief Section',
+    category: 'Motions & Briefs',
+    icon: Gavel,
+    title: 'Daubert / Rule 702 response section',
+    docType: 'Brief Section',
     summary: 'General-causation expert defense, ties to the gating hearing.',
-    prompt: 'Draft a brief section responding to a Rule 702 / Daubert challenge to Plaintiffs\' general-causation expert(s) on the meningioma–medroxyprogesterone acetate association. No caption — produce the brief section only, suitable for insertion into a larger opposition. Numbered headings (I. Legal Standard; II. Dr. [EXPERT NAME]\'s Methodology Satisfies Rule 702; A. Reliability; B. Fit; III. Defendants\' Critiques Go to Weight, Not Admissibility). Cite Daubert, Kumho Tire, the 2023 amendments to Rule 702, and Eleventh Circuit authority (e.g., Chapman v. Procter & Gamble, McClain v. Metabolife). Use [BRACKETED ALL-CAPS] for expert names, study citations, and record pin cites.',
+    prompt:
+      'Draft a brief section responding to a Rule 702 / Daubert challenge to Plaintiffs\' general-causation expert(s) on the meningioma–medroxyprogesterone acetate association. Numbered headings (I. Legal Standard; II. Dr. [EXPERT NAME]\'s Methodology Satisfies Rule 702; A. Reliability; B. Fit; III. Defendants\' Critiques Go to Weight, Not Admissibility). Cite Daubert, Kumho Tire, the 2023 amendments to Rule 702, and Eleventh Circuit authority. Use [BRACKETED ALL-CAPS] for expert names and record pin cites.',
   },
   {
-    category: 'Motions & Briefs', icon: Gavel, title: 'Opposition to motion to quash', docType: 'Brief',
-    summary: 'Third-party subpoena defense; relevance and proportionality.',
-    prompt: 'Draft an opposition brief responding to a non-party\'s motion to quash a Rule 45 subpoena duces tecum issued by Plaintiffs. Full caption (MDL No. 3140, Judge Rodgers, Magistrate Cannon). Title: "PLAINTIFFS\' OPPOSITION TO [NON-PARTY]\'S MOTION TO QUASH". Sections: Introduction; Factual Background (the subpoena and meet-and-confer); Legal Standard (Fed. R. Civ. P. 45(d), 26(b)(1)); Argument (relevance to general causation, proportionality, narrow tailoring, no undue burden, willingness to negotiate protective terms); Conclusion; signature block; Certificate of Service. Insert [BRACKETED ALL-CAPS] placeholders for the non-party identity and document categories.',
-  },
-  {
-    category: 'Motions & Briefs', icon: Gavel, title: 'Motion to seal under PO', docType: 'Motion',
-    summary: 'Narrow sealing request tied to the operative confidentiality order.',
-    prompt: 'Draft an unopposed motion to file under seal pursuant to the operative Confidentiality / Protective Order in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "UNOPPOSED MOTION TO FILE UNDER SEAL". Sections: Introduction (one paragraph identifying the document and the protective-order designation), Legal Standard (Eleventh Circuit common-law right of access; *Chicago Tribune Co. v. Bridgestone/Firestone, Inc.* test), Argument (narrow tailoring, redactions considered, defendants\' designation), Conclusion / Proposed Order. Signature block; proposed order paragraphs in a separate section labeled "[PROPOSED] ORDER". Insert [BRACKETED ALL-CAPS] placeholders.',
-  },
-
-  // ---------- Discovery ----------
-  {
-    category: 'Discovery', icon: FileSignature, title: "Plaintiffs' First RFPs", docType: 'Discovery Request',
+    category: 'Discovery',
+    icon: FileSignature,
+    title: "Plaintiffs' First RFPs",
+    docType: 'Discovery Request',
     summary: 'Numbered RFPs with definitions and instructions block.',
-    prompt: 'Draft Plaintiffs\' First Set of Requests for Production to Defendants in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "PLAINTIFFS\' FIRST SET OF REQUESTS FOR PRODUCTION TO DEFENDANTS". Sections: I. Definitions (Plaintiffs, Defendants, Depo-Provera, Document, Communication, Concerning, Relevant Time Period, etc.); II. Instructions (incorporate Fed. R. Civ. P. 26 and 34 and the operative ESI protocol); III. Requests (numbered RFP No. 1–[N] on topics including general-causation research, pharmacovigilance signals on meningioma, label change history, FDA correspondence, internal risk assessments). Signature block. Each request on one substantive item.',
+    prompt:
+      'Draft Plaintiffs\' First Set of Requests for Production to Defendants in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Sections: I. Definitions; II. Instructions (Fed. R. Civ. P. 26/34 and operative ESI protocol); III. Requests (numbered RFP No. 1–[N] on general-causation research, pharmacovigilance signals on meningioma, label change history, FDA correspondence, internal risk assessments). Signature block. Each request on one substantive item.',
   },
   {
-    category: 'Discovery', icon: FileSignature, title: 'Subpoena duces tecum (non-party)', docType: 'Subpoena',
-    summary: 'Rule 45 schedule of documents to produce.',
-    prompt: 'Draft Schedule A to a Fed. R. Civ. P. 45 subpoena duces tecum to a non-party in connection with In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Sections: I. Definitions; II. Instructions; III. Documents to be Produced (numbered categories, each scoped narrowly to a defined relevant time period and subject). Note that the subpoena form itself is the AO 88B and need not be reproduced; produce Schedule A only. Use [BRACKETED ALL-CAPS] placeholders for the non-party name and subject matter.',
-  },
-  {
-    category: 'Discovery', icon: FileSignature, title: 'ESI protocol stipulation', docType: 'Stipulation',
+    category: 'Discovery',
+    icon: FileSignature,
+    title: 'ESI protocol stipulation',
+    docType: 'Stipulation',
     summary: 'Skeleton ESI protocol tracking the operative CMO.',
-    prompt: 'Draft a stipulated ESI protocol for In re Depo-Provera Prods. Liab. Litig., MDL No. 3140, tracking the operative case management order. Full caption. Title: "STIPULATED ORDER GOVERNING THE PRODUCTION OF ELECTRONICALLY STORED INFORMATION". Numbered sections: 1. Cooperation; 2. Scope; 3. Custodians and Sources; 4. Search Methodology (TAR / search terms / negotiation); 5. Production Format (TIFF + load file, native for spreadsheets/presentations, color-as-kept); 6. Metadata Fields (table); 7. De-Duplication and Email Threading; 8. Privilege (logging, FRE 502(d)); 9. Hyperlinked / Modern Attachments; 10. Disputes (meet-and-confer, then to Magistrate Judge Cannon); 11. Modification. Signature lines for both sides and "SO ORDERED" line for Magistrate Judge Cannon.',
+    prompt:
+      'Draft a stipulated ESI protocol tracking the operative case management order. Numbered sections: 1. Cooperation; 2. Scope; 3. Custodians and Sources; 4. Search Methodology; 5. Production Format; 6. Metadata Fields (table); 7. De-Duplication and Threading; 8. Privilege (FRE 502(d)); 9. Modern Attachments; 10. Disputes; 11. Modification. Dual signature lines and "SO ORDERED" for Magistrate Judge Cannon.',
   },
-
-  // ---------- Case Management ----------
   {
-    category: 'Case Management', icon: ListChecks, title: 'Joint status report', docType: 'Status Report',
+    category: 'Case Management',
+    icon: ListChecks,
+    title: 'Joint status report',
+    docType: 'Status Report',
     summary: 'Pre-CMC report to Judge Rodgers on open items.',
-    prompt: 'Draft a Joint Status Report to The Honorable M. Casey Rodgers in advance of the next status conference in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "JOINT STATUS REPORT". Numbered sections: I. Case Inventory (transfers, direct filings, anticipated tag-alongs); II. Plaintiff Fact Sheets / Threshold Proof Compliance; III. Defendant Fact Sheets; IV. Document Discovery (status by custodian, hit-report progress); V. Deposition Schedule; VI. Expert Discovery / Daubert; VII. Bellwether Process; VIII. Pending Motions; IX. Proposed Agenda Items. Use a neutral joint voice; insert "Plaintiffs\' Position:" / "Defendants\' Position:" subheadings where the parties disagree. Dual signature block.',
+    prompt:
+      'Draft a Joint Status Report to Judge Rodgers ahead of the next status conference. Full caption. Numbered sections: I. Case Inventory; II. Plaintiff/Defendant Fact Sheets; III. Document Discovery; IV. Deposition Schedule; V. Expert Discovery / Daubert; VI. Bellwether Process; VII. Pending Motions; VIII. Proposed Agenda. Use joint voice; add "Plaintiffs\' Position:" / "Defendants\' Position:" subheads where the parties disagree. Dual signature block.',
   },
   {
-    category: 'Case Management', icon: ListChecks, title: 'Proposed PTO/CMO', docType: 'Proposed Order',
-    summary: 'Caption + IT IS ORDERED numbered paragraphs.',
-    prompt: 'Draft a proposed Pretrial / Case Management Order for In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Title: "PRETRIAL ORDER NO. [XX]: [SHORT SUBJECT]". One-paragraph recital noting the Court\'s consideration of the parties\' submissions and conference, then "Accordingly, IT IS ORDERED that:" followed by numbered operative paragraphs (1., 2., 3.) each stating a single obligation, deadline, or procedure. Close with "DONE AND ORDERED in Chambers in Pensacola, Florida, this [DATE]." and a signature line for "M. CASEY RODGERS, UNITED STATES DISTRICT JUDGE". Insert [BRACKETED ALL-CAPS] placeholders for fact-specific terms.',
+    category: 'Case Management',
+    icon: CalendarClock,
+    title: 'Deadline & obligations summary',
+    docType: 'Memo',
+    summary: 'Tabular summary of upcoming CMO obligations.',
+    prompt:
+      'Draft a memorandum summarizing upcoming deadlines and each party\'s obligations under the operative case management order. Memo header (TO / FROM / DATE / RE). Section 1: Markdown table "Date | Event | Source (PTO/CMO ¶) | Plaintiffs\' Obligation | Defendants\' Obligation". Section 2: narrative of the three most significant deadlines. Cite each row to the controlling order.',
   },
   {
-    category: 'Case Management', icon: CalendarClock, title: 'Status-conference agenda', docType: 'Agenda',
-    summary: 'PSC-facing internal agenda for the next status conference.',
-    prompt: 'Draft an internal status-conference agenda for the Plaintiffs\' Steering Committee in advance of the next conference before Judge Rodgers in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum-style header (TO: PSC; FROM: Co-Lead Counsel; DATE: [INSERT DATE]; RE: Status Conference Agenda). Numbered agenda items grouped under headings: I. Case Inventory; II. Discovery; III. Expert / Daubert; IV. Bellwether Process; V. Pending Motions; VI. Scheduling; VII. Common-Benefit Administration. Under each item, brief bullets for talking points and the proposed speaker. Insert [BRACKETED ALL-CAPS] placeholders.',
-  },
-  {
-    category: 'Case Management', icon: CalendarClock, title: 'Deadline & obligations summary', docType: 'Memo',
-    summary: 'Tabular summary of upcoming dates from the operative CMO.',
-    prompt: 'Draft a memorandum summarizing upcoming deadlines and each party\'s obligations under the operative case management order in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum header (TO / FROM / DATE / RE). Section 1: a Markdown table with columns "Date | Event | Source (PTO/CMO ¶) | Plaintiffs\' Obligation | Defendants\' Obligation". Section 2: narrative discussion of the three most operationally significant deadlines and any conflicts. Cite each row to the controlling order using short forms ("CMO-3 § II.B"). Use [BRACKETED ALL-CAPS] for any obligation not supported by the record.',
-  },
-
-  // ---------- Hearing Prep ----------
-  {
-    category: 'Hearing Prep', icon: FileSearch, title: 'Bench memo', docType: 'Bench Memo',
+    category: 'Hearing Prep',
+    icon: FileSearch,
+    title: 'Bench memo',
+    docType: 'Bench Memo',
     summary: 'Internal bench memo for an upcoming hearing.',
-    prompt: 'Draft an internal bench memo for Plaintiffs\' co-lead counsel preparing for an upcoming hearing in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Header: "MEMORANDUM" with TO / FROM / DATE / RE block. Sections: I. Question Presented; II. Short Answer; III. Background; IV. Discussion (numbered argument with subheadings A., B.); V. Anticipated Questions from the Court; VI. Recommended Talking Points; VII. Open Issues / Follow-up. Bluebook citations throughout. Use [BRACKETED ALL-CAPS] placeholders for record pin cites and witness/expert names.',
+    prompt:
+      'Draft an internal bench memo for Plaintiffs\' co-lead counsel preparing for an upcoming hearing. Header MEMORANDUM with TO / FROM / DATE / RE. Sections: I. Question Presented; II. Short Answer; III. Background; IV. Discussion (I., A., B.); V. Anticipated Questions from the Court; VI. Talking Points; VII. Follow-up. Bluebook throughout. Use [BRACKETED ALL-CAPS] placeholders.',
   },
   {
-    category: 'Hearing Prep', icon: FileSearch, title: 'Cross-examination outline', docType: 'Outline',
+    category: 'Hearing Prep',
+    icon: FileSearch,
+    title: 'Cross-examination outline',
+    docType: 'Outline',
     summary: 'Topic-driven cross outline for an expert witness.',
-    prompt: 'Draft a cross-examination outline for [EXPERT WITNESS NAME], a defense general-causation expert in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Header with witness name, role, and date of testimony [INSERT DATE]. Sections by topic (I., II., III.), each topic broken into lettered subtopics (A., B.), each subtopic broken into numbered questions (1., 2.) with the anticipated answer in parentheses or italics, and an exhibit reference where applicable (e.g., "[Ex. 4 — 2019 deposition at 112:14–18]"). End with "Loose Ends" and "Impeachment Reserves" sections. Place [BRACKETED ALL-CAPS] for facts not in the record.',
+    prompt:
+      'Draft a cross-examination outline for [EXPERT WITNESS NAME], a defense general-causation expert. Header with witness name, role, date. Sections by topic (I., II., III.), subtopics (A., B.), numbered questions with anticipated answer in italics and exhibit references. End with "Loose Ends" and "Impeachment Reserves".',
   },
-
-  // ---------- Leadership / PSC ----------
   {
-    category: 'Leadership / PSC', icon: ClipboardList, title: 'Common-benefit time memo', docType: 'PSC Memo',
+    category: 'Leadership / PSC',
+    icon: ClipboardList,
+    title: 'Common-benefit time memo',
+    docType: 'PSC Memo',
     summary: 'Submission instructions to participating firms.',
-    prompt: 'Draft a memorandum from Plaintiffs\' Co-Lead Counsel to all participating plaintiffs\' firms in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140, setting out the procedures for submitting common-benefit time and expenses under the operative Common Benefit Order. Memorandum header (TO / FROM / DATE / RE). Sections: I. Authority (cite the controlling CBO); II. What Qualifies as Common-Benefit Work; III. Time Submission Procedure (format, monthly deadline, contemporaneous-records requirement, billable categories); IV. Expense Submission Procedure; V. Audit and Approval; VI. Contact. Use [BRACKETED ALL-CAPS] for the time-keeper contact, monthly cut-off, and CBO paragraph numbers if not in the record.',
-  },
-  {
-    category: 'Leadership / PSC', icon: ClipboardList, title: 'Lone Pine compliance analysis', docType: 'Analysis Memo',
-    summary: 'Threshold-proof / Lone Pine compliance read.',
-    prompt: 'Draft an internal analysis memorandum for the Plaintiffs\' Steering Committee evaluating Lone Pine / threshold-proof compliance issues in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Memorandum header (TO: PSC; FROM: Co-Lead Counsel; DATE: [INSERT DATE]; RE: Threshold-Proof Compliance — Analysis and Recommendations). Sections: I. The Operative Order (summarize the threshold-proof requirements with pin cites); II. Categories of Non-Compliance Observed; III. Legal Standard for Dismissal / Show-Cause; IV. Recommended Compliance Push (deadlines, communications, escalation); V. Risk Assessment. Use [BRACKETED ALL-CAPS] for case-counts and dates not in the record.',
+    prompt:
+      'Draft a memorandum from Plaintiffs\' Co-Lead Counsel to all participating firms setting procedures for submitting common-benefit time and expenses under the operative Common Benefit Order. Memo header. Sections: I. Authority; II. What Qualifies; III. Time Submission Procedure; IV. Expense Submission Procedure; V. Audit and Approval; VI. Contact.',
   },
 ];
 
 const TEMPLATE_CATEGORIES: DraftTemplate['category'][] = [
-  'Correspondence', 'Motions & Briefs', 'Discovery', 'Case Management', 'Hearing Prep', 'Leadership / PSC',
+  'Correspondence',
+  'Motions & Briefs',
+  'Discovery',
+  'Case Management',
+  'Hearing Prep',
+  'Leadership / PSC',
 ];
 
 function TemplateLauncher({
-  onPick, disabled,
-}: { onPick: (t: DraftTemplate) => void; disabled: boolean }) {
+  onPick,
+  disabled,
+}: {
+  onPick: (t: DraftTemplate) => void;
+  disabled: boolean;
+}) {
   const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
   const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
   return (
-    <div className="py-3 px-1">
+    <div className="py-2 px-1">
       <div className="text-center mb-4 px-2">
-        <Sparkles className="h-5 w-5 mx-auto mb-2.5 text-accent/70" />
-        <p className="font-serif text-[15px] text-foreground/85 mb-1">Draft from a litigation template.</p>
+        <ClaudeLogo className="h-5 w-5 mx-auto mb-2.5" />
+        <p className="font-serif text-[15px] text-foreground/85 mb-1">
+          Draft with Claude.
+        </p>
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-          Pick a starting form below, or describe what you need. With grounding on, factual claims are
-          cited to the controlling orders in Bluebook short form.
+          Pick a starting form, or describe what you need. Factual claims are cited to the
+          controlling orders when grounding is on.
         </p>
       </div>
 
-      <div className="-mx-1 mb-3 overflow-x-auto">
+      <div className="-mx-1 mb-2.5 overflow-x-auto">
         <div className="flex gap-1 px-1 min-w-min">
           {TEMPLATE_CATEGORIES.map((c) => (
             <button
@@ -778,15 +1062,21 @@ function TemplateLauncher({
               type="button"
               onClick={() => onPick(t)}
               disabled={disabled}
-              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              className="group w-full flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-left transition hover:border-accent/50 hover:bg-accent/5 disabled:opacity-50"
             >
               <Icon className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={1.75} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">{t.title}</span>
-                  <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">{t.docType}</span>
+                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">
+                    {t.title}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">
+                    {t.docType}
+                  </span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{t.summary}</p>
+                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                  {t.summary}
+                </p>
               </div>
             </button>
           );
@@ -796,362 +1086,16 @@ function TemplateLauncher({
   );
 }
 
-// ---------- Bluebook citation formatting ----------
-
-/** Short-form record cite: "(PTO-12, at 4)" */
-function formatShortCite(c: CiteChip): string {
-  const label = c.order_label || c.title || 'Order';
-  const page = c.page ? formatPagePin(c.page) : '';
-  return page ? ` (${label}, at ${page})` : ` (${label})`;
-}
-
-/** Full-form record cite: "(Pretrial Order No. 12, *Case Management Order*, at 4)" */
-function formatFullCite(c: CiteChip): string {
-  const label = c.order_label || 'Order';
-  const title = c.title && c.title !== c.order_label ? `, *${stripLabelEcho(c.title, label)}*` : '';
-  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
-  return ` (${expandLabel(label)}${title}${page})`;
-}
-
-/** Markdown footnote pieces. Caller inserts inline marker and appends definition. */
-function formatFootnoteCite(c: CiteChip, n: number): { marker: string; definition: string } {
-  const label = c.order_label || c.title || 'Order';
-  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
-  const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
-  return {
-    marker: `[^${n}]`,
-    definition: `[^${n}]: ${expandLabel(label)}${page}.${url}`,
-  };
-}
-
-/** "*Id.* at 5" / "*Id.*" for an immediately repeated source. */
-function formatIdCite(prev: CiteChip, c: CiteChip): string | null {
-  const sameSource = (prev.order_label || prev.title) === (c.order_label || c.title);
-  if (!sameSource) return null;
-  if (c.page && c.page !== prev.page) return ` (*Id.* at ${formatPagePin(c.page)})`;
-  return ' (*Id.*)';
-}
-
-function expandLabel(label: string): string {
-  // "PTO-12" → "Pretrial Order No. 12"; "CMO-3" → "Case Management Order No. 3"; "CBO-2" → "Common Benefit Order No. 2"
-  const m = label.match(/^(PTO|CMO|CBO|JPML)[-\s]?(\d+)$/i);
-  if (!m) return label;
-  const kind = m[1].toUpperCase();
-  const num = m[2];
-  const expanded: Record<string, string> = {
-    PTO: 'Pretrial Order No.',
-    CMO: 'Case Management Order No.',
-    CBO: 'Common Benefit Order No.',
-    JPML: 'JPML Transfer Order No.',
-  };
-  return `${expanded[kind] ?? label} ${num}`;
-}
-
-function formatPagePin(page: string): string {
-  // "p.4" → "4"; "p.4–5" → "4–5"; "4-5" → "4–5"
-  return page.replace(/^p\.?\s*/i, '').replace(/-/g, '–');
-}
-
-function stripLabelEcho(title: string, label: string): string {
-  return title.replace(new RegExp(`^${label}[\\s:·—-]+`, 'i'), '').trim() || title;
-}
-
-function citeSourceKey(c: CiteChip): string {
-  return `${c.order_label ?? ''}|${c.title ?? ''}`;
-}
-
-
-
-function AssistantPane({
-  caseId, matter, documentText, onAppend, onInsertCite,
-}: {
-  caseId: string;
-  matter: { name: string; short_name: string; mdl_number: string; court: string; judge: string };
-  documentText: string;
-  onAppend: (text: string) => void;
-  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
-}) {
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [ground, setGround] = useState(true);
-  const { run, running } = useAiAssist();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const idRef = useRef(0);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
-
-  const send = async (override?: string) => {
-    const text = (override ?? input).trim();
-    if (!text || running) return;
-    if (!override) setInput('');
-    const userMsg: ChatMsg = { id: `u${idRef.current++}`, role: 'user', content: text };
-    const asstId = `a${idRef.current++}`;
-    const history = messages.map((m) => ({ role: m.role, content: m.content }));
-    setMessages((m) => [...m, userMsg, { id: asstId, role: 'assistant', content: '', streaming: true }]);
-
-    const result = await run({
-      mode: 'draft',
-      instruction: text,
-      document: documentText,
-      messages: history,
-      ground,
-      caseId,
-      matter,
-      onText: (delta) => {
-        setMessages((m) => m.map((msg) => (msg.id === asstId ? { ...msg, content: msg.content + delta } : msg)));
-      },
-    });
-
-    setMessages((m) => m.map((msg) => (msg.id === asstId
-      ? { ...msg, streaming: false, content: result?.text ?? msg.content, citations: result?.citations, chunks: result?.chunks }
-      : msg)));
-  };
-
-  return (
-    <div className="lg:flex-[2] min-w-0 lg:max-w-[440px] flex flex-col">
-      <Card className="p-0 flex flex-col flex-1 overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card/60">
-          <PenLine className="h-4 w-4 text-accent" />
-          <span className="text-sm font-medium">Drafting assistant</span>
-          <label className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground font-sans cursor-pointer">
-            <BookOpen className="h-3.5 w-3.5" /> Ground in record
-            <Switch checked={ground} onCheckedChange={setGround} />
-          </label>
-        </div>
-
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-[40vh]">
-          {messages.length === 0 && (
-            <TemplateLauncher
-              disabled={running}
-              onPick={(t) => send(t.prompt)}
-            />
-          )}
-          {messages.map((m) => (
-            <ChatBubble key={m.id} msg={m} onAppend={onAppend} onInsertCite={onInsertCite} />
-          ))}
-        </div>
-
-        <div className="border-t border-border p-3">
-          <div className="relative">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-              }}
-              placeholder="Ask the assistant to draft or revise…"
-              className="resize-none min-h-[72px] pr-12 text-[14px]"
-              disabled={running}
-            />
-            <Button size="sm" className="absolute bottom-2 right-2 h-8 w-8 p-0" disabled={!input.trim() || running} onClick={() => send()}>
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <CornerDownLeft className="h-4 w-4" />}
-            </Button>
-          </div>
-          <div className="text-[10.5px] text-muted-foreground mt-1.5 px-1 font-sans">
-            Enter to send · Shift+Enter for a new line{ground ? ' · grounded in the record' : ''}
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function ChatBubble({
-  msg, onAppend, onInsertCite,
-}: {
-  msg: ChatMsg;
-  onAppend: (t: string) => void;
-  onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard?.writeText(msg.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  if (msg.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[88%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-3.5 py-2 text-[14px] leading-relaxed">
-          {msg.content}
-        </div>
-      </div>
-    );
-  }
-
-  const citeChips = dedupeCitations(msg.citations, msg.chunks);
-  const copyAppendix = () => {
-    const lines = citeChips.map((c) => {
-      const label = expandLabel(c.order_label || c.title || 'Order');
-      const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
-      const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
-      return `${c.num}. ${label}${page}.${url}`;
-    });
-    const md = `**Sources**\n\n${lines.join('\n')}\n`;
-    navigator.clipboard?.writeText(md).then(() => toast.success('Sources appendix copied'));
-  };
-  return (
-    <div className="space-y-2">
-      <div className="rounded-2xl rounded-bl-sm bg-secondary/50 border border-border px-3.5 py-2.5">
-        <div className="answer-prose text-[14px] leading-[1.65] font-serif">
-          {msg.content ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-          ) : msg.streaming ? (
-            <span className="text-muted-foreground inline-flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Drafting…</span>
-          ) : null}
-          {msg.streaming && msg.content && <span className="motion-stream-caret" aria-hidden />}
-        </div>
-
-        {citeChips.length > 0 && (
-          <div className="mt-2.5 pt-2 border-t border-border/60">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
-                Citations <span className="text-muted-foreground/60">({citeChips.length})</span>
-              </div>
-              <button
-                type="button"
-                onClick={copyAppendix}
-                className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/80 hover:text-accent font-sans inline-flex items-center gap-1"
-                title="Copy a Markdown Sources appendix for the bottom of a brief"
-              >
-                <Copy className="h-2.5 w-2.5" /> Sources appendix
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {citeChips.map((c, i) => (
-                <CitationChip key={i} c={c} onInsertCite={onInsertCite} />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {!msg.streaming && msg.content && (
-        <div className="flex items-center gap-1.5 px-1">
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={() => onAppend(msg.content)}>
-            <Plus className="h-3 w-3" /> Append
-          </Button>
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={copy}>
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />} {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CitationChip({
-  c, onInsertCite,
-}: { c: CiteChip; onInsertCite: (c: CiteChip, variant: 'short' | 'full' | 'footnote') => void }) {
-  const label = c.order_label ?? c.title ?? 'Source';
-  const copyBluebook = () => {
-    const text = formatShortCite(c).trim();
-    navigator.clipboard?.writeText(text).then(() => toast.success('Bluebook cite copied'));
-  };
-  return (
-    <span
-      className="group inline-flex items-center gap-1 text-[11px] rounded border border-border bg-card hover:border-accent/50 transition overflow-hidden"
-      title={c.cited_text ? `"${c.cited_text}"` : undefined}
-    >
-      {c.pdf_url ? (
-        <a href={c.pdf_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80 hover:text-foreground">
-          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-          <span>{label}</span>
-          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
-          <ExternalLink className="h-2.5 w-2.5 opacity-60" />
-        </a>
-      ) : (
-        <span className="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 text-foreground/80">
-          <span className="font-sans font-medium tabular-nums text-accent">[{c.num}]</span>
-          <span>{label}</span>
-          {c.page && <span className="text-muted-foreground tabular-nums">· {formatPagePin(c.page)}</span>}
-        </span>
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            title="Insert this citation"
-            className="px-1 py-0.5 border-l border-border text-muted-foreground hover:text-accent hover:bg-accent/5"
-          >
-            <Plus className="h-2.5 w-2.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60 text-[12px]">
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
-            Insert at cursor
-          </DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => onInsertCite(c, 'short')} className="flex flex-col items-start gap-0.5">
-            <span className="font-medium">Short form</span>
-            <span className="font-serif italic text-muted-foreground text-[11px]">{formatShortCite(c).trim()}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onInsertCite(c, 'full')} className="flex flex-col items-start gap-0.5">
-            <span className="font-medium">Full citation</span>
-            <span className="font-serif italic text-muted-foreground text-[11px] line-clamp-2">{formatFullCite(c).trim()}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onInsertCite(c, 'footnote')} className="flex flex-col items-start gap-0.5">
-            <span className="font-medium">Footnote</span>
-            <span className="font-serif italic text-muted-foreground text-[11px]">Inline [^n] + definition at doc end</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={copyBluebook}>
-            <Copy className="h-3 w-3 mr-2" /> Copy Bluebook cite
-          </DropdownMenuItem>
-          {c.cited_text && (
-            <>
-              <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 max-w-[14rem]">
-                <div className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans mb-1 inline-flex items-center gap-1">
-                  <Quote className="h-2.5 w-2.5" /> Cited text
-                </div>
-                <p className="font-serif italic text-[11px] leading-snug text-foreground/80 line-clamp-4">
-                  "{c.cited_text}"
-                </p>
-              </div>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
-  );
-}
-
-type CiteChip = {
-  num: number;
-  order_label: string | null;
-  page: string | null;
-  title?: string;
-  cited_text?: string;
-  pdf_url: string | null;
-};
-
-function dedupeCitations(citations?: AiAssistCitation[], chunks?: AiAssistChunk[]): CiteChip[] {
-  if (!citations?.length) return [];
-  const byRef = new Map((chunks ?? []).map((c) => [c.ref, c]));
-  const seen = new Map<string, CiteChip>();
-  for (const c of citations) {
-    const key = `${c.order_label ?? c.title ?? ''}|${c.page ?? ''}`;
-    if (seen.has(key)) continue;
-    const chunk = c.ref ? byRef.get(c.ref) : undefined;
-    seen.set(key, {
-      num: c.num,
-      order_label: c.order_label,
-      page: c.page,
-      title: c.title,
-      cited_text: c.cited_text,
-      pdf_url: chunk?.pdf_url ?? null,
-    });
-  }
-  return Array.from(seen.values());
-}
+// ============================================================
+// Save status & document rail
+// ============================================================
 
 function SaveStatus({
-  dirty, saving, lastSavedAt, hasActive, onSave,
+  dirty,
+  saving,
+  lastSavedAt,
+  hasActive,
+  onSave,
 }: {
   dirty: boolean;
   saving: boolean;
@@ -1163,7 +1107,7 @@ function SaveStatus({
   let status: { label: string; cls: string };
   if (saving) status = { label: 'Saving…', cls: 'text-muted-foreground' };
   else if (!hasActive) status = { label: 'Not saved', cls: 'text-muted-foreground' };
-  else if (dirty) status = { label: 'Unsaved changes', cls: 'text-amber-600' };
+  else if (dirty) status = { label: 'Unsaved', cls: 'text-amber-600' };
   else if (lastSavedAt) status = { label: `Saved ${ago}`, cls: 'text-muted-foreground' };
   else status = { label: 'Saved', cls: 'text-muted-foreground' };
 
@@ -1174,12 +1118,16 @@ function SaveStatus({
       disabled={saving || (!dirty && hasActive)}
       title={dirty ? 'Save now' : 'Up to date'}
       className={cn(
-        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border bg-card text-[11.5px] font-sans tabular-nums transition',
-        'hover:border-accent/40 disabled:opacity-70 disabled:cursor-default',
+        'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[11.5px] font-sans tabular-nums transition',
+        'hover:text-accent disabled:opacity-70 disabled:cursor-default',
         status.cls,
       )}
     >
-      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+      {saving ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <Save className="h-3.5 w-3.5" />
+      )}
       {status.label}
     </button>
   );
@@ -1203,7 +1151,13 @@ function useRelativeTime(ts: number | null): string {
 }
 
 function DocumentRail({
-  docs, activeId, isLoading, query, setQuery, onPick, onNew,
+  docs,
+  activeId,
+  isLoading,
+  query,
+  setQuery,
+  onPick,
+  onNew,
 }: {
   docs: WorkspaceDocument[];
   activeId: string | null;
@@ -1216,7 +1170,9 @@ function DocumentRail({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return docs;
-    return docs.filter((d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q));
+    return docs.filter(
+      (d) => d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q),
+    );
   }, [docs, query]);
 
   const groups = useMemo(() => {
@@ -1238,66 +1194,150 @@ function DocumentRail({
   }, [filtered]);
 
   return (
-    <aside className="hidden lg:flex lg:w-60 shrink-0 flex-col">
-      <Card className="p-0 flex flex-col flex-1 overflow-hidden">
-        <div className="px-3 py-2.5 border-b border-border bg-card/60 flex items-center gap-2">
-          <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
-            {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
-          </span>
-          <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-[11.5px]" onClick={onNew}>
-            <Plus className="h-3.5 w-3.5" /> New
-          </Button>
+    <aside className="hidden lg:flex lg:w-56 shrink-0 flex-col border-r border-border bg-card/40">
+      <div className="px-3 py-2 border-b border-border flex items-center gap-2 shrink-0">
+        <span className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
+          {isLoading ? 'Loading…' : `${docs.length} doc${docs.length === 1 ? '' : 's'}`}
+        </span>
+        <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 text-[11.5px]" onClick={onNew}>
+          <Plus className="h-3.5 w-3.5" /> New
+        </Button>
+      </div>
+      <div className="px-2.5 py-2 border-b border-border shrink-0">
+        <div className="relative">
+          <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search documents…"
+            className="h-8 pl-7 text-[12.5px]"
+          />
         </div>
-        <div className="px-3 py-2 border-b border-border">
-          <div className="relative">
-            <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search documents…"
-              className="h-8 pl-7 text-[12.5px]"
-            />
+      </div>
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {groups.length === 0 && !isLoading && (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
           </div>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {groups.length === 0 && !isLoading && (
-            <div className="p-4 text-[12px] text-muted-foreground">
-              {docs.length === 0 ? 'No documents yet — create one.' : 'No matches.'}
+        )}
+        {groups.map((g) => (
+          <div key={g.label} className="py-1.5">
+            <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
+              {g.label}
             </div>
-          )}
-          {groups.map((g) => (
-            <div key={g.label} className="py-1.5">
-              <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/80 font-sans">
-                {g.label}
-              </div>
-              {g.items.map((d) => {
-                const active = d.id === activeId;
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => onPick(d)}
+            {g.items.map((d) => {
+              const active = d.id === activeId;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => onPick(d)}
+                  className={cn(
+                    'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                    active
+                      ? 'bg-secondary/70 border-accent'
+                      : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                  )}
+                >
+                  <span
                     className={cn(
-                      'w-full text-left px-3 py-2 border-l-2 transition flex flex-col gap-0.5',
+                      'truncate text-[12.5px]',
                       active
-                        ? 'bg-secondary/70 border-accent'
-                        : 'border-transparent hover:bg-secondary/40 hover:border-border',
+                        ? 'font-semibold text-foreground'
+                        : 'font-medium text-foreground/90',
                     )}
                   >
-                    <span className={cn('truncate text-[12.5px]', active ? 'font-semibold text-foreground' : 'font-medium text-foreground/90')}>
-                      {d.title || 'Untitled document'}
-                    </span>
-                    <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
-                      {new Date(d.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </Card>
+                    {d.title || 'Untitled document'}
+                  </span>
+                  <span className="text-[10.5px] text-muted-foreground tabular-nums font-sans">
+                    {new Date(d.updated_at).toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </aside>
   );
 }
 
+// ============================================================
+// Bluebook cite formatting (retained)
+// ============================================================
+
+function formatShortCite(c: CiteChip): string {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? formatPagePin(c.page) : '';
+  return page ? ` (${label}, at ${page})` : ` (${label})`;
+}
+
+function formatFullCite(c: CiteChip): string {
+  const label = c.order_label || 'Order';
+  const title = c.title && c.title !== c.order_label ? `, *${stripLabelEcho(c.title, label)}*` : '';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  return ` (${expandLabel(label)}${title}${page})`;
+}
+
+function formatFootnoteCite(c: CiteChip, n: number): { marker: string; definition: string } {
+  const label = c.order_label || c.title || 'Order';
+  const page = c.page ? `, at ${formatPagePin(c.page)}` : '';
+  const url = c.pdf_url ? ` <${c.pdf_url}>` : '';
+  return { marker: `[^${n}]`, definition: `[^${n}]: ${expandLabel(label)}${page}.${url}` };
+}
+
+function expandLabel(label: string): string {
+  const m = label.match(/^(PTO|CMO|CBO|JPML)[-\s]?(\d+)$/i);
+  if (!m) return label;
+  const kind = m[1].toUpperCase();
+  const num = m[2];
+  const expanded: Record<string, string> = {
+    PTO: 'Pretrial Order No.',
+    CMO: 'Case Management Order No.',
+    CBO: 'Common Benefit Order No.',
+    JPML: 'JPML Transfer Order No.',
+  };
+  return `${expanded[kind] ?? label} ${num}`;
+}
+
+function formatPagePin(page: string): string {
+  return page.replace(/^p\.?\s*/i, '').replace(/-/g, '–');
+}
+
+function stripLabelEcho(title: string, label: string): string {
+  return title.replace(new RegExp(`^${label}[\\s:·—-]+`, 'i'), '').trim() || title;
+}
+
+function citeSourceKey(c: CiteChip): string {
+  return `${c.order_label ?? ''}|${c.title ?? ''}`;
+}
+
+// ============================================================
+// Claude logo (compact, degrades gracefully)
+// ============================================================
+
+function ClaudeLogo({ className }: { className?: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <MoreHorizontal
+        className={cn('text-[#C96442]', className)}
+        strokeWidth={2}
+        aria-hidden
+      />
+    );
+  }
+  return (
+    <img
+      src="https://cdn.simpleicons.org/claude/C96442"
+      alt=""
+      className={className}
+      onError={() => setBroken(true)}
+    />
+  );
+}
