@@ -105,7 +105,16 @@ function DraftPage() {
   const [dirty, setDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const raw = window.localStorage.getItem('draft.railOpen');
+    return raw == null ? true : raw === '1';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('draft.railOpen', railOpen ? '1' : '0');
+    }
+  }, [railOpen]);
   const [railQuery, setRailQuery] = useState('');
   const [sidecarOpen, setSidecarOpen] = useState(true);
   const footnoteCounterRef = useRef(0);
@@ -305,21 +314,21 @@ function DraftPage() {
         onNewDoc={newDocument}
       />
 
-      <div className="lg:h-[calc(100vh-6.75rem)] lg:flex lg:overflow-hidden">
-        {railOpen && (
-          <DocumentRail
-            docs={docs}
-            activeId={activeId}
-            isLoading={isLoading}
-            query={railQuery}
-            setQuery={setRailQuery}
-            onPick={loadDoc}
-            onNew={newDocument}
-          />
-        )}
+      <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
+        <DocumentRail
+          open={railOpen}
+          onToggle={() => setRailOpen((v) => !v)}
+          docs={docs}
+          activeId={activeId}
+          isLoading={isLoading}
+          query={railQuery}
+          setQuery={setRailQuery}
+          onPick={loadDoc}
+          onNew={newDocument}
+        />
 
         {/* Editor */}
-        <div className="lg:flex-1 min-w-0 flex flex-col bg-background">
+        <div className="lg:flex-1 min-w-0 min-h-0 flex flex-col bg-[color-mix(in_oklab,var(--card)_35%,transparent)]">
           <LegalEditor
             value={content}
             onChange={onContentChange}
@@ -334,7 +343,7 @@ function DraftPage() {
               // occurrence of the selected text with the model output.
               await runInlineTransform(instruction, sel);
             }}
-            className="flex-1"
+            className="flex-1 min-h-0"
           />
         </div>
 
