@@ -198,6 +198,9 @@ export type SynthState = {
   expansions: Record<number, number>;
   // v30 additive
   plan: PlanEvt | null;
+  planReasoning: string;
+  planModel: string | null;
+  planStreaming: boolean;
   webResults: WebResult[];
   verify: VerifyEvt | null;
   followups: string[];
