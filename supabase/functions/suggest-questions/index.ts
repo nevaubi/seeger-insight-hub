@@ -166,8 +166,9 @@ async function persist(matterSlug: string, items: { question: string; category: 
     body: JSON.stringify(rows),
   });
   if (!ins.ok) throw new Error(`insert ${ins.status}: ${(await ins.text()).slice(0, 200)}`);
-  // Prune anything older than 48h for this matter.
-  const cutoff = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+  // Prune anything older than 96h for this matter (keeps prior batch readable
+  // between 48h cron runs in case of delay).
+  const cutoff = new Date(Date.now() - 96 * 3600 * 1000).toISOString();
   await fetch(`${SUPABASE_URL}/rest/v1/question_suggestions?matter_slug=eq.${matterSlug}&generated_at=lt.${cutoff}`, {
     method: "DELETE",
     headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
