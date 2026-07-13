@@ -580,7 +580,7 @@ function DraftPage() {
         </div>
       </PageHeader>
 
-      <div className="px-6 lg:px-8 py-5 lg:h-[calc(100vh-9.5rem)] lg:flex lg:gap-5 lg:overflow-hidden">
+      <div className="px-6 lg:px-8 py-2 lg:h-[calc(100vh-5.25rem)] lg:flex lg:gap-4 lg:overflow-hidden">
         {/* DOCUMENT RAIL */}
         {railOpen && (
           <DocumentRail
