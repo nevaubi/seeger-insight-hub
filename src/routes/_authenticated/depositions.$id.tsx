@@ -416,6 +416,72 @@ function DepositionWorkspace() {
 
   const searchLower = search.trim().toLowerCase();
 
+  // Compile regex if enabled; falls back to substring match on parse errors.
+  const searchRegex = useMemo(() => {
+    if (!useRegex || !search.trim()) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [useRegex, search]);
+  const regexInvalid = useRegex && search.trim().length > 0 && !searchRegex;
+
+  const lineMatchesSpeaker = useCallback(
+    (kind: string | undefined) => {
+      if (speakerFilter === 'any') return true;
+      const k = (kind || '').toLowerCase();
+      if (speakerFilter === 'q') return k === 'question';
+      if (speakerFilter === 'a') return k === 'answer';
+      if (speakerFilter === 'obj') return k === 'objection';
+      return true;
+    },
+    [speakerFilter],
+  );
+
+  const lineHitsSearch = useCallback(
+    (text: string) => {
+      if (!search.trim()) return false;
+      if (searchRegex) return searchRegex.test(text);
+      return text.toLowerCase().includes(searchLower);
+    },
+    [search, searchLower, searchRegex],
+  );
+
+  // Ordered list of matching line ids (for prev/next nav).
+  const matches = useMemo(() => {
+    const out: { page: number; line: number }[] = [];
+    const hasSearch = search.trim().length > 0;
+    const hasSpeaker = speakerFilter !== 'any';
+    if (!hasSearch && !hasSpeaker) return out;
+    for (const l of linesQ.data ?? []) {
+      const seg = segmentByLineKey.get(`${l.page}-${l.line}`);
+      if (hasSpeaker && !lineMatchesSpeaker(seg?.kind)) continue;
+      if (hasSearch && !lineHitsSearch(l.text)) continue;
+      out.push({ page: l.page, line: l.line });
+    }
+    return out;
+  }, [linesQ.data, search, speakerFilter, segmentByLineKey, lineMatchesSpeaker, lineHitsSearch]);
+
+  // Clamp match index when result set changes.
+  useEffect(() => {
+    if (matchIdx >= matches.length) setMatchIdx(0);
+  }, [matches.length, matchIdx]);
+
+  const jumpToMatch = useCallback(
+    (idx: number) => {
+      if (matches.length === 0) return;
+      const clamped = ((idx % matches.length) + matches.length) % matches.length;
+      setMatchIdx(clamped);
+      const m = matches[clamped];
+      const anchor = document.getElementById(`line-${m.page}-${m.line}`);
+      anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    [matches],
+  );
+
+
+
   // Findings by type
   const findings = findingsQ.data ?? [];
   const byType = useMemo(() => {
