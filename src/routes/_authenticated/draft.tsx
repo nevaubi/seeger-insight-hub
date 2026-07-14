@@ -342,6 +342,32 @@ function DraftPage() {
     toast.success('Exported Markdown (.md)');
   };
 
+  const polishBluebook = useCallback(() => {
+    if (!content.trim()) {
+      toast.error('Nothing to polish yet');
+      return;
+    }
+    const { markdown, report } = normalizeBluebook(content);
+    if (markdown === content) {
+      toast.success('Citations already Bluebook-clean');
+      return;
+    }
+    setContent(markdown);
+    setDirty(true);
+    const total = Object.values(report.totals).reduce((a, b) => a + b, 0);
+    const bits: string[] = [];
+    if (report.totals.reporter) bits.push(`${report.totals.reporter} reporter${report.totals.reporter === 1 ? '' : 's'}`);
+    if (report.totals.signal) bits.push(`${report.totals.signal} signal${report.totals.signal === 1 ? '' : 's'}`);
+    if (report.totals.id) bits.push(`${report.totals.id} Id.`);
+    if (report.totals.short) bits.push(`${report.totals.short} short-form`);
+    if (report.totals.pincite) bits.push(`${report.totals.pincite} pincite${report.totals.pincite === 1 ? '' : 's'}`);
+    if (report.totals.italic) bits.push(`${report.totals.italic} italics`);
+    if (report.totals.smart) bits.push(`${report.totals.smart} smart quote${report.totals.smart === 1 ? '' : 's'}`);
+    toast.success(`Bluebook polish · ${total} fix${total === 1 ? '' : 'es'}`, {
+      description: bits.join(' · ') || undefined,
+    });
+  }, [content]);
+
   const appendToDoc = (text: string) => {
     const next = content ? `${content}\n\n${text}` : text;
     setContent(next);
