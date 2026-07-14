@@ -1,39 +1,28 @@
-## Drafting page polish — 3 surgical additions
+## Fix 1 — Accept/Reject/Retry pill not appearing after regenerate
 
-### 1. Compact the body type
-Current editor body sits around 17–18px with generous leading, which reads oversized on a 1214px viewport.
+**Root cause.** The pill only renders when a track-change is created, and that only happens on the "suggestions ON" path in `runInlineTransform` (src/routes/_authenticated/draft.tsx:595). When we removed the "Suggest" header button in a prior pass, we left the underlying `suggestionsOn` state — which reads from `localStorage['draft.suggestions']`. Any user (like you) whose localStorage still has `'0'` from an earlier session now silently falls into the OFF path: the edit is applied in-place, no `changeId` is created, and `ChangePill` has nothing to anchor to.
 
-- Drop base body from ~17px → **15px** (headings scale down proportionally: H1 26→22, H2 20→18, H3 17→16).
-- Tighten line-height 1.7 → **1.55** for body, 1.35 for headings.
-- Ligatures + tabular-nums stay on. Print/DOCX export sizing untouched — this is screen-only via the `.legal-editor-content` scope in `src/styles.css`.
+**Fix.** Since there's no longer a UI to toggle suggestions, force the ON path always:
+- Remove the `suggestionsOn` state, its localStorage read/write, and the `if (!suggestionsOn) { …direct replace… }` branch in `runInlineTransform`.
+- Always create the deletion/insertion track-change pair and stream into it, so `ChangePill` renders with Accept / Reject / Retry every time.
 
-### 2. Visible page/document boundaries
-Give the editor real paper chrome so it reads as a document, not a text box.
+No changes to `ChangePill` itself — it works, it just wasn't being given a `changeId`.
 
-- Wrap the ProseMirror surface in a `.page-sheet` element: white (`--card`) rectangle, `box-shadow: 0 1px 2px, 0 8px 24px -12px`, thin `1px` hairline border in `--border`, `8.5in` max-width capped by container.
-- Parchment/navy app background shows around it → the sheet floats.
-- Optional faint 1in margin guides (dashed `--border/40`) toggled by a small "Show margins" switch in the DocumentBar, off by default.
-- Simulated page-break rules: every ~11in of content height, render a horizontal seam (`::before` pseudo on paragraphs crossing the boundary is fragile; instead a fixed decorative `background-image: repeating-linear-gradient` in the sheet gutter, purely visual). Cheapest, no layout math.
+## Fix 2 — Slim, minimal Placeholder navigator
 
-### 3. Placeholder navigator rail
-Detect bracketed placeholders anywhere in the doc and expose a smooth vertical timeline.
+Rework `src/components/editor/placeholder-rail.tsx` into a compact vertical rail:
+- Drop the header ("Placeholders" title + count) and the empty-state paragraph.
+- Drop the token text (`[party name]`, `{{date}}`, index number).
+- Render each placeholder as a small circular dot button (~10px), stacked vertically with tight spacing. Hover reveals the token as a tooltip (`title` attr) only.
+- Container shrinks from a card to a bare ~20px-wide column of dots; no border, no background, no header chrome.
+- When zero placeholders remain, render nothing (rail disappears).
+- Click behaviour unchanged: focus + scroll + pulse.
 
-- Parse the editor JSON on every debounced change for text matching `\[[^\]]+\]` and `\{\{[^}]+\}\}`. Store `{ id, label, pos, resolved }` where `resolved = false` when brackets remain.
-- New right-edge rail component `PlaceholderRail` inside the editor column (thin 32px gutter or an overlay pill stack anchored top-right of the sheet). Each entry: small dot + truncated label. Sticky, scrolls with sheet.
-- Click → `editor.commands.setTextSelection(pos)` + smooth `scrollIntoView({ block: 'center' })` + a 1.2s pulse ring on the token (temporary decoration mark).
-- Counter chip at top: "3 placeholders remaining". Turns green + collapses when zero.
-- Keyboard: `⌘J` / `Ctrl+J` cycles to the next placeholder.
-- Lives alongside the existing Claude sidecar — it's a 220px collapsible strip between editor and sidecar, or floats over the sheet's right margin on narrow viewports.
+Also narrow the reserved column in `draft.tsx` (`hidden xl:block shrink-0`) so the editor reclaims the width.
 
-### Files touched
-- `src/styles.css` — new `.legal-editor-content` sizing, `.page-sheet`, optional margin-guide utility.
-- `src/components/editor/legal-editor.tsx` — wrap content in `.page-sheet`, emit placeholder positions upward via a callback prop.
-- `src/components/editor/placeholder-rail.tsx` *(new)* — the timeline + click-to-scroll + pulse decoration.
-- `src/routes/_authenticated/draft.tsx` — mount `PlaceholderRail`, wire count chip into DocumentBar, add margin-toggle state (localStorage-persisted).
+## Files touched
+- `src/routes/_authenticated/draft.tsx` — remove `suggestionsOn` + OFF branch; tighten the placeholder rail slot.
+- `src/components/editor/placeholder-rail.tsx` — minimal dot-only rail.
+- `src/styles.css` — new minimal `.placeholder-rail` / `.placeholder-dot` styles (replace the card styles).
 
-### Out of scope
-- No true multi-page pagination (would require ProseMirror page-break plugin; expensive, brittle).
-- No changes to DOCX/PDF export sizing.
-- No changes to Claude sidecar behavior.
-
-Est. work: ~1 focused pass, ~250 lines net.
+No edge-function or data changes.
