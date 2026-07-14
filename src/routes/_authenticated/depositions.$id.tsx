@@ -795,17 +795,17 @@ function DepositionWorkspace() {
         </div>
       </div>
 
-      <div className="px-8 py-6">
+      <div className="lg:h-[calc(100vh-3.25rem)] lg:flex lg:flex-col">
         {/* Mobile toggle (below lg) */}
-        <div className="mb-4 lg:hidden">
-          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+        <div className="px-6 pt-3 lg:hidden">
+          <div className="inline-flex rounded-sm border border-border bg-card p-0.5">
             {(['transcript', 'findings'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setMobileView(v)}
                 className={cn(
-                  'px-3 py-1.5 text-xs font-medium capitalize rounded-sm transition-colors',
+                  'px-3 py-1 text-[11px] font-medium capitalize rounded-sm transition-colors',
                   mobileView === v
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -817,11 +817,16 @@ function DepositionWorkspace() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[58%_1fr] gap-6">
-          {/* LEFT: transcript */}
-          <div className={cn('min-w-0', mobileView !== 'transcript' && 'hidden lg:block')}>
-            <Card className="p-0 overflow-hidden flex flex-col h-[calc(100vh-11rem)] sticky top-4">
-              <div className="border-b border-border bg-card px-4 py-3 shrink-0 space-y-2">
+        <SplitPane
+          storageKey="depo-split"
+          defaultPercent={58}
+          min={38}
+          max={72}
+          className="flex-1 min-h-0 lg:h-full"
+          left={
+            <div className={cn('min-w-0 h-full flex flex-col', mobileView !== 'transcript' && 'hidden lg:flex')}>
+            <div className="flex-1 min-h-0 flex flex-col border-r border-border lg:border-r-0">
+              <div className="border-b border-border bg-card px-4 py-2 shrink-0 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
