@@ -75,6 +75,7 @@ import {
 } from '@/lib/format-presets';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
+import { PlaceholderRail } from '@/components/editor/placeholder-rail';
 import type { Editor } from '@tiptap/react';
 import { markdownToHtml } from '@/lib/tiptap-markdown';
 import { ProposalCard, type Proposal, type CiteChip } from '@/components/editor/proposal-card';
