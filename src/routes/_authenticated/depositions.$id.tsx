@@ -1637,6 +1637,9 @@ function AskTab({
   onAsk,
   pending,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   question: string;
   setQuestion: (s: string) => void;
@@ -1645,7 +1648,7 @@ function AskTab({
   onAsk: (q: string) => void;
   pending: boolean;
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   const submit = () => {
     const q = question.trim();
     if (!q || pending) return;
