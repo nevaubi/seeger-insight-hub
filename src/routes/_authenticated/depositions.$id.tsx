@@ -1732,7 +1732,14 @@ function AskTab({
                     </blockquote>
                   )}
                   <div className="mt-2 flex items-center gap-2">
-                    <CiteButton span={c} onCite={onCite} label={c.cite} />
+                    <CiteButton
+                      span={c}
+                      onCite={onCite}
+                      label={c.cite}
+                      onHover={onHoverCite}
+                      onPin={onPin}
+                      pinned={isPinned ? isPinned(c) : undefined}
+                    />
                     {c.verified && (
                       <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-700">
                         <BadgeCheck className="h-3 w-3" /> verified
