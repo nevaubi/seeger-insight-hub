@@ -780,6 +780,7 @@ function DocumentBar({
   onExportDocx: () => void;
   onExportPdf: () => void;
   onExportMd: () => void;
+  onPolish: () => void;
   canExport: boolean;
   onDelete?: () => void;
   matterShort: string;
