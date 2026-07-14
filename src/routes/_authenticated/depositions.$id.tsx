@@ -706,7 +706,47 @@ function DepositionWorkspace() {
               </p>
             )}
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!analyzed}>
+                  <Download className="mr-2 h-4 w-4" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Deposition digest
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestDocx(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <FileText className="mr-2 h-4 w-4" /> Digest .docx
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestMarkdown(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <PenLine className="mr-2 h-4 w-4" /> Digest .md
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => printDigest(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <FileText className="mr-2 h-4 w-4" /> Print / Save as PDF
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Data
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadAdmissionsCsv(depo, findings)}
+                  disabled={!analyzed || !(byType['admission']?.length)}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Admissions .csv
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="outline"
               onClick={() => void runAnalyze()}
