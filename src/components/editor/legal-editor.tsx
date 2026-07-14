@@ -49,6 +49,15 @@ const HoverParagraphExtension = Extension.create({
           init: () => ({ pos: null as number | null }),
           apply: (tr, prev) => {
             const meta = tr.getMeta(key);
+            if (meta === undefined) {
+              // Clamp any prior pos against the new doc so a stale hover
+              // position can't outlive the doc that produced it.
+              if (prev.pos == null) return prev;
+              const size = tr.doc.content.size;
+              if (size === 0) return { pos: null };
+              const clamped = Math.min(Math.max(prev.pos, 0), size - 1);
+              return clamped === prev.pos ? prev : { pos: clamped };
+            }
             if (meta && typeof meta.pos === 'number') return { pos: meta.pos };
             if (meta && meta.pos === null) return { pos: null };
             return prev;
@@ -56,26 +65,38 @@ const HoverParagraphExtension = Extension.create({
         },
         props: {
           decorations(state) {
-            const s = key.getState(state) as { pos: number | null };
-            if (s?.pos == null) return null;
-            const $pos = state.doc.resolve(Math.min(s.pos, state.doc.content.size - 1));
-            const depth = $pos.depth;
-            if (depth < 1) return null;
-            const start = $pos.before(1);
-            const node = state.doc.nodeAt(start);
-            if (!node) return null;
-            return DecorationSet.create(state.doc, [
-              Decoration.node(start, start + node.nodeSize, { class: 'is-hovered' }),
-            ]);
+            const s = key.getState(state) as { pos: number | null } | undefined;
+            if (!s || s.pos == null) return null;
+            if (state.doc.content.size === 0) return null;
+            try {
+              const $pos = state.doc.resolve(Math.min(s.pos, state.doc.content.size - 1));
+              if ($pos.depth < 1) return null;
+              const start = $pos.before(1);
+              const node = state.doc.nodeAt(start);
+              if (!node) return null;
+              return DecorationSet.create(state.doc, [
+                Decoration.node(start, start + node.nodeSize, { class: 'is-hovered' }),
+              ]);
+            } catch {
+              return null;
+            }
           },
           handleDOMEvents: {
             mousemove(view, event) {
-              const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
-              if (!pos) return false;
-              view.dispatch(view.state.tr.setMeta(key, { pos: pos.pos }));
+              try {
+                const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                if (!pos) return false;
+                const current = key.getState(view.state) as { pos: number | null } | undefined;
+                if (current?.pos === pos.pos) return false;
+                view.dispatch(view.state.tr.setMeta(key, { pos: pos.pos }));
+              } catch {
+                /* ignore transient coord failures */
+              }
               return false;
             },
             mouseleave(view) {
+              const current = key.getState(view.state) as { pos: number | null } | undefined;
+              if (!current || current.pos == null) return false;
               view.dispatch(view.state.tr.setMeta(key, { pos: null }));
               return false;
             },
@@ -85,6 +106,7 @@ const HoverParagraphExtension = Extension.create({
     ];
   },
 });
+
 
 export function LegalEditor({
   value,
