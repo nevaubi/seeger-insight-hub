@@ -1333,6 +1333,18 @@ function SummaryTab({
                           }}
                           onCite={onCite}
                           label={kp.cite}
+                          onHover={onHoverCite}
+                          onPin={onPin}
+                          pinned={
+                            isPinned
+                              ? isPinned({
+                                  page_start: kp.page_start ?? null,
+                                  line_start: kp.line_start ?? null,
+                                  page_end: kp.page_end ?? null,
+                                  line_end: kp.line_end ?? null,
+                                })
+                              : undefined
+                          }
                         />
                         {kp.verified && (
                           <BadgeCheck className="h-3.5 w-3.5 text-emerald-600" />
