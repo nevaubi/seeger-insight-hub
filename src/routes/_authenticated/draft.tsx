@@ -543,17 +543,40 @@ function DraftPage() {
           />
         </div>
 
-        {sidecarOpen && (
-          <ClaudeSidecar
-            caseId={caseId}
-            matter={matterScope}
-            documentText={content}
-            onAppend={appendToDoc}
-            onInsertCite={insertCitation}
-            onClose={() => setSidecarOpen(false)}
+        {isCounterActive && counterPanelOpen && activeId ? (
+          <CounterdraftPanel
+            docId={activeId}
+            editor={editorRef.current}
+            onClose={() => setCounterPanelOpen(false)}
+            onDismantle={() => setCounterPanelOpen(false)}
+            onSuggest={async (args: SuggestArgs) => {
+              await runInlineTransform({
+                instruction: args.instruction,
+                selectionText: args.selectionText,
+                from: args.from,
+                to: args.to,
+              });
+            }}
           />
+        ) : (
+          sidecarOpen && (
+            <ClaudeSidecar
+              caseId={caseId}
+              matter={matterScope}
+              documentText={content}
+              onAppend={appendToDoc}
+              onInsertCite={insertCitation}
+              onClose={() => setSidecarOpen(false)}
+            />
+          )
         )}
       </div>
+
+      <CounterdraftDialog
+        open={counterOpen}
+        onOpenChange={setCounterOpen}
+        onCreate={createCounterdraft}
+      />
     </AppShell>
   );
 
