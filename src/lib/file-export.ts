@@ -403,17 +403,70 @@ function tableXml(b: { header: Run[][]; rows: Run[][][]; align: TableAlign[] }):
   return `<w:tbl>${tblPr}${grid}${headerRow}${bodyRows}</w:tbl><w:p><w:pPr><w:spacing w:after="120"/></w:pPr></w:p>`;
 }
 
-const DOCX_STYLES =
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-  `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
-  `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault>` +
-  `<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>` +
-  `</w:styles>`;
+export type DocxPreset = {
+  font: string;
+  sizeHalfPts: number;
+  lineTwips: number;
+  firstLineIndentDxa: number;
+  marginsDxa: { top: number; right: number; bottom: number; left: number };
+  justify: boolean;
+  captionLine?: string;
+};
 
-export function buildDocx(blocks: DocBlock[]): Blob {
+const DEFAULT_DOCX_PRESET: DocxPreset = {
+  font: 'Times New Roman',
+  sizeHalfPts: 24,
+  lineTwips: 276,
+  firstLineIndentDxa: 0,
+  marginsDxa: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+  justify: true,
+};
+
+function docxStylesFor(p: DocxPreset): string {
+  const font = xmlEscape(p.font);
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:cs="${font}"/><w:sz w:val="${p.sizeHalfPts}"/><w:szCs w:val="${p.sizeHalfPts}"/></w:rPr></w:rPrDefault>` +
+    `<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="${p.lineTwips}" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>` +
+    `</w:styles>`
+  );
+}
+
+function paragraphPresetXml(p: DocxPreset): string {
+  const ind = p.firstLineIndentDxa
+    ? `<w:ind w:firstLine="${p.firstLineIndentDxa}"/>`
+    : '';
+  const jc = p.justify ? '<w:jc w:val="both"/>' : '';
+  return `${ind}${jc}`;
+}
+
+// When a preset is passed, we override the paragraph's default `<w:pPr>` so
+// indent/justify align with the preset. We re-emit paragraph blocks with a
+// preset-aware pPr; other block types (heading, list, table, blockquote) keep
+// their existing shape which already reads well against any font/size defaults.
+function blockToDocxXmlWithPreset(b: DocBlock, p: DocxPreset): string {
+  if (b.type === 'paragraph') {
+    return `<w:p><w:pPr><w:spacing w:after="160"/>${paragraphPresetXml(p)}</w:pPr>${b.runs.map(runXml).join('')}</w:p>`;
+  }
+  return blockToDocxXml(b);
+}
+
+function captionBlockXml(line: string): string {
+  return (
+    `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="0" w:after="80"/></w:pPr>` +
+    `<w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>` +
+    `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="333333"/></w:pBdr><w:spacing w:after="160"/></w:pPr></w:p>`
+  );
+}
+
+export function buildDocx(blocks: DocBlock[], preset?: DocxPreset): Blob {
+  const p = preset ?? DEFAULT_DOCX_PRESET;
+  const caption = p.captionLine ? captionBlockXml(p.captionLine) : '';
   const body =
-    blocks.map(blockToDocxXml).join('') +
-    `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
+    caption +
+    blocks.map((b) => blockToDocxXmlWithPreset(b, p)).join('') +
+    `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="${p.marginsDxa.top}" w:right="${p.marginsDxa.right}" w:bottom="${p.marginsDxa.bottom}" w:left="${p.marginsDxa.left}" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>`;
   const document =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`;
@@ -440,15 +493,15 @@ export function buildDocx(blocks: DocBlock[]): Blob {
     { name: '_rels/.rels', data: utf8(rootRels) },
     { name: 'word/document.xml', data: utf8(document) },
     { name: 'word/_rels/document.xml.rels', data: utf8(docRels) },
-    { name: 'word/styles.xml', data: utf8(DOCX_STYLES) },
+    { name: 'word/styles.xml', data: utf8(docxStylesFor(p)) },
   ];
   return new Blob([zipSync(entries)], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
 }
 
-export function downloadDocx(base: string, blocks: DocBlock[]): void {
-  downloadBlob(exportFilename(base, 'docx'), buildDocx(blocks));
+export function downloadDocx(base: string, blocks: DocBlock[], preset?: DocxPreset): void {
+  downloadBlob(exportFilename(base, 'docx'), buildDocx(blocks, preset));
 }
 
 // ---------- print-to-PDF ----------
