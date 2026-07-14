@@ -526,23 +526,28 @@ function DraftPage() {
             focusMode && 'legal-focus-mode',
           )}
         >
-          <LegalEditor
-            value={content}
-            onChange={onContentChange}
-            onReady={(ed) => {
-              editorRef.current = ed;
-            }}
-            onAskClaude={({ text, kind }) => {
-              setSidecarOpen(true);
-              window.dispatchEvent(
-                new CustomEvent('legal-ask-claude', { detail: { text, kind } }),
-              );
-            }}
-            onVoiceAction={async (payload) => {
-              await runInlineTransform(payload);
-            }}
-            className="flex-1 min-h-0"
-          />
+          <div className="flex-1 min-h-0 flex">
+            <LegalEditor
+              value={content}
+              onChange={onContentChange}
+              onReady={(ed) => {
+                editorRef.current = ed;
+              }}
+              onAskClaude={({ text, kind }) => {
+                setSidecarOpen(true);
+                window.dispatchEvent(
+                  new CustomEvent('legal-ask-claude', { detail: { text, kind } }),
+                );
+              }}
+              onVoiceAction={async (payload) => {
+                await runInlineTransform(payload);
+              }}
+              className="flex-1 min-h-0"
+            />
+            <div className="hidden xl:block shrink-0">
+              <PlaceholderRail editor={editorRef.current} />
+            </div>
+          </div>
           <ChangePill
             editor={editorRef.current}
             changeId={activeChangeId}
@@ -552,6 +557,7 @@ function DraftPage() {
             onRegenerate={regenerateActive}
           />
         </div>
+
 
         {sidecarOpen && (
           <ClaudeSidecar
