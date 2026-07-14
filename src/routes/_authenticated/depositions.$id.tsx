@@ -1109,20 +1109,21 @@ function DepositionWorkspace() {
               </Card>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
-                <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
-                  <ClaudeBadge variant="chip" label="Claude Legal — deposition intelligence" />
-                  <span className="text-[11px] text-muted-foreground">
-                    Citations verified against the record · Draft for attorney review
-                  </span>
+                <div className="flex items-center justify-between gap-3 border-b border-border -mx-4 px-4 pb-1">
+                  <TabsList className="flex justify-start gap-0 bg-transparent p-0 h-auto">
+                    {(['summary','admissions','chronology','exhibits','quality','ask'] as const).map((v) => (
+                      <TabsTrigger
+                        key={v}
+                        value={v}
+                        className="shrink-0 px-2.5 py-1 h-7 text-[11.5px] rounded-none border-b-2 border-transparent bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground capitalize"
+                      >
+                        {v}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <ClaudeBadge variant="chip" label="Claude Legal" />
                 </div>
-                <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap h-auto p-1">
-                  <TabsTrigger value="summary" className="shrink-0 px-3">Summary</TabsTrigger>
-                  <TabsTrigger value="admissions" className="shrink-0 px-3">Admissions</TabsTrigger>
-                  <TabsTrigger value="chronology" className="shrink-0 px-3">Chronology</TabsTrigger>
-                  <TabsTrigger value="exhibits" className="shrink-0 px-3">Exhibits</TabsTrigger>
-                  <TabsTrigger value="quality" className="shrink-0 px-3">Quality</TabsTrigger>
-                  <TabsTrigger value="ask" className="shrink-0 px-3">Ask</TabsTrigger>
-                </TabsList>
+
 
                 <TabsContent value="summary" className="mt-4">
                   <SummaryTab
