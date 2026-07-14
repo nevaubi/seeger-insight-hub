@@ -1367,12 +1367,21 @@ function AdmissionsTab({
   onCite,
   onReview,
   pendingId,
+  onHoverCite,
+  onPin,
+  isPinned,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
   onReview: (findingId: string, status: 'approved' | 'rejected') => void;
   pendingId?: string;
-}) {
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="admissions" />;
   return (
     <div className="space-y-3">
@@ -1433,8 +1442,21 @@ function AdmissionsTab({
               </blockquote>
             )}
             <div className="mt-3">
-              <CiteButton span={f} onCite={onCite} label={f.cite} />
+              <CiteButton
+                span={f}
+                onCite={onCite}
+                label={f.cite}
+                onHover={onHoverCite}
+                onPin={onPin}
+                pinned={isPinned ? isPinned(f) : undefined}
+              />
             </div>
+            <FindingActionRow
+              f={f}
+              onSendToDraft={onSendToDraft}
+              onSendToAsk={onSendToAsk}
+              onCopy={onCopy}
+            />
           </Card>
         );
       })}
@@ -1445,10 +1467,13 @@ function AdmissionsTab({
 function ChronologyTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="chronology" />;
   return (
     <Card className="p-5">
@@ -1477,7 +1502,14 @@ function ChronologyTab({
                 <div className="mt-1.5 text-xs text-muted-foreground italic">“{f.quote}”</div>
               )}
               <div className="mt-2">
-                <CiteButton span={f} onCite={onCite} label={f.cite} />
+                <CiteButton
+                  span={f}
+                  onCite={onCite}
+                  label={f.cite}
+                  onHover={onHoverCite}
+                  onPin={onPin}
+                  pinned={isPinned ? isPinned(f) : undefined}
+                />
               </div>
             </li>
           );
@@ -1486,6 +1518,7 @@ function ChronologyTab({
     </Card>
   );
 }
+
 
 function ExhibitsTab({
   items,
