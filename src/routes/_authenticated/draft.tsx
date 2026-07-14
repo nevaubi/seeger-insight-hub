@@ -836,8 +836,19 @@ function DocumentBar({
           isLoading={isLoading}
           onPick={onPickDoc}
           onNew={onNewDoc}
+          onNewCounterdraft={onNewCounterdraft}
         />
       </div>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onNewCounterdraft}
+        className="h-8 gap-1.5 hidden lg:inline-flex text-[11.5px]"
+        title="Upload an opposing draft to counter section-by-section"
+      >
+        <GitPullRequestArrow className="h-3.5 w-3.5" /> Counter draft
+      </Button>
 
       <div className="hidden md:flex items-center gap-1.5 text-[10.5px] font-sans uppercase tracking-[0.14em] text-muted-foreground px-1.5">
         <span className="text-accent/80">{matterShort}</span>
