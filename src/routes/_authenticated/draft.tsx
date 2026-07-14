@@ -1033,6 +1033,11 @@ function DocumentMenu({
         <DropdownMenuItem onClick={onNew} className="gap-2 cursor-pointer font-medium">
           <Plus className="h-4 w-4" /> New document
         </DropdownMenuItem>
+        {onNewCounterdraft && (
+          <DropdownMenuItem onClick={onNewCounterdraft} className="gap-2 cursor-pointer">
+            <GitPullRequestArrow className="h-4 w-4" /> Counter opposing draft…
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
           {isLoading ? 'Loading…' : `${docs.length} document${docs.length === 1 ? '' : 's'}`}
