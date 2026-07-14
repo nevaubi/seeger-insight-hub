@@ -1121,6 +1121,9 @@ function DepositionWorkspace() {
                     execs={byType['exec_summary'] ?? []}
                     profiles={byType['witness_profile'] ?? []}
                     onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
                   />
                 </TabsContent>
 
@@ -1132,19 +1135,43 @@ function DepositionWorkspace() {
                       reviewM.mutate({ findingId: fid, status })
                     }
                     pendingId={reviewM.isPending ? reviewM.variables?.findingId : undefined}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
                   />
                 </TabsContent>
 
                 <TabsContent value="chronology" className="mt-4">
-                  <ChronologyTab items={byType['chronology'] ?? []} onCite={scrollToCite} />
+                  <ChronologyTab
+                    items={byType['chronology'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="exhibits" className="mt-4">
-                  <ExhibitsTab items={byType['exhibit'] ?? []} onCite={scrollToCite} />
+                  <ExhibitsTab
+                    items={byType['exhibit'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="quality" className="mt-4">
-                  <QualityTab items={byType['quality_note'] ?? []} onCite={scrollToCite} />
+                  <QualityTab
+                    items={byType['quality_note'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="ask" className="mt-4">
@@ -1156,6 +1183,9 @@ function DepositionWorkspace() {
                     onAsk={(q) => askM.mutate(q)}
                     pending={askM.isPending}
                     onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
                   />
                 </TabsContent>
               </Tabs>
