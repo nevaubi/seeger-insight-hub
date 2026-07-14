@@ -1,75 +1,43 @@
 
-# Depositions v2 — improvements plan
+## Goal
 
-The current page is solid (dual-pane transcript + findings tabs, quote verification, Ask). The gaps are mostly around **workflow speed, cross-depo intelligence, and output**. Below is a prioritized set of upgrades, grouped so you can approve a subset.
+Trim visual bulk on the Depositions pages so the entire experience sits inside one viewport, matches the editorial tone of the rest of the app, and reads as a professional litigation tool. Frontend-only — no data, API, or feature changes.
 
-## 1. Index page (`depositions.index.tsx`)
+## Depositions index (`src/routes/_authenticated/depositions.index.tsx`)
 
-**Problem:** Just a flat list. No filtering, no signal about what's inside each depo.
-**Changes:**
-- Header ledger row: total transcripts, total pages, # analyzed, # helpful vs harmful admissions across the matter.
-- Filter bar: witness role, alignment (plaintiff/defendant/expert), status, free-text witness search.
-- Per-row preview: mini-counts of admissions / exhibits / quality issues, top 1–2 issue tags, "last analyzed" timestamp.
-- Sort: date deposed, date added, # findings.
-- Bulk actions: re-run analysis on N selected; delete.
-- Drag-and-drop upload zone (currently click-only) + multi-file queue with per-file progress.
+Current problem: three tall stacked blocks (metrics band, upload card, list) push the transcript list below the fold and duplicate every filter and label.
 
-## 2. Detail page (`depositions.$id.tsx`)
+Changes:
+- Replace `<PageHeader>` block with a slim editorial header row: title `Depositions` (serif, 22px), matter name in muted mono to the right, `Upload transcript` primary button on the right. Removes the ~140px bespoke hero.
+- Kill the 6-metric ledger band. Fold the same numbers into a single-line summary strip under the header (`24 transcripts · 3,182 pp · 18 analyzed · 42 helpful / 19 harmful · 61 exhibits`) with muted labels and tabular-nums. Saves ~110px.
+- Convert the always-visible upload Card into a collapsible drawer opened by the header's `Upload transcript` button (uses existing `Sheet` component). The drop zone, witness fields, and auto-analyze switch move into the sheet unchanged. When the sheet is closed the list starts near the top of the viewport.
+- Compact the filter row: search input (h-8) + three small `Select`s become icon-prefixed dropdowns on a single 32px-tall bar aligned right of the "Recent depositions" heading, using the same bordered pill style as Orders. Drop redundant `ArrowUpDown` icon and the standalone `Clear` button (fold into an X inside the search input when any filter is set).
+- List rows: reduce Card padding from `p-4` to `px-4 py-3`, remove the leading `ChevronRight`, use a 3-column grid `[minmax(0,1fr)_auto_auto]` (title/meta | count chips | status pill) so metadata stops wrapping. Move `filename` off the primary row into a `title` tooltip. Findings summary chips (`helpful/harmful/adm./ex.`) render as one right-aligned tabular strip instead of a wrapped chip cloud.
+- Empty state: single centered line instead of a Card.
 
-### Transcript pane
-- **Segment-level navigation:** left mini-outline (Q/A blocks + objections + exhibits marked) with jump-to. Today only page headers are sticky.
-- **Persistent highlights:** any finding hovered in the right pane lights up its lines on the left (not just click). Add a "pin" so multiple citations stay lit.
-- **Search:** current substring search → add regex + speaker filter (Q only / A only / objection) and next/prev match with match count.
-- **Copy-as-cite:** select any range → floating button copies `"quote" (Prescott Dep. 42:7–18)`.
-- **Split-pane divider:** reuse `src/components/split-pane.tsx` so users can widen either side.
-- **Virtualization:** long transcripts (500+ pp) drop frames — swap the map for `@tanstack/react-virtual` on `linesByPage`.
+## Deposition workspace (`src/routes/_authenticated/depositions.$id.tsx`)
 
-### Findings pane
-- **Compare-across-depos:** on any admission, show a "cross-check" button that queries `deposition_findings` across the matter for contradicting/corroborating quotes from other witnesses (uses existing `hybrid_search_v2` scoped by finding embedding, or a simple issue-tag match as v1).
-- **Approve / reject with reason:** current review only stores status; add optional note stored in `deposition_findings.review_note` (or JSON `data`).
-- **"Send to Draft":** each finding gets a button that stashes the quote + cite in a matter-scoped clipboard (localStorage keyed by `master_case_id`) that the Draft page's Claude sidecar can paste as a block quote with pre-formatted cite.
-- **"Send to Ask the Record":** pipes the finding text as a seed question in `/search` (uses existing matter context).
-- **Streaming re-analysis:** today `analyzeDeposition` blocks then polls; wire the edge function to SSE like `legal-synthesis` so findings stream in with the same rail UI (`useSynthesisStream` pattern reused).
-- **Impeachment view:** new tab that pairs harmful admissions with any conflicting statements from same witness's prior transcripts / documents (uses existing hybrid search).
+Current problem: the 140px header eats vertical space, the transcript pane's toolbar is two rows deep, and both panes scroll independently inside a page that already scrolls.
 
-### Ask tab
-- Persist Q&A history for the depo (currently discarded on tab switch); store in `deposition_qa` table (new) or session state as v1.
-- Suggested questions per witness role (mirrors `SuggestionDeck` on `/search`).
-- Streaming answer + inline cite chips that also scroll the transcript.
+Changes:
+- Slim header: shrink from `py-8` to `py-4`, drop the "Depositions" back-link into a tiny left-aligned breadcrumb chip, put title + alignment badge + subtitle bits on a single row, and move `Export` + `Re-run analysis` into a compact right-aligned toolbar with icon-only buttons and a shared `MoreHorizontal` overflow.
+- Pane container: switch from the fixed `grid-cols-[58%_1fr]` layout to the existing `SplitPane` (`storageKey: 'depo-split'`, default 58%) so the divider is draggable and matches the search route. Set page container to `h-[calc(100vh-var(--depo-header,4rem))]` so only the panes scroll — the page itself no longer overflows.
+- Transcript toolbar: collapse to a single 36px row — search input (flex-1) with inline regex toggle and match counter on the right edge; the speaker segmented control (`All / Q / A / Obj`) becomes a compact 24px pill row directly under the search only when filters are active. Removes the second toolbar row for most sessions.
+- Sticky page headers: reduce from `py-1` band to a hairline `py-[2px]` label; use `Page 12` in mono-caps only.
+- Findings pane: remove the outer `Card` chrome from every tab (`SummaryTab`, `AdmissionsTab`, `ChronologyTab`, `ExhibitsTab`, `QualityTab`, `AskTab`) — keep the tab strip flush with the pane, list rows separated by hairline `divide-y` instead of nested cards. Row padding drops from `p-4` → `px-3 py-2.5`, action buttons collapse into a hover-revealed row (`Send / Copy / Pin`) instead of always-visible.
+- Mobile toggle pill: keep, but restyle to match the segmented controls used elsewhere (no drop-shadow, thinner border).
 
-### Header
-- Add witness photo/avatar slot (optional metadata).
-- Add "Exhibits" quick-count chips, "Deposed by" (from segments), duration if we can infer.
-- Sticky compact header on scroll.
+## Shared
 
-## 3. Export & sharing
-- **Digest PDF/DOCX** using existing `src/lib/file-export.ts`: summary + admissions + chronology + exhibits with pin-cites. Toggleable sections.
-- **CSV** of admissions/chronology/exhibits (reuse `review-export.ts` patterns).
-- **Copy shareable deep link** to a specific cite (`?jump=42:7`).
+- No new components required. Reuse `SplitPane`, `Sheet`, `DropdownMenu`, existing `Badge` variants, and `cn`.
+- Preserve every existing prop, mutation, keyboard shortcut, and handler — this is a CSS/layout pass only. No changes to `depo-api`, `depo-export`, `useSynthesisStream`, or Supabase queries.
 
-## 4. Ingest & analysis quality
-- OCR fallback for scanned PDFs (server-side flag, surface "Low OCR confidence" banner in UI).
-- Speaker map editor: if the parser mislabels Q/A speakers, let the user reassign a speaker across the transcript — writes back to `deposition_segments`.
-- Auto-detect deposition_date / case_no from cover page when user leaves them blank.
-- Confidence score per finding + filter "only high-confidence".
+## Out of scope
 
-## 5. Technical notes
-- New client-only additions: react-virtual, split-pane reuse, clipboard state via a `useDepoClipboard` hook (localStorage).
-- New edge-function work (out of scope for a pure-frontend pass, flagged separately): SSE variant of `depo-analyze`, `depo-cross-check` RPC.
-- New tables (if we go beyond in-session state): `deposition_qa`, optional `review_note` column — will be a separate migration turn on the external Supabase project.
-- No changes to `src/integrations/supabase/*` (auto-gen).
+- No changes to analysis logic, edge functions, or types.
+- No color-token additions — reuses existing `--primary`, `--secondary`, `--border`, `--muted-foreground`.
+- No touch to `AppShell`, `case-ui`, or other routes.
 
-## Suggested first slice (if you want to ship fast)
+## Verification
 
-Phase A (frontend-only, no backend changes):
-1. Index page filters + counts + drag-and-drop multi-upload.
-2. Transcript virtualization + split-pane divider + copy-as-cite + regex/speaker search.
-3. Findings: "Send to Draft" clipboard, "Send to Ask", hover-highlight, pin multiple cites.
-4. Export digest (DOCX/PDF/CSV).
-
-Phase B (needs edge-function / schema work):
-5. Streaming analysis with rail UI.
-6. Cross-depo impeachment view + confidence filter.
-7. Persistent Ask history + speaker map editor + OCR fallback.
-
-**Which slice do you want me to build first — all of Phase A, or a specific subset?**
+After edits: read both files, then load `/depositions` and `/depositions/$id` via Playwright at the current 970×635 viewport and confirm the primary content (upload trigger, first list row, or transcript + findings top rows) is visible without scrolling.

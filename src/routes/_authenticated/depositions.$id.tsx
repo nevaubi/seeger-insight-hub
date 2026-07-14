@@ -712,32 +712,49 @@ function DepositionWorkspace() {
 
   return (
     <AppShell>
-      <div className="border-b border-border bg-card px-8 py-8">
-        <div className="flex items-start justify-between gap-6">
-          <div className="min-w-0">
+      <div className="border-b border-border bg-card px-6 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex items-center gap-3">
             <Link
               to="/depositions"
-              className="inline-flex items-center gap-1 text-xs font-sans text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 -ml-1.5 text-[11px] font-sans text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+              title="Back to depositions"
             >
-              <ArrowLeft className="h-3 w-3" /> Depositions
+              <ArrowLeft className="h-3 w-3" />
             </Link>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="font-serif text-[32px] leading-[1.15] font-semibold tracking-[-0.015em] text-foreground">
-                {title}
-              </h1>
-              <AlignmentBadge alignment={depo.party_alignment} role={depo.witness_role} />
-            </div>
+            <h1 className="font-serif text-[18px] leading-tight font-semibold tracking-[-0.01em] text-foreground truncate">
+              {title}
+            </h1>
+            <AlignmentBadge alignment={depo.party_alignment} role={depo.witness_role} />
             {subtitleBits.length > 0 && (
-              <p className="mt-2 font-sans text-sm leading-relaxed text-muted-foreground tabular-nums">
+              <span className="hidden md:inline text-[11px] font-sans text-muted-foreground tabular-nums truncate">
                 {subtitleBits.join(' · ')}
-              </p>
+              </span>
             )}
           </div>
-          <div className="shrink-0 flex items-center gap-2">
+          <div className="shrink-0 flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void runAnalyze()}
+              disabled={isAnalyzing}
+              className="h-8 gap-1.5 text-xs"
+              title="Re-run analysis"
+            >
+              {isAnalyzing ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing…
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Re-run</span>
+                </>
+              )}
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={!analyzed}>
-                  <Download className="mr-2 h-4 w-4" /> Export
+                <Button size="sm" variant="outline" disabled={!analyzed} className="h-8 gap-1.5 text-xs">
+                  <Download className="h-3.5 w-3.5" /> Export
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -774,36 +791,21 @@ function DepositionWorkspace() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button
-              variant="outline"
-              onClick={() => void runAnalyze()}
-              disabled={isAnalyzing}
-            >
-              {isAnalyzing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing…
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4" /> Re-run analysis
-                </>
-              )}
-            </Button>
           </div>
         </div>
       </div>
 
-      <div className="px-8 py-6">
+      <div className="lg:h-[calc(100vh-3.25rem)] lg:flex lg:flex-col">
         {/* Mobile toggle (below lg) */}
-        <div className="mb-4 lg:hidden">
-          <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+        <div className="px-6 pt-3 lg:hidden">
+          <div className="inline-flex rounded-sm border border-border bg-card p-0.5">
             {(['transcript', 'findings'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setMobileView(v)}
                 className={cn(
-                  'px-3 py-1.5 text-xs font-medium capitalize rounded-sm transition-colors',
+                  'px-3 py-1 text-[11px] font-medium capitalize rounded-sm transition-colors',
                   mobileView === v
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -815,11 +817,16 @@ function DepositionWorkspace() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[58%_1fr] gap-6">
-          {/* LEFT: transcript */}
-          <div className={cn('min-w-0', mobileView !== 'transcript' && 'hidden lg:block')}>
-            <Card className="p-0 overflow-hidden flex flex-col h-[calc(100vh-11rem)] sticky top-4">
-              <div className="border-b border-border bg-card px-4 py-3 shrink-0 space-y-2">
+        <SplitPane
+          storageKey="depo-split"
+          defaultPercent={58}
+          min={38}
+          max={72}
+          className="flex-1 min-h-0 lg:h-full"
+          left={
+            <div className={cn('min-w-0 h-full flex flex-col', mobileView !== 'transcript' && 'hidden lg:flex')}>
+            <div className="flex-1 min-h-0 flex flex-col border-r border-border lg:border-r-0">
+              <div className="border-b border-border bg-card px-4 py-2 shrink-0 space-y-1.5">
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -931,7 +938,7 @@ function DepositionWorkspace() {
                       // Determine "previous segment" carried over from the last line of the previous page
                       return (
                         <div key={page}>
-                          <div className="sticky top-0 z-10 bg-secondary/70 backdrop-blur border-y border-border px-4 py-1 text-[10.5px] font-sans font-medium uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                          <div className="sticky top-0 z-10 bg-secondary/80 backdrop-blur border-b border-border/70 px-4 py-[2px] text-[9.5px] font-mono font-medium uppercase tracking-[0.16em] text-muted-foreground/80 tabular-nums">
                             Page {page}
                           </div>
                           <div className="py-1">
@@ -1046,11 +1053,12 @@ function DepositionWorkspace() {
                   </div>
                 )}
               </div>
-            </Card>
-          </div>
+            </div>
+            </div>
+          }
+          right={
+            <div className={cn('min-w-0 h-full flex flex-col overflow-y-auto px-4 py-3', mobileView !== 'findings' && 'hidden lg:flex')}>
 
-          {/* RIGHT: findings tabs */}
-          <div className={cn('min-w-0', mobileView !== 'findings' && 'hidden lg:block')}>
             {droppedCount > 0 && !isAnalyzing && !hasError && (
               <div className="mb-3 flex items-start gap-2 rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-800">
                 <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -1101,20 +1109,21 @@ function DepositionWorkspace() {
               </Card>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
-                <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
-                  <ClaudeBadge variant="chip" label="Claude Legal — deposition intelligence" />
-                  <span className="text-[11px] text-muted-foreground">
-                    Citations verified against the record · Draft for attorney review
-                  </span>
+                <div className="flex items-center justify-between gap-3 border-b border-border -mx-4 px-4 pb-1">
+                  <TabsList className="flex justify-start gap-0 bg-transparent p-0 h-auto">
+                    {(['summary','admissions','chronology','exhibits','quality','ask'] as const).map((v) => (
+                      <TabsTrigger
+                        key={v}
+                        value={v}
+                        className="shrink-0 px-2.5 py-1 h-7 text-[11.5px] rounded-none border-b-2 border-transparent bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground capitalize"
+                      >
+                        {v}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <ClaudeBadge variant="chip" label="Claude Legal" />
                 </div>
-                <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap h-auto p-1">
-                  <TabsTrigger value="summary" className="shrink-0 px-3">Summary</TabsTrigger>
-                  <TabsTrigger value="admissions" className="shrink-0 px-3">Admissions</TabsTrigger>
-                  <TabsTrigger value="chronology" className="shrink-0 px-3">Chronology</TabsTrigger>
-                  <TabsTrigger value="exhibits" className="shrink-0 px-3">Exhibits</TabsTrigger>
-                  <TabsTrigger value="quality" className="shrink-0 px-3">Quality</TabsTrigger>
-                  <TabsTrigger value="ask" className="shrink-0 px-3">Ask</TabsTrigger>
-                </TabsList>
+
 
                 <TabsContent value="summary" className="mt-4">
                   <SummaryTab
@@ -1191,7 +1200,9 @@ function DepositionWorkspace() {
               </Tabs>
             )}
           </div>
-        </div>
+          }
+        />
+
       </div>
     </AppShell>
   );
