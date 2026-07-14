@@ -153,16 +153,7 @@ function DraftPage() {
   const cursorRef = useRef<number>(0);
   const editorRef = useRef<Editor | null>(null);
 
-  // Track-changes state
-  const [suggestionsOn, setSuggestionsOn] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    return window.localStorage.getItem('draft.suggestions') !== '0';
-  });
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('draft.suggestions', suggestionsOn ? '1' : '0');
-    }
-  }, [suggestionsOn]);
+  // Track-changes state (always on — Accept/Reject/Retry pill for every AI edit)
   const [activeChangeId, setActiveChangeId] = useState<ChangeId | null>(null);
   const [changeStreaming, setChangeStreaming] = useState(false);
   const [pendingChangeCount, setPendingChangeCount] = useState(0);
