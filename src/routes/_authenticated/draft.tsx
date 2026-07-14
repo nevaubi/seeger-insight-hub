@@ -300,6 +300,23 @@ function DraftPage() {
 
   const newDocument = () => createDoc.mutate({ title: 'Untitled document', content: '' });
 
+  // -------- Counter-draft ingestion --------
+  const [counterOpen, setCounterOpen] = useState(false);
+  const isCounterActive = !!activeId && isCounterdraft(activeId);
+  const [counterPanelOpen, setCounterPanelOpen] = useState(true);
+  useEffect(() => {
+    if (isCounterActive) setCounterPanelOpen(true);
+  }, [isCounterActive, activeId]);
+
+  const createCounterdraft = useCallback(
+    async ({ title: t, markdown, state }: CounterdraftDraft) => {
+      const created = await createDoc.mutateAsync({ title: t, content: markdown });
+      saveCounterdraft(created.id, state);
+      toast.success(`Counter-draft ready — ${state.sections.length} sections`);
+    },
+    [createDoc],
+  );
+
   const onContentChange = useCallback((v: string) => {
     setContent(v);
     setDirty(true);
