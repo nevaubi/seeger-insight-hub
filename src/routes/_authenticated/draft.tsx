@@ -1185,7 +1185,12 @@ function ClaudeSidecar({
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 min-h-0">
         {proposals.length === 0 && (
-          <TemplateLauncher disabled={running} onPick={(t) => send(t.prompt)} />
+          <TemplateLauncher
+            disabled={running}
+            matter={matter}
+            onPick={(_t, resolvedPrompt) => send(resolvedPrompt)}
+          />
+
         )}
         {proposals.map((p) => (
           <ProposalCard
