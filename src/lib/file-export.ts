@@ -302,6 +302,12 @@ export function markdownToBlocks(md: string): DocBlock[] {
       out.push({ type: 'bullet', runs: parseInline(ul[1]) });
       continue;
     }
+    const bq = /^\s*>\s?(.*)$/.exec(line);
+    if (bq) {
+      orderedIdx = 0;
+      out.push({ type: 'blockquote', runs: parseInline(bq[1]) });
+      continue;
+    }
     orderedIdx = 0;
     out.push({ type: 'paragraph', runs: parseInline(line) });
   }
