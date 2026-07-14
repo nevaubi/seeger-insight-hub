@@ -343,6 +343,8 @@ function blockToDocxXml(b: DocBlock): string {
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: '• ' })}${b.runs.map(runXml).join('')}</w:p>`;
     case 'ordered':
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: `${b.index}. ` })}${b.runs.map(runXml).join('')}</w:p>`;
+    case 'blockquote':
+      return `<w:p><w:pPr><w:spacing w:before="80" w:after="120" w:line="240" w:lineRule="auto"/><w:ind w:left="720" w:right="720"/></w:pPr>${b.runs.map((r) => runXml({ ...r, italic: true })).join('')}</w:p>`;
     case 'paragraph':
       return `<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>${b.runs.map(runXml).join('')}</w:p>`;
     case 'table':
