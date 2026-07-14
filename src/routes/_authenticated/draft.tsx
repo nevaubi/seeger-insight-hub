@@ -84,6 +84,9 @@ import {
 } from '@/components/editor/track-changes';
 import { ChangePill } from '@/components/editor/change-pill';
 import { drainDraftQueue } from '@/lib/depo-clipboard';
+import { CounterdraftDialog, type CounterdraftDraft } from '@/components/editor/counterdraft-dialog';
+import { CounterdraftPanel, type SuggestArgs } from '@/components/editor/counterdraft-panel';
+import { isCounterdraft, saveCounterdraft } from '@/lib/counterdraft';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
