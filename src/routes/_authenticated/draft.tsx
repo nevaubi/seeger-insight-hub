@@ -497,16 +497,8 @@ function DraftPage() {
         isLoading={isLoading}
         onPickDoc={loadDoc}
         onNewDoc={newDocument}
-        suggestionsOn={suggestionsOn}
-        onToggleSuggestions={() => setSuggestionsOn((v) => !v)}
-        pendingChangeCount={pendingChangeCount}
-        onAcceptAll={handleAcceptAll}
-        onRejectAll={handleRejectAll}
-        focusMode={focusMode}
-        onToggleFocus={() => setFocusMode((v) => !v)}
         wordCount={stats.words}
         readMin={stats.readMin}
-        
       />
 
       <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
