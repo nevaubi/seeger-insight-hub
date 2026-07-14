@@ -201,8 +201,21 @@ export function LegalEditor({
     return editor.state.doc.textBetween(from, to, '\n').trim();
   }, [editor]);
 
+  const presetStyle = preset
+    ? ({
+        '--legal-font': preset.fontFamily,
+        '--legal-size': preset.fontSize,
+        '--legal-line': preset.lineHeight,
+        '--legal-indent': preset.firstLineIndent,
+        '--legal-align': preset.justify ? 'justify' : 'left',
+      } as React.CSSProperties)
+    : undefined;
+
   return (
-    <div className={cn('legal-editor-shell', className)}>
+    <div
+      className={cn('legal-editor-shell', preset ? `preset-${preset.id}` : null, className)}
+      style={presetStyle}
+    >
       {editor && (
         <>
           <BubbleMenu
