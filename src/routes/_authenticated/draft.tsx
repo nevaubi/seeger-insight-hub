@@ -135,7 +135,9 @@ function DraftPage() {
   const [railOpen, setRailOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return true;
     const raw = window.localStorage.getItem('draft.railOpen');
-    return raw == null ? true : raw === '1';
+    // Default closed on smaller desktops to give the editor room; respect explicit preference.
+    if (raw == null) return window.innerWidth >= 1536;
+    return raw === '1';
   });
   useEffect(() => {
     if (typeof window !== 'undefined') {
