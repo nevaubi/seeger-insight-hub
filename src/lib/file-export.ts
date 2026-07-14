@@ -518,6 +518,7 @@ const PRINT_CSS = `
   ul, ol { margin: 0 0 10px; padding-left: 22px; }
   li { margin: 0 0 4px; }
   hr { border: none; border-top: 1px solid #c9c2b4; margin: 16px 0; }
+  blockquote { margin: 12px 0 12px 0.5in; padding: 0 0.4in; font-style: italic; color: #2a2a2a; border-left: 2px solid #c9c2b4; }
   table.doc-table { width: 100%; border-collapse: collapse; margin: 4px 0 14px; font-size: 10.5pt; page-break-inside: auto; }
   .doc-table th, .doc-table td { border: 1px solid #c9c2b4; padding: 6px 9px; vertical-align: top; text-align: left; }
   .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2a44; }
