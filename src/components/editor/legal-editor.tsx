@@ -26,6 +26,15 @@ export type VoiceActionPayload = {
   to: number;
 };
 
+export type EditorPresetStyle = {
+  id: string;
+  fontFamily: string;
+  fontSize: string;
+  lineHeight: string;
+  firstLineIndent: string;
+  justify: boolean;
+};
+
 export type LegalEditorProps = {
   value: string;
   onChange: (markdown: string) => void;
@@ -34,6 +43,7 @@ export type LegalEditorProps = {
   onReady?: (editor: Editor) => void;
   running?: boolean;
   className?: string;
+  preset?: EditorPresetStyle;
 };
 
 // Hovered-paragraph decoration → adds a class we style in CSS so the gutter
