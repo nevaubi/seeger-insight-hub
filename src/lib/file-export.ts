@@ -497,6 +497,8 @@ export function blocksToHtml(blocks: DocBlock[]): string {
         )
         .join('')}</tbody>`;
       out.push(`<table class="doc-table">${thead}${tbody}</table>`);
+    } else if (b.type === 'blockquote') {
+      out.push(`<blockquote>${b.runs.map(runHtml).join('')}</blockquote>`);
     } else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
   }
   flush();
