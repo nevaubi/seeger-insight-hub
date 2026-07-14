@@ -1523,10 +1523,13 @@ function ChronologyTab({
 function ExhibitsTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="exhibits" />;
   return (
     <div className="space-y-3">
@@ -1544,7 +1547,14 @@ function ExhibitsTab({
                   <h4 className="font-serif text-[15px] font-semibold text-foreground">
                     {f.title || (num ? `Exhibit ${num}` : 'Exhibit')}
                   </h4>
-                  <CiteButton span={f} onCite={onCite} label={f.cite} />
+                  <CiteButton
+                    span={f}
+                    onCite={onCite}
+                    label={f.cite}
+                    onHover={onHoverCite}
+                    onPin={onPin}
+                    pinned={isPinned ? isPinned(f) : undefined}
+                  />
                 </div>
                 {data.description && (
                   <p className="mt-1 text-sm text-foreground/85">{data.description}</p>
@@ -1566,10 +1576,13 @@ function ExhibitsTab({
 function QualityTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="quality notes" />;
   return (
     <div className="space-y-3">
@@ -1598,7 +1611,14 @@ function QualityTab({
             )}
             {(f.page_start != null || f.cite) && (
               <div className="mt-2">
-                <CiteButton span={f} onCite={onCite} label={f.cite} />
+                <CiteButton
+                  span={f}
+                  onCite={onCite}
+                  label={f.cite}
+                  onHover={onHoverCite}
+                  onPin={onPin}
+                  pinned={isPinned ? isPinned(f) : undefined}
+                />
               </div>
             )}
           </Card>
@@ -1607,6 +1627,7 @@ function QualityTab({
     </div>
   );
 }
+
 
 function AskTab({
   question,
