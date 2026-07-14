@@ -46,9 +46,14 @@ export function ChangePill({
     const rerender = () => force((n) => n + 1);
     editor.on('transaction', rerender);
     editor.on('selectionUpdate', rerender);
+    const scrollEl = editor.view.dom.closest('.legal-editor-content') as HTMLElement | null;
+    scrollEl?.addEventListener('scroll', rerender, { passive: true });
+    window.addEventListener('resize', rerender);
     return () => {
       editor.off('transaction', rerender);
       editor.off('selectionUpdate', rerender);
+      scrollEl?.removeEventListener('scroll', rerender);
+      window.removeEventListener('resize', rerender);
     };
   }, [editor]);
 
@@ -60,7 +65,7 @@ export function ChangePill({
     }
     const range = findChangeRange(editor, changeId);
     if (!range) {
-      setPos((prev) => (prev === null ? prev : null));
+      if (!streaming) setPos((prev) => (prev === null ? prev : null));
       return;
     }
     const view = editor.view;
@@ -84,14 +89,14 @@ export function ChangePill({
           : { top, left, placement },
       );
     } catch {
-      setPos((prev) => (prev === null ? prev : null));
+      if (!streaming) setPos((prev) => prev);
     }
     const insR = findMarkRange(editor, 'insertion', changeId);
     const delR = findMarkRange(editor, 'deletion', changeId);
     const added = insR ? wordCount(markText(editor, insR)) : 0;
     const removed = delR ? wordCount(markText(editor, delR)) : 0;
     setDiff((prev) => (prev.added === added && prev.removed === removed ? prev : { added, removed }));
-  }, [editor, changeId, tick]);
+  }, [editor, changeId, streaming, tick]);
 
   // Fade in shortly after mount so the pill doesn't snap into place.
   useEffect(() => {
