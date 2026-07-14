@@ -69,6 +69,7 @@ import {
   resolveTemplatePrompt,
   buildDefaultVars,
   type DraftTemplate,
+  type TemplateCategory,
 } from '@/lib/draft-templates';
 import {
   FORMAT_PRESETS,
