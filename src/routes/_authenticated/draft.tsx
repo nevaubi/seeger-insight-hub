@@ -477,6 +477,7 @@ function DraftPage() {
         onExportDocx={exportDocx}
         onExportPdf={exportPdf}
         onExportMd={exportMarkdown}
+        onPolish={polishBluebook}
         canExport={!!content.trim()}
         onDelete={activeId ? () => deleteDoc.mutate(activeId) : undefined}
         matterShort={currentMatter.short_name}
