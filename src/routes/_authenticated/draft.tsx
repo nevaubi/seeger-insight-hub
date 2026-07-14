@@ -758,13 +758,6 @@ function DocumentBar({
   isLoading,
   onPickDoc,
   onNewDoc,
-  suggestionsOn,
-  onToggleSuggestions,
-  pendingChangeCount,
-  onAcceptAll,
-  onRejectAll,
-  focusMode,
-  onToggleFocus,
   wordCount,
   readMin,
 }: {
