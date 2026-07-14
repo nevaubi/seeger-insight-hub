@@ -154,6 +154,22 @@ function AskTheRecord() {
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
+  // Drain a cross-page seed once per mount (e.g. "Ask about this" from a
+  // deposition finding). Runs before the panels render, so the composer opens
+  // pre-filled and focused.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    seededRef.current = true;
+    void import('@/lib/depo-clipboard').then(({ drainAskSeed }) => {
+      const seed = drainAskSeed();
+      if (seed && seed.trim()) {
+        setQ(seed.trim());
+        setMode('synth');
+      }
+    });
+  }, []);
+
   return (
     <AppShell>
       <div className="px-6 lg:px-10 pt-6 pb-2 flex items-center gap-1 text-xs">
