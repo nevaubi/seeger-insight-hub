@@ -536,7 +536,7 @@ function DraftPage() {
               }}
               className="flex-1 min-h-0"
             />
-            <div className="hidden xl:block shrink-0">
+            <div className="hidden lg:block shrink-0 w-5">
               <PlaceholderRail editor={editorRef.current} />
             </div>
           </div>
