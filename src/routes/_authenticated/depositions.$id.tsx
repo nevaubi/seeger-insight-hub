@@ -185,21 +185,48 @@ function CiteButton({
   span,
   onCite,
   label,
+  onHover,
+  onPin,
+  pinned,
 }: {
   span: CiteSpan;
   onCite: (s: CiteSpan) => void;
   label?: string | null;
+  onHover?: (s: CiteSpan | null) => void;
+  onPin?: (s: CiteSpan) => void;
+  pinned?: boolean;
 }) {
   const text = label ?? formatCite(span);
   if (!text) return null;
   return (
-    <button
-      type="button"
-      onClick={() => onCite(span)}
-      className="inline-flex items-center rounded-sm border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-foreground hover:bg-primary/10 hover:border-primary/30 hover:text-primary transition-colors"
+    <span
+      className="inline-flex items-center rounded-sm border border-border bg-secondary/40 overflow-hidden divide-x divide-border/70"
+      onMouseEnter={() => onHover?.(span)}
+      onMouseLeave={() => onHover?.(null)}
     >
-      {text}
-    </button>
+      <button
+        type="button"
+        onClick={() => onCite(span)}
+        className="px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+      >
+        {text}
+      </button>
+      {onPin && (
+        <button
+          type="button"
+          onClick={() => onPin(span)}
+          title={pinned ? 'Unpin from transcript' : 'Pin to transcript'}
+          className={cn(
+            'px-1 py-0.5 transition-colors',
+            pinned
+              ? 'text-primary bg-primary/10'
+              : 'text-muted-foreground hover:text-primary',
+          )}
+        >
+          {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+        </button>
+      )}
+    </span>
   );
 }
 
