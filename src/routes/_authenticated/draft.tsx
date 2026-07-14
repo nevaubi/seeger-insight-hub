@@ -11,14 +11,7 @@ import {
   CornerDownLeft,
   BookOpen,
   ArrowDownToLine,
-  Mail,
-  ListChecks,
-  CalendarClock,
-  Gavel,
   Search,
-  FileSignature,
-  FileSearch,
-  ClipboardList,
   Sparkles,
   MoreHorizontal,
   Layers,
@@ -26,9 +19,12 @@ import {
   ChevronsRight,
   X,
   Check,
+  Star,
   GitPullRequestArrow,
   Focus,
   Hash,
+  Type as TypeIcon,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
@@ -67,6 +63,19 @@ import {
   exportFilename,
 } from '@/lib/file-export';
 import { normalizeBluebook } from '@/lib/bluebook';
+import {
+  DRAFT_TEMPLATES,
+  TEMPLATE_CATEGORIES,
+  resolveTemplatePrompt,
+  buildDefaultVars,
+  type DraftTemplate,
+  type TemplateCategory,
+} from '@/lib/draft-templates';
+import {
+  FORMAT_PRESETS,
+  getPreset,
+  type PresetId,
+} from '@/lib/format-presets';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
 import type { Editor } from '@tiptap/react';
@@ -1177,7 +1186,12 @@ function ClaudeSidecar({
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 min-h-0">
         {proposals.length === 0 && (
-          <TemplateLauncher disabled={running} onPick={(t) => send(t.prompt)} />
+          <TemplateLauncher
+            disabled={running}
+            matter={matter}
+            onPick={(_t, resolvedPrompt) => send(resolvedPrompt)}
+          />
+
         )}
         {proposals.map((p) => (
           <ProposalCard
@@ -1294,228 +1308,332 @@ function ClaudeSidecar({
 }
 
 // ============================================================
-// Templates (retained from previous version, categorised)
+// Template launcher — search + favorites + recents + preview
 // ============================================================
 
-type DraftTemplate = {
-  category:
-    | 'Correspondence'
-    | 'Motions & Briefs'
-    | 'Discovery'
-    | 'Case Management'
-    | 'Hearing Prep'
-    | 'Leadership / PSC';
-  icon: typeof Mail;
-  title: string;
-  docType: string;
-  summary: string;
-  prompt: string;
-};
+const FAVORITES_KEY = 'draft.templates.favorites';
+const RECENTS_KEY = 'draft.templates.recents';
 
-const DRAFT_TEMPLATES: DraftTemplate[] = [
-  {
-    category: 'Correspondence',
-    icon: Mail,
-    title: 'Meet-and-confer letter',
-    docType: 'Letter',
-    summary: 'Discovery deficiencies, numbered, tied to the controlling order.',
-    prompt:
-      'Draft a meet-and-confer letter from Seeger Weiss LLP to defense liaison counsel addressing outstanding discovery deficiencies. Full letter form: date line, addressee block, "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — Outstanding Discovery Deficiencies" line, salutation, body organized as numbered deficiency items each citing the controlling discovery order and the specific request at issue, a proposal of meet-and-confer times within the next seven days, and a closing signature block for [ATTORNEY NAME], Seeger Weiss LLP. Reserve all rights. Insert [BRACKETED ALL-CAPS] placeholders for any fact not in the record.',
-  },
-  {
-    category: 'Correspondence',
-    icon: Mail,
-    title: 'Letter to Magistrate Cannon',
-    docType: 'Letter',
-    summary: 'Pre-motion discovery dispute letter per the operative procedure.',
-    prompt:
-      'Draft a pre-motion discovery dispute letter to Magistrate Judge Hope T. Cannon following the procedure set out in the operative discovery management order. Brief letter form with subject line "Re: In re Depo-Provera Prods. Liab. Litig., MDL No. 3140 — [SUBJECT]", three to four short numbered paragraphs stating (1) the dispute, (2) what plaintiffs sought and when, (3) defendants\' position and meet-and-confer efforts, and (4) the limited relief requested. Cite the controlling order. Sign "Respectfully submitted," with [ATTORNEY NAME], Seeger Weiss LLP.',
-  },
-  {
-    category: 'Motions & Briefs',
-    icon: Gavel,
-    title: 'Motion to compel — outline',
-    docType: 'Motion',
-    summary: 'Argument headings, governing standard, and proposed relief.',
-    prompt:
-      'Draft a detailed outline for Plaintiffs\' Motion to Compel Discovery. Full court caption; title "PLAINTIFFS\' MOTION TO COMPEL DISCOVERY". Sections: Introduction; Background (meet-and-confer history, pin-cited); Legal Standard (Fed. R. Civ. P. 26(b)(1), 37(a), Eleventh Circuit authority); Argument with numbered headings (I., II., A., B.); Conclusion / Proposed Relief; signature block; Certificate of Service. Use [BRACKETED ALL-CAPS] placeholders for case-specific facts.',
-  },
-  {
-    category: 'Motions & Briefs',
-    icon: Gavel,
-    title: 'Daubert / Rule 702 response section',
-    docType: 'Brief Section',
-    summary: 'General-causation expert defense, ties to the gating hearing.',
-    prompt:
-      'Draft a brief section responding to a Rule 702 / Daubert challenge to Plaintiffs\' general-causation expert(s) on the meningioma–medroxyprogesterone acetate association. Numbered headings (I. Legal Standard; II. Dr. [EXPERT NAME]\'s Methodology Satisfies Rule 702; A. Reliability; B. Fit; III. Defendants\' Critiques Go to Weight, Not Admissibility). Cite Daubert, Kumho Tire, the 2023 amendments to Rule 702, and Eleventh Circuit authority. Use [BRACKETED ALL-CAPS] for expert names and record pin cites.',
-  },
-  {
-    category: 'Discovery',
-    icon: FileSignature,
-    title: "Plaintiffs' First RFPs",
-    docType: 'Discovery Request',
-    summary: 'Numbered RFPs with definitions and instructions block.',
-    prompt:
-      'Draft Plaintiffs\' First Set of Requests for Production to Defendants in In re Depo-Provera Prods. Liab. Litig., MDL No. 3140. Full caption. Sections: I. Definitions; II. Instructions (Fed. R. Civ. P. 26/34 and operative ESI protocol); III. Requests (numbered RFP No. 1–[N] on general-causation research, pharmacovigilance signals on meningioma, label change history, FDA correspondence, internal risk assessments). Signature block. Each request on one substantive item.',
-  },
-  {
-    category: 'Discovery',
-    icon: FileSignature,
-    title: 'ESI protocol stipulation',
-    docType: 'Stipulation',
-    summary: 'Skeleton ESI protocol tracking the operative CMO.',
-    prompt:
-      'Draft a stipulated ESI protocol tracking the operative case management order. Numbered sections: 1. Cooperation; 2. Scope; 3. Custodians and Sources; 4. Search Methodology; 5. Production Format; 6. Metadata Fields (table); 7. De-Duplication and Threading; 8. Privilege (FRE 502(d)); 9. Modern Attachments; 10. Disputes; 11. Modification. Dual signature lines and "SO ORDERED" for Magistrate Judge Cannon.',
-  },
-  {
-    category: 'Case Management',
-    icon: ListChecks,
-    title: 'Joint status report',
-    docType: 'Status Report',
-    summary: 'Pre-CMC report to Judge Rodgers on open items.',
-    prompt:
-      'Draft a Joint Status Report to Judge Rodgers ahead of the next status conference. Full caption. Numbered sections: I. Case Inventory; II. Plaintiff/Defendant Fact Sheets; III. Document Discovery; IV. Deposition Schedule; V. Expert Discovery / Daubert; VI. Bellwether Process; VII. Pending Motions; VIII. Proposed Agenda. Use joint voice; add "Plaintiffs\' Position:" / "Defendants\' Position:" subheads where the parties disagree. Dual signature block.',
-  },
-  {
-    category: 'Case Management',
-    icon: CalendarClock,
-    title: 'Deadline & obligations summary',
-    docType: 'Memo',
-    summary: 'Tabular summary of upcoming CMO obligations.',
-    prompt:
-      'Draft a memorandum summarizing upcoming deadlines and each party\'s obligations under the operative case management order. Memo header (TO / FROM / DATE / RE). Section 1: Markdown table "Date | Event | Source (PTO/CMO ¶) | Plaintiffs\' Obligation | Defendants\' Obligation". Section 2: narrative of the three most significant deadlines. Cite each row to the controlling order.',
-  },
-  {
-    category: 'Hearing Prep',
-    icon: FileSearch,
-    title: 'Bench memo',
-    docType: 'Bench Memo',
-    summary: 'Internal bench memo for an upcoming hearing.',
-    prompt:
-      'Draft an internal bench memo for Plaintiffs\' co-lead counsel preparing for an upcoming hearing. Header MEMORANDUM with TO / FROM / DATE / RE. Sections: I. Question Presented; II. Short Answer; III. Background; IV. Discussion (I., A., B.); V. Anticipated Questions from the Court; VI. Talking Points; VII. Follow-up. Bluebook throughout. Use [BRACKETED ALL-CAPS] placeholders.',
-  },
-  {
-    category: 'Hearing Prep',
-    icon: FileSearch,
-    title: 'Cross-examination outline',
-    docType: 'Outline',
-    summary: 'Topic-driven cross outline for an expert witness.',
-    prompt:
-      'Draft a cross-examination outline for [EXPERT WITNESS NAME], a defense general-causation expert. Header with witness name, role, date. Sections by topic (I., II., III.), subtopics (A., B.), numbered questions with anticipated answer in italics and exhibit references. End with "Loose Ends" and "Impeachment Reserves".',
-  },
-  {
-    category: 'Leadership / PSC',
-    icon: ClipboardList,
-    title: 'Common-benefit time memo',
-    docType: 'PSC Memo',
-    summary: 'Submission instructions to participating firms.',
-    prompt:
-      'Draft a memorandum from Plaintiffs\' Co-Lead Counsel to all participating firms setting procedures for submitting common-benefit time and expenses under the operative Common Benefit Order. Memo header. Sections: I. Authority; II. What Qualifies; III. Time Submission Procedure; IV. Expense Submission Procedure; V. Audit and Approval; VI. Contact.',
-  },
-];
-
-const TEMPLATE_CATEGORIES: DraftTemplate['category'][] = [
-  'Correspondence',
-  'Motions & Briefs',
-  'Discovery',
-  'Case Management',
-  'Hearing Prep',
-  'Leadership / PSC',
-];
+function readIds(key: string): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function writeIds(key: string, ids: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(ids.slice(0, 20)));
+  } catch {
+    /* ignore */
+  }
+}
 
 function TemplateLauncher({
   onPick,
   disabled,
+  matter,
 }: {
-  onPick: (t: DraftTemplate) => void;
+  onPick: (tpl: DraftTemplate, resolvedPrompt: string) => void;
   disabled: boolean;
+  matter: { name: string; short_name: string; mdl_number: string; court: string; judge: string };
 }) {
-  const [cat, setCat] = useState<DraftTemplate['category']>('Correspondence');
-  const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const items = useMemo(() => DRAFT_TEMPLATES.filter((t) => t.category === cat), [cat]);
-  const handlePick = (t: DraftTemplate) => {
-    if (disabled || pickedKey) return;
-    setPickedKey(t.title);
-    onPick(t);
-  };
+  const [query, setQuery] = useState('');
+  const [activeCat, setActiveCat] = useState<TemplateCategory | 'All'>('All');
+  const [selectedId, setSelectedId] = useState<string | null>(DRAFT_TEMPLATES[0]?.id ?? null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [favorites, setFavorites] = useState<string[]>(() => readIds(FAVORITES_KEY));
+  const [recents, setRecents] = useState<string[]>(() => readIds(RECENTS_KEY));
+  const [userVars, setUserVars] = useState<Record<string, string>>({});
+
+  const defaultVars = useMemo(() => buildDefaultVars(matter), [matter]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return DRAFT_TEMPLATES.filter((t) => {
+      if (activeCat !== 'All' && t.category !== activeCat) return false;
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.docType.toLowerCase().includes(q) ||
+        t.summary.toLowerCase().includes(q) ||
+        t.category.toLowerCase().includes(q)
+      );
+    });
+  }, [query, activeCat]);
+
+  const favoriteList = useMemo(
+    () =>
+      favorites
+        .map((id) => DRAFT_TEMPLATES.find((t) => t.id === id))
+        .filter((x): x is DraftTemplate => !!x),
+    [favorites],
+  );
+  const recentList = useMemo(
+    () =>
+      recents
+        .map((id) => DRAFT_TEMPLATES.find((t) => t.id === id))
+        .filter((x): x is DraftTemplate => !!x)
+        .slice(0, 5),
+    [recents],
+  );
+
+  const selected = useMemo(
+    () => DRAFT_TEMPLATES.find((t) => t.id === selectedId) ?? filtered[0] ?? DRAFT_TEMPLATES[0],
+    [selectedId, filtered],
+  );
+
+  const toggleFavorite = useCallback(
+    (id: string) => {
+      setFavorites((prev) => {
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
+        writeIds(FAVORITES_KEY, next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handlePick = useCallback(
+    (tpl: DraftTemplate) => {
+      if (disabled || pickedId) return;
+      const merged = { ...defaultVars, ...userVars };
+      const resolved = resolveTemplatePrompt(tpl, merged);
+      setPickedId(tpl.id);
+      // Track recents (dedupe, cap at 5).
+      setRecents((prev) => {
+        const next = [tpl.id, ...prev.filter((x) => x !== tpl.id)].slice(0, 5);
+        writeIds(RECENTS_KEY, next);
+        return next;
+      });
+      onPick(tpl, resolved);
+    },
+    [disabled, pickedId, defaultVars, userVars, onPick],
+  );
+
+  const preset = getPreset(selected?.preset);
+  const manualVars = (selected?.vars ?? []).filter((v) => v.source === 'user');
+
   return (
     <div className="py-2 px-1">
-      <div className="text-center mb-4 px-2">
-        <ClaudeLogo className="h-5 w-5 mx-auto mb-2.5" />
-        <p className="font-serif text-[15px] text-foreground/85 mb-1">
-          Draft with Claude.
-        </p>
-        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-          Pick a starting form, or describe what you need. Factual claims are cited to the
-          controlling orders when grounding is on.
+      <div className="text-center mb-3 px-2">
+        <ClaudeLogo className="h-5 w-5 mx-auto mb-2" />
+        <p className="font-serif text-[15px] text-foreground/85">Draft with Claude.</p>
+        <p className="text-[11px] leading-relaxed text-muted-foreground mt-0.5">
+          Pick a starting form. Formatting auto-applies from the template preset.
         </p>
       </div>
 
-      <div className="mb-3">
-        <div className="flex flex-wrap gap-1.5">
-          {TEMPLATE_CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCat(c)}
-              className={cn(
-                'rounded-full px-2.5 py-1 text-[11px] font-sans transition border',
-                cat === c
-                  ? 'bg-accent/10 border-accent/40 text-accent'
-                  : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
-              )}
-            >
-              {c}
-            </button>
-          ))}
+      <div className="relative mb-2.5">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/70" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search templates…"
+          className="h-8 pl-7 text-[12px] border-border/70"
+        />
+      </div>
+
+      <div className="mb-2 flex flex-wrap gap-1">
+        {(['All', ...TEMPLATE_CATEGORIES] as const).map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setActiveCat(c)}
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10.5px] font-sans transition border',
+              activeCat === c
+                ? 'bg-accent/10 border-accent/40 text-accent'
+                : 'bg-card border-border text-muted-foreground hover:border-accent/30 hover:text-foreground',
+            )}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Favorites & Recents strips */}
+      {(favoriteList.length > 0 || recentList.length > 0) && query.trim() === '' && activeCat === 'All' && (
+        <div className="mb-2 space-y-1.5">
+          {favoriteList.length > 0 && (
+            <TemplateStrip
+              label="Favorites"
+              icon={Star}
+              items={favoriteList}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          )}
+          {recentList.length > 0 && (
+            <TemplateStrip
+              label="Recent"
+              icon={Hash}
+              items={recentList}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          )}
         </div>
-      </div>
+      )}
 
-      <div className="space-y-1.5">
-        {items.map((t) => {
+      {/* Template list */}
+      <div className="space-y-1">
+        {filtered.length === 0 && (
+          <div className="text-[11.5px] text-muted-foreground italic px-1 py-4 text-center">
+            No templates match "{query}"
+          </div>
+        )}
+        {filtered.map((t) => {
           const Icon = t.icon;
-          const isPicked = pickedKey === t.title;
-          const isDim = !!pickedKey && !isPicked;
+          const isSelected = selectedId === t.id;
+          const isFav = favorites.includes(t.id);
           return (
-            <button
-              key={t.title}
-              type="button"
-              onClick={() => handlePick(t)}
-              disabled={disabled || !!pickedKey}
+            <div
+              key={t.id}
               className={cn(
-                'group w-full flex items-start gap-3 rounded-md border bg-card px-3 py-3 text-left transition',
-                'hover:border-accent/50 hover:bg-accent/5 disabled:cursor-default',
-                isPicked ? 'border-accent/60 bg-accent/5' : 'border-border',
-                isDim && 'opacity-45',
+                'group flex items-start gap-2 rounded-md border px-2 py-2 transition cursor-pointer',
+                isSelected
+                  ? 'border-accent/50 bg-accent/5'
+                  : 'border-border/60 bg-card hover:border-accent/30 hover:bg-accent/[0.03]',
               )}
+              onClick={() => setSelectedId(t.id)}
             >
-              <span className="h-6 w-6 rounded-full bg-accent/10 grid place-items-center shrink-0 mt-0.5">
-                {isPicked ? (
-                  <Loader2 className="h-3.5 w-3.5 text-accent animate-spin" />
-                ) : (
-                  <Icon className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} />
-                )}
+              <span className="h-5 w-5 rounded-full bg-accent/10 grid place-items-center shrink-0 mt-0.5">
+                <Icon className="h-3 w-3 text-accent" strokeWidth={1.75} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[13px] font-sans font-medium text-foreground/90 leading-snug">
+                  <span className="text-[12.5px] font-sans font-medium text-foreground/90 leading-snug truncate">
                     {t.title}
                   </span>
-                  <span className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground/70 font-sans shrink-0">
+                  <span className="text-[9.5px] uppercase tracking-[0.09em] text-muted-foreground/70 font-sans shrink-0">
                     {t.docType}
                   </span>
                 </div>
-                <p className="text-[11.5px] text-muted-foreground leading-snug mt-0.5">
-                  {isPicked ? `Preparing ${t.title.toLowerCase()}…` : t.summary}
+                <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-1">
+                  {t.summary}
                 </p>
               </div>
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFavorite(t.id);
+                }}
+                className={cn(
+                  'shrink-0 p-1 rounded transition opacity-0 group-hover:opacity-100',
+                  isFav && 'opacity-100 text-amber-500',
+                )}
+                title={isFav ? 'Unfavorite' : 'Favorite'}
+                aria-label={isFav ? 'Unfavorite template' : 'Favorite template'}
+              >
+                <Star className={cn('h-3 w-3', isFav && 'fill-current')} />
+              </button>
+            </div>
           );
         })}
+      </div>
+
+      {/* Preview + Use button */}
+      {selected && (
+        <div className="mt-3 rounded-md border border-border/70 bg-card/60 p-2.5">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <TypeIcon className="h-3 w-3 text-accent/80" />
+            <span className="text-[10px] uppercase tracking-[0.11em] font-sans text-muted-foreground">
+              {preset.label}
+            </span>
+            <span className="text-[10px] text-muted-foreground/60 font-sans truncate">
+              · {preset.short}
+            </span>
+          </div>
+          {manualVars.length > 0 && (
+            <div className="mb-2 grid grid-cols-1 gap-1.5">
+              {manualVars.map((v) => (
+                <div key={v.key} className="flex items-center gap-1.5">
+                  <label className="text-[10.5px] font-sans text-muted-foreground w-24 shrink-0">
+                    {v.label}
+                  </label>
+                  <Input
+                    value={userVars[v.key] ?? ''}
+                    onChange={(e) => setUserVars((s) => ({ ...s, [v.key]: e.target.value }))}
+                    placeholder={v.placeholder}
+                    className="h-6 text-[11.5px] border-border/60 flex-1"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <Button
+            size="sm"
+            className="w-full h-7 gap-1.5 text-[11.5px]"
+            disabled={disabled || !!pickedId}
+            onClick={() => handlePick(selected)}
+          >
+            {pickedId === selected.id ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" /> Preparing…
+              </>
+            ) : (
+              <>
+                <ChevronRight className="h-3 w-3" /> Use "{selected.title}"
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TemplateStrip({
+  label,
+  icon: Icon,
+  items,
+  selectedId,
+  onSelect,
+}: {
+  label: string;
+  icon: typeof Star;
+  items: DraftTemplate[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-1 mb-0.5 px-0.5">
+        <Icon className="h-2.5 w-2.5 text-muted-foreground/70" />
+        <span className="text-[9.5px] uppercase tracking-[0.12em] font-sans text-muted-foreground/70">
+          {label}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {items.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onSelect(t.id)}
+            className={cn(
+              'rounded px-1.5 py-0.5 text-[10.5px] font-sans transition border max-w-[180px] truncate',
+              selectedId === t.id
+                ? 'bg-accent/10 border-accent/40 text-accent'
+                : 'bg-card border-border/60 text-foreground/75 hover:border-accent/30',
+            )}
+            title={t.title}
+          >
+            {t.title}
+          </button>
+        ))}
       </div>
     </div>
   );
 }
+
+
 
 // ============================================================
 // Save status & document rail

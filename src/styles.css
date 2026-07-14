@@ -428,13 +428,42 @@
 }
 
 .legal-prose {
-  font-family: var(--font-serif);
-  font-size: 16px;
-  line-height: 1.75;
+  font-family: var(--legal-font, var(--font-serif));
+  font-size: var(--legal-size, 16px);
+  line-height: var(--legal-line, 1.75);
   letter-spacing: 0.005em;
   color: var(--foreground);
   font-feature-settings: "onum" 1, "liga" 1, "kern" 1;
   hanging-punctuation: first last;
+}
+
+/* Preset: paragraph indent + alignment driven by the active FormatPreset. */
+.legal-editor-shell .legal-prose p {
+  text-indent: var(--legal-indent, 0);
+  text-align: var(--legal-align, left);
+}
+.legal-editor-shell .legal-prose h1 + p,
+.legal-editor-shell .legal-prose h2 + p,
+.legal-editor-shell .legal-prose h3 + p,
+.legal-editor-shell .legal-prose h4 + p,
+.legal-editor-shell .legal-prose blockquote p,
+.legal-editor-shell .legal-prose li p {
+  text-indent: 0;
+}
+/* Memo/letter presets: quieter headings, no top rule on H2. */
+.preset-internal-memo .legal-prose h2,
+.preset-outline .legal-prose h2,
+.preset-letter .legal-prose h2 {
+  border-top: 0;
+  padding-top: 0;
+  font-size: 1.15rem;
+  margin: 1.2rem 0 0.4rem;
+}
+.preset-internal-memo .legal-prose h1::first-line,
+.preset-outline .legal-prose h1::first-line,
+.preset-letter .legal-prose h1::first-line {
+  font-variant: normal;
+  letter-spacing: 0;
 }
 
 .legal-prose h1 {

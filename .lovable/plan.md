@@ -1,85 +1,113 @@
-# Drafting polish: Bluebook citations + court-ready DOCX + formatting
+## Goal
 
-Three coordinated upgrades to the drafting workspace. All changes are frontend + export-layer only; the existing `cite-check` edge function (CourtListener) is reused as-is.
+Expand the drafting template library and redesign the launcher, with each template carrying formatting metadata that automatically applies matching styles to both the editor and the exported DOCX.
 
-## 1. Bluebook cite normalizer (pre-export pass)
+## Part 1 — Expanded template library
 
-New: `src/lib/bluebook.ts` — pure functions, no network.
+New file: `src/lib/draft-templates.ts` (moves `DRAFT_TEMPLATES` out of `draft.tsx` and grows it).
 
-**Normalizations applied on export and on-demand via a toolbar action:**
-- **Reporter abbreviations** — `F.Supp.3d`/`F. Supp. 3d`/`F.Supp.3d.` → canonical `F. Supp. 3d`; same for `F.`, `F.2d`, `F.3d`, `F.4th`, `U.S.`, `S. Ct.`, `L. Ed. 2d`, `A.2d/3d`, `N.E.2d/3d`, `S.E.2d/3d`, `So. 2d/3d`, `P.2d/3d`, `Cal.`, `N.Y.`, etc. (table-driven).
-- **Short-form promotion** — after the first full cite of a case, subsequent full repeats collapse to `Smith, 123 F.3d at 45` short form. Tracks a per-document citation ledger by normalized reporter+volume+page.
-- **`Id.` insertion** — when the immediately preceding citation in the same paragraph refers to the same case (same volume+reporter+page), replace with `Id.` (with pincite: `Id. at 47`). Never crosses headings or block quotes.
-- **`supra` for treatises / non-case authorities** — repeat references to secondary sources (detected by pattern: author name + title + pin) become `Author, supra note N, at X` when a footnote number is present; otherwise `Author, supra, at X`.
-- **Signal spacing** — `see,` / `See ,` / `see  also` → `See also`; correct comma/italics placement for `see`, `see also`, `cf.`, `but see`, `accord`, `e.g.`.
-- **Pincite hygiene** — `at 45-47` → `at 45–47` (en-dash); `pp. 45` → `at 45`; strip stray periods after reporter volumes.
-- **Case-name italics** — mark case names (detected via `v.` between capitalized tokens) with `italic: true` runs so DOCX/PDF renders them italicized. Skips names already inside italic runs.
-- **Court + year normalization** — `(D.C. Cir. 2019)` retained; strip double spaces; add missing parenthesis on unambiguous patterns.
-
-**Report object returned to UI:**
+Template shape (extended):
 ```ts
-type BluebookReport = {
-  changes: { kind: 'reporter' | 'id' | 'supra' | 'short' | 'signal' | 'pincite' | 'italic'; before: string; after: string; blockIndex: number }[];
-  totals: Record<Kind, number>;
-}
+type PresetId = 'federal-motion' | 'federal-brief' | 'letter' | 'internal-memo' | 'discovery' | 'stipulation' | 'outline' | 'bench-memo';
+type TemplateVar = { key: string; label: string; default?: string; source?: 'matter.judge'|'matter.court'|'matter.mdl_number'|'matter.short_name'|'today'|'user' };
+type DraftTemplate = {
+  id: string;                          // stable slug for favorites/recents
+  category: Category;
+  icon: LucideIcon;
+  title: string;
+  docType: string;
+  summary: string;
+  preset: PresetId;                    // drives editor + export styling
+  vars: TemplateVar[];                 // prefilled from matter context / user
+  prompt: string;                      // may reference {{var}} tokens
+};
 ```
 
-## 2. Court-ready DOCX styling
+Categories (unchanged 6) and ~28 templates total. Adds:
+- **Correspondence**: Rule 37 pre-motion letter; Extension request; Deposition scheduling; Preservation letter.
+- **Motions & Briefs**: Motion to Compel (full brief, not outline); Reply in support; Opposition to MTD; Motion in Limine; Motion for Protective Order; Rule 502(d) motion; Sanctions motion; Response to Lone Pine motion.
+- **Discovery**: Interrogatories (First Set); Requests for Admission; 30(b)(6) notice; Subpoena duces tecum; Privilege log skeleton; Plaintiff Fact Sheet cover.
+- **Case Management**: Rule 26(f) report; Proposed CMO section; Bellwether selection proposal.
+- **Hearing Prep**: Direct-exam outline; Oral-argument outline; Daubert hearing prep memo.
+- **Leadership / PSC**: PSC meeting agenda; Common-benefit assessment notice; TPLF disclosure memo.
 
-Extend `src/lib/file-export.ts`:
+Existing templates get an `id`, `preset`, and `vars` field.
 
-**New export mode** — `exportCourtReadyDocx(blocks, opts)` where `opts` includes:
-- `caption`: `{ court, division, caseName, caseNumber, judge, docType }` — renders the N.D. Fla. pleading caption block (two-column table: parties left, case metadata right, `)` divider column) at the top.
-- `pageNumbers`: default `true` — footer with `Page X of Y` centered, using Word's `PAGE`/`NUMPAGES` fields.
-- `lineNumbers`: default `false` — adds `<w:lnNumType w:countBy="1" w:restart="newPage"/>` to the section for pleading line numbering.
-- `doubleSpace`: default `true` for body paragraphs (`w:line="480" w:lineRule="auto"`).
-- `firstLineIndent`: default `720` DXA (0.5") on body paragraphs; headings unindented.
-- `certificateOfService`: optional trailing block auto-appended.
-- `signatureBlock`: `{ attorney, firm, address, phone, email, barNumber }` rendered right-aligned above COS.
+## Part 2 — Formatting presets (editor + export)
 
-**Style upgrades to the existing styles.xml:**
-- Add explicit `Heading1`/`Heading2`/`Heading3` styles with outline levels (fixes Word's Navigation Pane).
-- Add `BlockQuote` style: 0.5" left+right indent, single-spaced, 11pt.
-- Add `Footnote` style — enables footnote export (see §3).
-- Add `Caption` and `Signature` styles used by the court-ready block.
-- Widow/orphan control on all body paragraphs.
-- `keepNext` on all headings (already partial; extend to H2/H3).
+New file: `src/lib/format-presets.ts` — the source of truth for per-preset styling.
 
-**Page setup:**
-- US Letter 12240×15840, 1" margins (unchanged).
-- Header offset 720, footer 720 (unchanged).
-- Add page numbers via footer part (new `word/footer1.xml` + rel + content-type entry).
+```ts
+type FormatPreset = {
+  id: PresetId;
+  label: string;
+  editor: { fontFamily: string; fontSize: string; lineHeight: string; firstLineIndent?: string; headingScale: 'legal'|'memo'|'letter' };
+  docx: {
+    font: 'Times New Roman'|'Century Schoolbook'|'Arial';
+    sizeHalfPts: number;               // 24 = 12pt
+    lineRule: 'auto'|'exact';
+    lineTwips: number;                 // 480 = double
+    firstLineIndentDxa: number;
+    marginsDxa: { top:number; right:number; bottom:number; left:number };
+    headingNumbering: 'roman'|'decimal'|'none';    // I./A./1./a. vs 1./1.1 vs plain
+    caption: boolean;                  // render court caption block
+    pageNumbers: 'footer-center'|'footer-right'|'none';
+    signatureBlock: boolean;
+    certificateOfService: boolean;
+  };
+};
+```
 
-## 3. Document formatting polish (editor + export)
+Six presets ship: `federal-motion`, `federal-brief`, `letter`, `internal-memo`, `discovery`, `stipulation`, plus `outline` and `bench-memo`.
 
-**Markdown → block improvements** (`file-export.ts` block parser):
-- Recognize `> ` block quotes → new `blockquote` block type; renders in DOCX/HTML with `BlockQuote` style (indented, no first-line indent).
-- Recognize footnote syntax `[^1]` inline + `[^1]: text` at doc end → real Word footnotes (`w:footnoteReference` + `word/footnotes.xml` part). PDF path renders as numbered list under `<h2>Footnotes</h2>`.
-- Recognize `---` on its own line → thematic break (already `rule`, verify path).
-- Preserve smart quotes on export: `'` → `’`, `"` → `“/”` (open/close aware), `--` → `—`, `...` → `…`.
-- Non-breaking space between citation atoms: `123 U.S. 456` → `123\u00a0U.S.\u00a0456` in export.
-- Small-caps run flag (new `smallcaps` on `Run`) mapped to `<w:smallCaps/>` in DOCX and `font-variant: small-caps` in HTML — used by Bluebook normalizer for author names in secondary sources.
+**Editor side** (`legal-editor.tsx`): accept an optional `preset` prop; apply matching CSS custom properties (`--legal-font`, `--legal-size`, `--legal-line`, `--legal-indent`) on the `.legal-prose` root. Heading numbering rendered via CSS counters (`.preset-federal-motion h2::before { content: counter(h2, upper-roman) '. '; }`). No content change.
 
-**Editor-side (LegalEditor):**
-- Add a `Format polish` toolbar action that runs Bluebook normalize + smart-quote pass over the current doc and streams the diff as tracked changes (reuses existing `insertion`/`deletion` marks so the user can accept/reject each fix).
-- Add a right-side toolbar chip showing citation stats: `12 cites · 2 short · 1 Id.` — clicking opens a summary popover.
+**Export side** (`file-export.ts`): existing `downloadDocx` gains an optional `preset: FormatPreset['docx']` parameter that swaps the `DOCX_STYLES` defaults (font, size, line spacing, first-line indent), sets `<w:sectPr>` margins, and conditionally emits the caption/footer/signature/COS parts already scoped by the earlier court-ready plan. Presets without caption keep the current clean output.
 
-**New Export menu entries** (replace current single "Word (.docx)"):
-- **Word — Draft** (current clean export).
-- **Word — Court-ready** (Part 2, opens a small options dialog: doc type, caption, line numbers).
-- **Word — Redlined** (existing tracked changes preserved as `w:ins`/`w:del`).
-- **PDF — Print preview** (current path).
+## Part 3 — Launcher UX
+
+Rewrite `TemplateLauncher` (still in `draft.tsx`, ~200 lines) into three panes:
+
+```
+┌ Search ─────────────────────┐  ┌ Preview ─────────────────┐
+│ [🔎 search templates…]      │  │ Motion to Compel         │
+│                             │  │ Preset: Federal Motion   │
+│ ★ Favorites                 │  │ ─────────────────────── │
+│   • Motion to compel        │  │ Fields                   │
+│   • Meet-and-confer letter  │  │ Opposing party: [    ]  │
+│                             │  │ Deadline:       [    ]  │
+│ Recents (5)                 │  │ Attorney:       Firas … │
+│                             │  │                          │
+│ Correspondence   >          │  │ [ Use template ]         │
+│ Motions & Briefs >          │  │                          │
+│ Discovery        >          │  └──────────────────────────┘
+│ Case Management  >          │
+│ Hearing Prep     >          │
+│ Leadership/PSC   >          │
+└─────────────────────────────┘
+```
+
+- **Search** — fuzzy match on title, docType, summary (client-side).
+- **Favorites & Recents** — persisted in `localStorage` under `draft.templates.{favorites,recents}`; recents capped at 5.
+- **Variables** — auto-filled from `useMatter()` (`matter.judge`, `matter.court`, `matter.mdl_number`, `matter.short_name`) and today's date; user-editable fields for opposing party, attorney name, deadline, subject. `{{tokens}}` in the prompt are substituted before sending.
+- **Preview pane** — shows the resolved prompt's first ~15 lines and the preset badge (`Federal Motion · Times 12 · Double-spaced`).
+- **Preset badge** on every category chip so users see the format at a glance.
+
+## Part 4 — Wiring
+
+- `draft.tsx`: import from `draft-templates.ts`, store `activePresetId` alongside the current document, pass it to `<LegalEditor preset={preset} />` and to `downloadDocx({ preset })`.
+- Persist `preset_id` on `WorkspaceDocument` locally (session state only — no schema change; we cache it in a `Map<docId, presetId>` in memory + `localStorage`).
+- Template pick sets the preset AND streams the resolved prompt into the assist queue exactly as today.
 
 ## Technical notes
 
-- No new backend, no migrations, no new edge functions.
-- New files: `src/lib/bluebook.ts`, `src/lib/court-docx.ts` (thin wrapper on `file-export`), `src/components/editor/court-ready-dialog.tsx`.
-- Touched: `src/lib/file-export.ts` (blockquote/footnote/smartquote/smallcaps + styles), `src/routes/_authenticated/draft.tsx` (export menu split + polish action + citation chip), `src/components/editor/legal-editor.tsx` (toolbar hook for polish action).
-- Bluebook pass is deterministic and local — no LLM call, no cost.
-- Court-ready caption defaults pulled from `matter-context` (matter name, court, judge, MDL number) so most fields prefill.
+- No backend, no migrations, no new edge functions.
+- New files: `src/lib/draft-templates.ts`, `src/lib/format-presets.ts`.
+- Touched: `src/routes/_authenticated/draft.tsx` (launcher rewrite + preset plumbing), `src/components/editor/legal-editor.tsx` (preset prop + CSS scope class), `src/lib/file-export.ts` (preset param on `downloadDocx`), `src/styles.css` (preset CSS rules).
+- Bluebook polish and court-ready caption from the prior pass remain intact — presets simply toggle those existing capabilities.
 
-## Out of scope for this pass
+## Out of scope
 
-- Bluebook 21st-ed edge cases for foreign authorities.
-- Automated pinpoint verification against the source PDF (that's the cite-check panel — separate feature).
-- Multi-jurisdiction local-rules templates beyond N.D. Fla. (add on request).
+- Server-side template storage or sharing across users.
+- Per-firm branding kits (logo insertion, watermarks).
+- Real-time collaborative editing of templates.

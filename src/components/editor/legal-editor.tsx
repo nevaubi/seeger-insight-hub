@@ -26,6 +26,15 @@ export type VoiceActionPayload = {
   to: number;
 };
 
+export type EditorPresetStyle = {
+  id: string;
+  fontFamily: string;
+  fontSize: string;
+  lineHeight: string;
+  firstLineIndent: string;
+  justify: boolean;
+};
+
 export type LegalEditorProps = {
   value: string;
   onChange: (markdown: string) => void;
@@ -34,6 +43,7 @@ export type LegalEditorProps = {
   onReady?: (editor: Editor) => void;
   running?: boolean;
   className?: string;
+  preset?: EditorPresetStyle;
 };
 
 // Hovered-paragraph decoration → adds a class we style in CSS so the gutter
@@ -116,6 +126,7 @@ export function LegalEditor({
   onReady,
   running,
   className,
+  preset,
 }: LegalEditorProps) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const lastMdRef = useRef(value);
@@ -190,8 +201,21 @@ export function LegalEditor({
     return editor.state.doc.textBetween(from, to, '\n').trim();
   }, [editor]);
 
+  const presetStyle = preset
+    ? ({
+        '--legal-font': preset.fontFamily,
+        '--legal-size': preset.fontSize,
+        '--legal-line': preset.lineHeight,
+        '--legal-indent': preset.firstLineIndent,
+        '--legal-align': preset.justify ? 'justify' : 'left',
+      } as React.CSSProperties)
+    : undefined;
+
   return (
-    <div className={cn('legal-editor-shell', className)}>
+    <div
+      className={cn('legal-editor-shell', preset ? `preset-${preset.id}` : null, className)}
+      style={presetStyle}
+    >
       {editor && (
         <>
           <BubbleMenu
