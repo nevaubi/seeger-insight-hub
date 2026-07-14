@@ -1199,11 +1199,63 @@ function DepositionWorkspace() {
 
 // ---------- Tab components ----------
 
+type CiteExtras = {
+  onHoverCite?: (s: CiteSpan | null) => void;
+  onPin?: (s: CiteSpan) => void;
+  isPinned?: (s: CiteSpan) => boolean;
+};
+
 function EmptyTab({ label }: { label: string }) {
   return (
     <Card className="p-6 text-center text-sm text-muted-foreground">No {label} yet.</Card>
   );
 }
+
+function FindingActionRow({
+  f,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
+}: {
+  f: DepositionFinding;
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+}) {
+  if (!onSendToDraft && !onSendToAsk && !onCopy) return null;
+  return (
+    <div className="mt-3 flex items-center gap-1 border-t border-dashed border-border/70 pt-2">
+      {onCopy && (
+        <button
+          type="button"
+          onClick={() => onCopy(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+        >
+          <Copy className="h-3 w-3" /> Copy cite
+        </button>
+      )}
+      {onSendToDraft && (
+        <button
+          type="button"
+          onClick={() => onSendToDraft(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+        >
+          <PenLine className="h-3 w-3" /> Send to Draft
+        </button>
+      )}
+      {onSendToAsk && (
+        <button
+          type="button"
+          onClick={() => onSendToAsk(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+        >
+          <Brain className="h-3 w-3" /> Ask the record
+        </button>
+      )}
+    </div>
+  );
+}
+
 
 function SummaryTab({
   execs,
