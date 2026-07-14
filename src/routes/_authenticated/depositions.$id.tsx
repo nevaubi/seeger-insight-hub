@@ -938,7 +938,7 @@ function DepositionWorkspace() {
                       // Determine "previous segment" carried over from the last line of the previous page
                       return (
                         <div key={page}>
-                          <div className="sticky top-0 z-10 bg-secondary/70 backdrop-blur border-y border-border px-4 py-1 text-[10.5px] font-sans font-medium uppercase tracking-[0.14em] text-muted-foreground tabular-nums">
+                          <div className="sticky top-0 z-10 bg-secondary/80 backdrop-blur border-b border-border/70 px-4 py-[2px] text-[9.5px] font-mono font-medium uppercase tracking-[0.16em] text-muted-foreground/80 tabular-nums">
                             Page {page}
                           </div>
                           <div className="py-1">
