@@ -66,6 +66,7 @@ import {
   downloadBlob,
   exportFilename,
 } from '@/lib/file-export';
+import { normalizeBluebook } from '@/lib/bluebook';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
 import type { Editor } from '@tiptap/react';
