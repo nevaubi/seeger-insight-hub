@@ -558,6 +558,56 @@ function DepositionWorkspace() {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Update failed'),
   });
 
+  // Cross-page actions on findings
+  const witnessName = depoQ.data?.witness_name ?? null;
+  const sendToDraft = useCallback(
+    (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      const parts: string[] = [];
+      if (f.title) parts.push(`**${f.title.trim()}**`);
+      if (f.detail) parts.push(f.detail.trim());
+      if (f.quote) parts.push(formatQuoteBlock(f.quote, cite));
+      else if (cite) parts.push(`_${cite}_`);
+      queueDraftPaste({ markdown: parts.join('\n\n'), source: cite });
+      toast.success('Sent to Draft', {
+        description: 'It will appear in your document when you open Drafting.',
+        action: { label: 'Open', onClick: () => navigate({ to: '/draft' }) },
+      });
+    },
+    [witnessName, navigate],
+  );
+
+  const sendToAsk = useCallback(
+    (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      const seed = f.title
+        ? `Regarding ${witnessName || 'the witness'} on ${cite || 'the record'}: ${f.title}. What does the wider MDL record say?`
+        : `What does the wider MDL record say about ${cite || 'this testimony'}?`;
+      seedAskQuestion(seed);
+      toast.success('Seeded Ask the Record', {
+        description: 'Open Research to run it.',
+        action: { label: 'Open', onClick: () => navigate({ to: '/search' }) },
+      });
+    },
+    [witnessName, navigate],
+  );
+
+  const copyFindingCite = useCallback(
+    async (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      if (!cite) return;
+      const payload = f.quote ? formatQuoteBlock(f.quote, cite) : cite;
+      try {
+        await navigator.clipboard.writeText(payload);
+        toast.success('Copied citation');
+      } catch {
+        toast.error('Copy failed');
+      }
+    },
+    [witnessName],
+  );
+
+
   // Ask
   const [question, setQuestion] = useState('');
   const [askResult, setAskResult] = useState<DepoAskResponse | null>(null);
