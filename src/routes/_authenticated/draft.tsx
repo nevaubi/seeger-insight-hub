@@ -69,13 +69,13 @@ import {
   resolveTemplatePrompt,
   buildDefaultVars,
   type DraftTemplate,
-  type TemplateCategory,
 } from '@/lib/draft-templates';
 import {
   FORMAT_PRESETS,
   getPreset,
   type PresetId,
 } from '@/lib/format-presets';
+import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
 import type { Editor } from '@tiptap/react';
 import { markdownToHtml } from '@/lib/tiptap-markdown';
