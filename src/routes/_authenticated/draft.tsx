@@ -83,6 +83,7 @@ import {
   type ChangeId,
 } from '@/components/editor/track-changes';
 import { ChangePill } from '@/components/editor/change-pill';
+import { drainDraftQueue } from '@/lib/depo-clipboard';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -345,6 +346,20 @@ function DraftPage() {
     setDirty(true);
     toast.success('Appended to document');
   };
+
+  // Drain the cross-page paste queue once per mount (e.g. "Send to Draft" from
+  // the depositions workspace). Runs after the editor is ready.
+  const drainedRef = useRef(false);
+  useEffect(() => {
+    if (drainedRef.current) return;
+    const queued = drainDraftQueue();
+    if (queued.length === 0) return;
+    drainedRef.current = true;
+    const block = queued.map((q) => q.markdown).join('\n\n');
+    setContent((prev) => (prev ? `${prev}\n\n${block}` : block));
+    setDirty(true);
+    toast.success(`Pasted ${queued.length} item${queued.length === 1 ? '' : 's'} from depositions`);
+  }, []);
 
   const insertCitation = (c: CiteChip, variant: 'short' | 'full' | 'footnote') => {
     const key = citeSourceKey(c);
