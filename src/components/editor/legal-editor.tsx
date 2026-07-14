@@ -126,6 +126,7 @@ export function LegalEditor({
   onReady,
   running,
   className,
+  preset,
 }: LegalEditorProps) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const lastMdRef = useRef(value);
