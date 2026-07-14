@@ -1010,12 +1010,14 @@ function DocumentMenu({
   isLoading,
   onPick,
   onNew,
+  onNewCounterdraft,
 }: {
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
   onPick: (d: WorkspaceDocument) => void;
   onNew: () => void;
+  onNewCounterdraft?: () => void;
 }) {
   const active = docs.find((d) => d.id === activeId);
   return (
