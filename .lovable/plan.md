@@ -1,66 +1,54 @@
+# Drafting page: remove counter-draft, then improve
 
-## Counter-draft workflow
+## Part 1 — Remove the counter-draft workflow
 
-Adds a new lane on the Drafting page: upload an opposing party's draft (.docx / .pdf / paste), the platform segments it by section, and — per section — produces a redline (original ↔ our counter-language) plus a rationale grounded in the matter record. Reuses the existing `ai-assist` `redline` mode, docx importer, and track-changes marks.
+Delete and unwire everything from the aborted counter-draft feature so the page ships clean.
 
-### 1. Entry point (Draft page)
+**Delete**
+- `src/lib/counterdraft.ts`
+- `src/components/editor/counterdraft-dialog.tsx`
+- `src/components/editor/counterdraft-panel.tsx`
+- `.lovable/plan.md` (stale counter-draft plan)
 
-`src/routes/_authenticated/draft.tsx`
-- Add a "Counter opposing draft" action to the "New document" dropdown next to existing template picks.
-- Opens a `CounterDraftDialog` (new component) with three tabs: **Upload .docx**, **Upload PDF**, **Paste text**.
-- On import, create a workspace document typed `counterdraft` (existing `workspace_documents.kind` if present, else store as regular doc with a `meta.source = 'opposing-draft'` flag on the row) and route the editor into **Counter-draft mode**.
+**Edit `src/routes/_authenticated/draft.tsx`**
+- Remove all counterdraft imports, state, handlers (`createCounterdraft`, dialog open state, panel rendering).
+- Remove the "Counter opposing draft" entry from the DocumentBar / DocumentMenu.
+- Remove the `onNewCounterdraft` prop from `DocumentBar` type + call sites.
 
-### 2. Ingest + sectioning
+**Verify:** `tsgo` clean, /draft loads with no dead imports.
 
-New: `src/lib/counterdraft.ts`
-- `ingestOpposing(file | text): Promise<{ title, sections: Section[] }>`.
-- .docx path → existing `importDocx` (already handles headings, lists, tables). PDF path → send bytes to a small new server function `pdf-extract` (or reuse `tabular-extract` text pipeline if it already exposes plain text; will inspect and pick one — no new backend if `tabular-extract` suffices).
-- Sectioning heuristic (pure client):
-  1. Split on ATX headings (`#`/`##`/`###`).
-  2. Fallback: split on Roman/Arabic outline markers at line start (`I.`, `A.`, `1.`, `(a)`) with a min block size.
-  3. Fallback: 400–800 word rolling windows.
-- Each `Section` = `{ id, heading, level, markdown, start, end }` where `start/end` are offsets into the full document.
+---
 
-### 3. Counter-draft editor mode
+## Part 2 — Which improvements to build
 
-New: `src/components/editor/counterdraft-panel.tsx`
-- Rendered next to `LegalEditor` via existing `SplitPane` (left: opposing draft read-only preview; right: our working counter-draft).
-- Section list rail on the far left: heading, status pill (`pending | drafting | ready | accepted | rejected`), diff counters (`+adds / −dels`).
-- Per section actions:
-  - **Suggest counter-language** → calls `ai-assist` `mode: "redline"` with `selection_start/end` scoped to that section, `ground: true`, `run_id`, and a new `intent: "counterdraft"` hint added to the instruction ("Rewrite from the perspective of Plaintiffs' Co-Lead; preserve neutral structural language, contest asserted facts and legal conclusions, propose narrower/broader language as appropriate, cite controlling PTO/CMO where relevant.").
-  - Streamed `edit` events land as `insertion`/`deletion` marks (existing `newChangeId` + track-changes plumbing) — no new mark types needed.
-  - `edit_failed` surfaces inline under the section as a warning row (same treatment as review).
-- Section header shows the model's rationale (first sentence of the streamed `analysis` field) and record citations as `CiteChip`s (reuses `ProposalCard` chip renderer).
-- Accept / Reject / Regenerate at both section and change level (reuse `acceptChange` / `rejectChange` / `acceptAll` / `rejectAll` scoped to the section's range via `findMarkRange` filtered by `changeId` prefix `sec_<sectionId>_`).
+I'd like you to pick before I plan the build. Here are the highest-leverage upgrades I see after re-reading the drafting page, editor, and `ai-assist`. Grouped by theme; pick any subset.
 
-### 4. Backend touch (minimal)
+### A. Draft intelligence
+1. **Matter-grounded "Ask Claude"** — the gutter/sidecar currently runs generic AI. Route selection prompts through `ai-assist` with `ground: true` + matter context so every rewrite pulls from PTO/CMO/deposition record and returns cite chips inline.
+2. **Live cite-check panel** — reuse the existing `cite-check` edge function. On save (debounced), scan the doc for citations, flag unresolved / miscited pins in a right-rail panel with jump-to-position.
+3. **One-click "improve" bar on selection** — replace the sidecar with a floating micro-toolbar (Tighten · Formalize · Shorten · Add citation · Rebut) that streams a redline directly at the selection. No panel round-trip.
 
-`supabase/functions/ai-assist/index.ts`
-- Accept a new optional field `intent?: "counterdraft"` and, when set, prepend a counterdraft-flavored system preface to the existing redline prompt (no schema change to edit events).
-- Everything else — anchor verification, cite tiering, writer fallback chain — is reused unchanged.
+### B. Structure & authoring
+4. **Outline rail** — auto-extract H1/H2/H3 into a collapsible outline on the left; drag to reorder sections (updates doc). Doubles as jump nav for long motions.
+5. **Section-scoped generation** — "Draft this section from the record" per outline node. Uses the section heading + matter context to stream a first draft into that node only.
+6. **Template gallery upgrade** — the current 18 templates are flat. Group by phase (Pleadings / Discovery / Motions / Trial), add previews, and let a template preload matter facts (caption block, judge, MDL number) via the matter context.
 
-### 5. Export
+### C. Review & compare
+7. **Version history diff** — snapshot on each save; browse prior versions with inline diff and one-click restore. (Storage is local per doc via workspace_documents.)
+8. **Two-doc compare** — pick any two workspace documents and see a side-by-side redline. Same infra as version diff.
 
-`src/lib/file-export.ts`
-- Add `exportCounterdraftDocx(sections, { showRedlines: boolean })`:
-  - `showRedlines = true` → renders `<w:ins>` / `<w:del>` OOXML runs from remaining insertion/deletion marks so Word opens it as tracked changes.
-  - `showRedlines = false` → current clean-accepted behavior.
-- Add a menu item on the Counter-draft toolbar: "Export redline (.docx)" and "Export clean counter-draft (.docx)".
+### D. Export & polish
+9. **Bluebook cite normalizer on export** — run cite-check + auto-format (short forms, id., supra) before DOCX/PDF export.
+10. **Court-ready DOCX styling** — line numbering, pleading caption, footer with page X of Y, correct margins per N.D. Fla. local rules.
 
-### 6. Persistence
+### E. Speed / UX polish
+11. **Command palette (⌘K) scoped to draft** — jump to section, insert template block, run AI action, cite a specific order.
+12. **Autosave indicator + offline queue** — visible saved/unsaved state, retry on network failure, never lose text.
 
-- Store per-section metadata on the workspace document as JSON in an existing free-form field (e.g. `meta` / `body_meta`). If no such column exists, keep it session-local for v1 (matches current pending-diff semantics) and note it in the section rail as "Suggestions are session-local until accepted".
+---
 
-### Technical notes
+## What I recommend
 
-- No new tables, no migrations.
-- Reuses: `LegalEditor`, `SplitPane`, `Insertion`/`Deletion` marks, `useAiAssist` (add `intent` passthrough), `importDocx`, `ProposalCard` chips, `ChangePill`.
-- New files: `src/lib/counterdraft.ts`, `src/components/editor/counterdraft-panel.tsx`, `src/components/editor/counterdraft-dialog.tsx`.
-- Touched files: `src/routes/_authenticated/draft.tsx` (entry + mode toggle), `src/lib/useAiAssist.ts` (intent field), `src/lib/file-export.ts` (redline .docx), `supabase/functions/ai-assist/index.ts` (intent preface).
-- PDF ingestion: I'll first check if `tabular-extract` already returns plain text I can reuse; if not, I'll add a tiny `pdf-extract` edge function that returns `{ text }`.
+If you want the biggest visible jump: **A1 + A3 + B4 + C7**. That gives you a grounded, cite-aware editor with a real outline and version history — the four things that make it feel like a professional drafting tool instead of a rich-text box.
 
-### Out of scope for this pass
-
-- Cross-document conflict detection against our own filings (candidate for follow-up).
-- Clause-library matching / preferred-language playbook (candidate follow-up; hooks in via the practice profile that `ai-assist` already injects).
-- Multi-turn negotiation view (side-by-side markup exchange history).
+Reply with the numbers you want and I'll return a build-ready plan for just those.
