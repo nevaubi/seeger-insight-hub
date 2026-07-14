@@ -913,6 +913,17 @@ function DocumentBar({
           onSave={onSave}
         />
 
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onPolish}
+          disabled={!canExport}
+          className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+          title="Normalize reporters, signals, Id., pincites, and smart quotes"
+        >
+          <BookOpen className="h-3.5 w-3.5" /> Bluebook polish
+        </Button>
+
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
