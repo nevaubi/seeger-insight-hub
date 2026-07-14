@@ -785,16 +785,8 @@ function DocumentBar({
   isLoading: boolean;
   onPickDoc: (d: WorkspaceDocument) => void;
   onNewDoc: () => void;
-  suggestionsOn: boolean;
-  onToggleSuggestions: () => void;
-  pendingChangeCount: number;
-  onAcceptAll: () => void;
-  onRejectAll: () => void;
-  focusMode: boolean;
-  onToggleFocus: () => void;
   wordCount: number;
   readMin: number;
-  
 }) {
   return (
     <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
