@@ -407,16 +407,30 @@
   min-height: 0;
   height: 100%;
   overflow-y: auto;
+  /* Parchment gutter around the page sheet */
+  background:
+    radial-gradient(1200px 400px at 50% -10%, color-mix(in oklab, var(--accent) 4%, transparent), transparent 60%),
+    color-mix(in oklab, var(--muted) 45%, transparent);
+  padding: 1.5rem clamp(0.75rem, 2vw, 2rem) 4rem;
 }
 
 .legal-editor-content .ProseMirror {
-  min-height: 40vh;
-  padding: 2.5rem clamp(1rem, 3.5vw, 2.5rem) 6rem;
-  max-width: min(96ch, 100% - 2.5rem);
+  min-height: calc(100vh - 220px);
+  padding: 3.25rem clamp(2rem, 5vw, 4rem) 5rem;
+  max-width: min(8.5in, 100%);
   margin: 0 auto;
   outline: none;
   position: relative;
+  /* Page sheet — visible document boundary */
+  background: var(--card);
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--foreground) 6%, transparent),
+    0 12px 32px -18px color-mix(in oklab, var(--foreground) 25%, transparent);
 }
+
+.legal-editor-content .ProseMirror > * { position: relative; }
 
 .legal-editor-content .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
@@ -427,11 +441,22 @@
   pointer-events: none;
 }
 
+/* Placeholder tokens — visual accent + click-to-focus pulse */
+.legal-editor-content .ProseMirror .placeholder-flash {
+  animation: placeholder-pulse 1.4s var(--ease-out-soft) 1;
+  border-radius: 3px;
+}
+@keyframes placeholder-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); background: color-mix(in oklab, var(--accent) 32%, transparent); }
+  60%  { box-shadow: 0 0 0 10px color-mix(in oklab, var(--accent) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+
 .legal-prose {
   font-family: var(--legal-font, var(--font-serif));
-  font-size: var(--legal-size, 16px);
-  line-height: var(--legal-line, 1.75);
-  letter-spacing: 0.005em;
+  font-size: var(--legal-size, 15px);
+  line-height: var(--legal-line, 1.55);
+  letter-spacing: 0.003em;
   color: var(--foreground);
   font-feature-settings: "onum" 1, "liga" 1, "kern" 1;
   hanging-punctuation: first last;
@@ -456,8 +481,8 @@
 .preset-letter .legal-prose h2 {
   border-top: 0;
   padding-top: 0;
-  font-size: 1.15rem;
-  margin: 1.2rem 0 0.4rem;
+  font-size: 1.05rem;
+  margin: 1rem 0 0.35rem;
 }
 .preset-internal-memo .legal-prose h1::first-line,
 .preset-outline .legal-prose h1::first-line,
@@ -469,29 +494,29 @@
 .legal-prose h1 {
   font-family: var(--font-serif);
   font-weight: 600;
-  font-size: 1.85rem;
-  line-height: 1.18;
-  letter-spacing: -0.015em;
-  margin: 2rem 0 0.6rem;
+  font-size: 1.55rem;
+  line-height: 1.2;
+  letter-spacing: -0.012em;
+  margin: 1.6rem 0 0.5rem;
   color: var(--foreground);
 }
 .legal-prose h2 {
   font-family: var(--font-serif);
   font-weight: 600;
-  font-size: 1.375rem;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-  margin: 2rem 0 0.5rem;
-  padding-top: 1rem;
+  font-size: 1.2rem;
+  line-height: 1.28;
+  letter-spacing: -0.008em;
+  margin: 1.5rem 0 0.4rem;
+  padding-top: 0.75rem;
   border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
   color: var(--foreground);
 }
 .legal-prose h3 {
   font-family: var(--font-serif);
   font-weight: 600;
-  font-size: 1.1rem;
-  line-height: 1.3;
-  margin: 1.4rem 0 0.35rem;
+  font-size: 1rem;
+  line-height: 1.32;
+  margin: 1.1rem 0 0.3rem;
   color: var(--foreground);
 }
 .legal-prose h4 {
@@ -858,3 +883,123 @@
   .change-pill-status { animation: none; }
 }
 
+
+/* ============================================================
+   Placeholder navigator rail
+   ============================================================ */
+.placeholder-rail {
+  position: sticky;
+  top: 1rem;
+  align-self: flex-start;
+  width: 220px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  padding: 0.75rem 0.75rem 1rem;
+  border-left: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  background: color-mix(in oklab, var(--card) 60%, transparent);
+  font-family: var(--font-sans);
+  animation: fade-in 200ms var(--ease-out-soft) both;
+}
+.placeholder-rail-empty {
+  padding: 0.5rem 0.25rem;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  font-style: italic;
+  line-height: 1.4;
+}
+.placeholder-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 0.25rem 0.5rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+}
+.placeholder-rail-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--foreground) 60%, transparent);
+}
+.placeholder-rail-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: color-mix(in oklab, var(--accent) 92%, black);
+  font-variant-numeric: tabular-nums;
+}
+.placeholder-rail-count.is-done {
+  background: color-mix(in oklab, var(--success, oklch(0.7 0.15 145)) 15%, transparent);
+  color: color-mix(in oklab, var(--success, oklch(0.55 0.15 145)) 90%, black);
+}
+.placeholder-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  position: relative;
+}
+.placeholder-rail-list::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in oklab, var(--border) 70%, transparent);
+}
+.placeholder-item {
+  all: unset;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 18px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out-soft), color 120ms;
+}
+.placeholder-item:hover {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+  color: var(--foreground);
+}
+.placeholder-item::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1.5px solid color-mix(in oklab, var(--accent) 65%, transparent);
+  transition: transform 120ms var(--ease-out-soft), background 120ms;
+}
+.placeholder-item:hover::before {
+  background: color-mix(in oklab, var(--accent) 65%, transparent);
+  transform: translateY(-50%) scale(1.15);
+}
+.placeholder-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.placeholder-item-index {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
