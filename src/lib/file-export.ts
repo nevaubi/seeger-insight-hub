@@ -318,7 +318,8 @@ export function markdownToBlocks(md: string): DocBlock[] {
 // ---------- DOCX ----------
 
 function runXml(r: Run): string {
-  const props = `${r.bold ? '<w:b/>' : ''}${r.italic ? '<w:i/>' : ''}`;
+  const props =
+    `${r.bold ? '<w:b/>' : ''}${r.italic ? '<w:i/>' : ''}${r.smallCaps ? '<w:smallCaps/>' : ''}`;
   const rPr = props ? `<w:rPr>${props}</w:rPr>` : '';
   return `<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(r.text)}</w:t></w:r>`;
 }
