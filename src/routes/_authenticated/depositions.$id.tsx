@@ -910,10 +910,14 @@ function DepositionWorkspace() {
                           <div className="py-1">
                             {pageLines.map((l, idx) => {
                               const key = `${l.page}-${l.line}`;
-                              const isMatch =
-                                searchLower.length > 0 &&
-                                l.text.toLowerCase().includes(searchLower);
+                              const isMatch = lineHitsSearch(l.text);
                               const isHi = highlighted.has(key);
+                              const isSticky = stickyKeys.has(key);
+                              const currentMatch = matches[matchIdx];
+                              const isCurrent =
+                                !!currentMatch &&
+                                currentMatch.page === l.page &&
+                                currentMatch.line === l.line;
                               const seg = segmentByLineKey.get(key);
                               // Prev line across pages: prefer previous line on this page,
                               // else previous page's last line via lines array lookup
@@ -935,6 +939,8 @@ function DepositionWorkspace() {
                               const kind = (seg?.kind || '').toLowerCase();
                               const speaker = (seg?.speaker || '').trim();
                               const isBareQA = speaker === 'Q' || speaker === 'A' || speaker === '';
+                              const speakerMatches = lineMatchesSpeaker(kind);
+                              const dimmedBySpeaker = speakerFilter !== 'any' && !speakerMatches;
                               let label = '';
                               if (kind === 'question') label = 'Q';
                               else if (kind === 'answer') label = 'A';
@@ -984,8 +990,11 @@ function DepositionWorkspace() {
                                     className={cn(
                                       'flex gap-3 pl-3 pr-4 py-[2px] transition-colors',
                                       turnAccent,
-                                      isHi && 'bg-primary/15',
-                                      !isHi && isMatch && 'bg-amber-200/40',
+                                      dimmedBySpeaker && 'opacity-40',
+                                      isSticky && 'bg-primary/10 ring-1 ring-inset ring-primary/25',
+                                      isHi && 'bg-primary/20',
+                                      isCurrent && 'bg-amber-300/50',
+                                      !isHi && !isCurrent && !isSticky && isMatch && 'bg-amber-200/40',
                                     )}
                                   >
                                     <span className="shrink-0 w-11 font-mono text-[10.5px] leading-5 text-muted-foreground/70 tabular-nums select-none">
