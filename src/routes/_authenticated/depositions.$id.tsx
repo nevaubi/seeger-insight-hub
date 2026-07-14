@@ -302,9 +302,33 @@ function DepositionWorkspace() {
 
   // Transcript: refs + search + scroll-to-cite
   const [search, setSearch] = useState('');
+  const [useRegex, setUseRegex] = useState(false);
+  const [speakerFilter, setSpeakerFilter] = useState<'any' | 'q' | 'a' | 'obj'>('any');
+  const [matchIdx, setMatchIdx] = useState(0);
   const [mobileView, setMobileView] = useState<'transcript' | 'findings'>('transcript');
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  const [pinnedCites, setPinnedCites] = useState<CiteSpan[]>([]);
+  const [hoverCite, setHoverCite] = useState<CiteSpan | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const keysForSpan = useCallback(
+    (span: CiteSpan): Set<string> => {
+      const out = new Set<string>();
+      if (span.page_start == null || span.line_start == null) return out;
+      const ps = span.page_start;
+      const ls = span.line_start;
+      const pe = span.page_end ?? ps;
+      const le = span.line_end ?? ls;
+      for (const l of linesQ.data ?? []) {
+        const afterStart = l.page > ps || (l.page === ps && l.line >= ls);
+        const beforeEnd = l.page < pe || (l.page === pe && l.line <= le);
+        if (afterStart && beforeEnd) out.add(`${l.page}-${l.line}`);
+      }
+      return out;
+    },
+    [linesQ.data],
+  );
 
   const scrollToCite = useCallback(
     (span: CiteSpan) => {
@@ -312,23 +336,47 @@ function DepositionWorkspace() {
       setMobileView('transcript');
       const anchor = document.getElementById(`line-${span.page_start}-${span.line_start}`);
       anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const keys = new Set<string>();
-      const ps = span.page_start;
-      const ls = span.line_start;
-      const pe = span.page_end ?? ps;
-      const le = span.line_end ?? ls;
-      const lines = linesQ.data ?? [];
-      for (const l of lines) {
-        const afterStart = l.page > ps || (l.page === ps && l.line >= ls);
-        const beforeEnd = l.page < pe || (l.page === pe && l.line <= le);
-        if (afterStart && beforeEnd) keys.add(`${l.page}-${l.line}`);
-      }
+      const keys = keysForSpan(span);
       setHighlighted(keys);
       if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
       highlightTimer.current = window.setTimeout(() => setHighlighted(new Set()), 2500);
     },
-    [linesQ.data],
+    [keysForSpan],
   );
+
+  const togglePin = useCallback((span: CiteSpan) => {
+    setPinnedCites((prev) => {
+      const key = `${span.page_start}-${span.line_start}-${span.page_end}-${span.line_end}`;
+      const exists = prev.some(
+        (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` === key,
+      );
+      if (exists) {
+        return prev.filter(
+          (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` !== key,
+        );
+      }
+      return [...prev, span];
+    });
+  }, []);
+
+  const isPinned = useCallback(
+    (span: CiteSpan) => {
+      const key = `${span.page_start}-${span.line_start}-${span.page_end}-${span.line_end}`;
+      return pinnedCites.some(
+        (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` === key,
+      );
+    },
+    [pinnedCites],
+  );
+
+  // Union of pinned + hover keys drives sticky highlights on transcript.
+  const stickyKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of pinnedCites) for (const k of keysForSpan(p)) s.add(k);
+    if (hoverCite) for (const k of keysForSpan(hoverCite)) s.add(k);
+    return s;
+  }, [pinnedCites, hoverCite, keysForSpan]);
+
 
   // Group lines by page
   const linesByPage = useMemo(() => {
