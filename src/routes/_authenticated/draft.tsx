@@ -582,55 +582,8 @@ function DraftPage() {
       return;
     }
 
-    // OFF path — direct in-place replacement (previous behavior).
-    if (!suggestionsOn) {
-      const applyDirect = (buf: string) => {
-        const ed = editorRef.current;
-        if (!ed) return;
-        const scrollEl = document.querySelector<HTMLElement>('.legal-editor-content');
-        const top = scrollEl?.scrollTop ?? 0;
-        const html = markdownToHtml(buf);
-        ed.chain()
-          .insertContentAt(
-            { from, to: currentDirectEnd },
-            html,
-            { updateSelection: false, parseOptions: { preserveWhitespace: 'full' } },
-          )
-          .run();
-        currentDirectEnd = from + (ed.state.doc.content.size - directBase);
-        if (scrollEl) scrollEl.scrollTop = top;
-      };
-      const directBase = editor.state.doc.content.size - (to - from);
-      let currentDirectEnd = to;
-      let acc = '';
-      let raf = 0;
-      const t = toast.loading('Refining selection…');
-      const res = await runAssistDirect({
-        mode: 'transform',
-        instruction,
-        selection: selectionText,
-        document: content,
-        caseId,
-        matter: matterScope,
-        onText: (delta) => {
-          acc += delta;
-          if (!raf) {
-            raf = requestAnimationFrame(() => {
-              raf = 0;
-              applyDirect(acc);
-            });
-          }
-        },
-      });
-      if (raf) cancelAnimationFrame(raf);
-      toast.dismiss(t);
-      applyDirect((res?.text ?? acc).trim() || selectionText);
-      setDirty(true);
-      toast.success('Selection updated');
-      return;
-    }
+    // Always create a track-change pair so the Accept/Reject/Retry pill appears.
 
-    // ON path — create a track-change pair.
     const cid = newChangeId();
     const insMark = editor.schema.marks['insertion'];
     const delMark = editor.schema.marks['deletion'];
