@@ -1053,11 +1053,12 @@ function DepositionWorkspace() {
                   </div>
                 )}
               </div>
-            </Card>
-          </div>
+            </div>
+            </div>
+          }
+          right={
+            <div className={cn('min-w-0 h-full flex flex-col overflow-y-auto px-4 py-3', mobileView !== 'findings' && 'hidden lg:flex')}>
 
-          {/* RIGHT: findings tabs */}
-          <div className={cn('min-w-0', mobileView !== 'findings' && 'hidden lg:block')}>
             {droppedCount > 0 && !isAnalyzing && !hasError && (
               <div className="mb-3 flex items-start gap-2 rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-800">
                 <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
