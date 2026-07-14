@@ -150,6 +150,7 @@ export function LegalEditor({
       },
     },
     onUpdate: ({ editor: ed }) => {
+      if (ed.isDestroyed) return;
       const html = ed.getHTML();
       const md = htmlToMarkdown(html);
       lastMdRef.current = md;
@@ -165,12 +166,13 @@ export function LegalEditor({
 
   // Reconcile external value changes (e.g. picking a different document).
   useEffect(() => {
-    if (!instance) return;
+    if (!instance || instance.isDestroyed) return;
     if (value === lastMdRef.current) return;
     const html = markdownToHtml(value);
     instance.commands.setContent(html, { emitUpdate: false });
     lastMdRef.current = value;
   }, [value, instance]);
+
 
   const askOnParagraph = useCallback(() => {
     if (!editor) return;
