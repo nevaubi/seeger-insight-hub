@@ -61,13 +61,6 @@ import {
   markdownToBlocks,
   downloadBlob,
   exportFilename,
-import {
-  downloadDocx,
-  printDocument,
-  blocksToHtml,
-  markdownToBlocks,
-  downloadBlob,
-  exportFilename,
 } from '@/lib/file-export';
 import { normalizeBluebook } from '@/lib/bluebook';
 import {
