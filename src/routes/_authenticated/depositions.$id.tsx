@@ -792,16 +792,106 @@ function DepositionWorkspace() {
           {/* LEFT: transcript */}
           <div className={cn('min-w-0', mobileView !== 'transcript' && 'hidden lg:block')}>
             <Card className="p-0 overflow-hidden flex flex-col h-[calc(100vh-11rem)] sticky top-4">
-              <div className="border-b border-border bg-card px-4 py-3 shrink-0">
-                <div className="relative">
-                  <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search transcript…"
-                    className="pl-8 h-8 text-sm"
-                  />
+              <div className="border-b border-border bg-card px-4 py-3 shrink-0 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder={useRegex ? 'Regex, e.g. \\b(risk|warn\\w+)\\b' : 'Search transcript…'}
+                      className={cn(
+                        'pl-8 pr-8 h-8 text-sm font-mono',
+                        regexInvalid && 'border-destructive/60 focus-visible:ring-destructive/40',
+                      )}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          jumpToMatch(e.shiftKey ? matchIdx - 1 : matchIdx + 1);
+                        }
+                        if (e.key === 'Escape') setSearch('');
+                      }}
+                    />
+                    {search && (
+                      <button
+                        type="button"
+                        onClick={() => setSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUseRegex((v) => !v)}
+                    title={useRegex ? 'Regex on' : 'Regex off'}
+                    aria-pressed={useRegex}
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded-sm border transition-colors',
+                      useRegex
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <RegexIcon className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="inline-flex rounded-sm border border-border overflow-hidden">
+                    {(['any', 'q', 'a', 'obj'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setSpeakerFilter(v)}
+                        className={cn(
+                          'h-8 px-2 text-[11px] font-medium uppercase tracking-wider transition-colors',
+                          speakerFilter === v
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {v === 'any' ? 'All' : v === 'obj' ? 'Obj' : v.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                {(search.trim() || speakerFilter !== 'any') && (
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
+                    <span>
+                      {regexInvalid ? (
+                        <span className="text-destructive">Invalid regex</span>
+                      ) : matches.length === 0 ? (
+                        'No matches'
+                      ) : (
+                        <>
+                          <span className="font-medium text-foreground">{matchIdx + 1}</span>
+                          {' / '}
+                          {matches.length} match{matches.length === 1 ? '' : 'es'}
+                        </>
+                      )}
+                    </span>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => jumpToMatch(matchIdx - 1)}
+                        disabled={matches.length === 0}
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-sm border border-border text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        aria-label="Previous match"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => jumpToMatch(matchIdx + 1)}
+                        disabled={matches.length === 0}
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-sm border border-border text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        aria-label="Next match"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto">
                 {linesByPage.length === 0 ? (
