@@ -894,8 +894,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  width: 18px;
+  gap: 9px;
+  width: 22px;
   max-height: calc(100vh - 140px);
   overflow-y: auto;
   padding: 8px 2px;
@@ -905,8 +905,8 @@
 .placeholder-dot {
   all: unset;
   box-sizing: border-box;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
   background: var(--card);
   border: 1.5px solid color-mix(in oklab, var(--accent) 55%, transparent);
