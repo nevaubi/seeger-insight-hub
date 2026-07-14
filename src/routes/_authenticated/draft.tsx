@@ -491,8 +491,6 @@ function DraftPage() {
         onToggleFocus={() => setFocusMode((v) => !v)}
         wordCount={stats.words}
         readMin={stats.readMin}
-        wordCount={stats.words}
-        readMin={stats.readMin}
         onNewCounterdraft={() => setCounterOpen(true)}
       />
 
