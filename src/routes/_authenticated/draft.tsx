@@ -782,6 +782,7 @@ function DocumentBar({
   onToggleFocus,
   wordCount,
   readMin,
+  onNewCounterdraft,
 }: {
   title: string;
   onTitleChange: (v: string) => void;
@@ -815,6 +816,7 @@ function DocumentBar({
   onToggleFocus: () => void;
   wordCount: number;
   readMin: number;
+  onNewCounterdraft: () => void;
 }) {
   return (
     <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
