@@ -539,11 +539,12 @@ function DraftPage() {
               }}
               className="flex-1 min-h-0"
             />
-            <div className="hidden lg:block shrink-0 w-5">
+            <div className="hidden lg:block shrink-0 w-6">
               <PlaceholderRail editor={editorInstance} />
             </div>
           </div>
           <ChangePill
+            key={activeChangeId ?? 'no-active-change'}
             editor={editorInstance}
             changeId={activeChangeId}
             streaming={changeStreaming}
