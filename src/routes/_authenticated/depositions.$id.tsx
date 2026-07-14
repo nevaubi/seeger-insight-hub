@@ -1261,11 +1261,14 @@ function SummaryTab({
   execs,
   profiles,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   execs: DepositionFinding[];
   profiles: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   const exec = execs[0];
   const profile = profiles[0];
   if (!exec && !profile) return <EmptyTab label="summary" />;
