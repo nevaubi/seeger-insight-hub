@@ -28,7 +28,9 @@ export interface QuestionSuggestion {
 }
 
 // Backed by the `suggest-questions` edge function on a 48h cron.
-const SUGGESTIONS_VIEW_ENABLED = true;
+// Disabled until the backend creates the `v_question_suggestions` view;
+// otherwise every matter switch fires a 404 to the console.
+const SUGGESTIONS_VIEW_ENABLED = false;
 
 // Reads the latest 20 curated starter questions for a matter from the
 // cron-populated view. Returns [] if the view doesn't exist yet or the pool
