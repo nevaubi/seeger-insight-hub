@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowLeft,
   Loader2,
@@ -15,6 +16,16 @@ import {
   Calendar,
   FileText,
   AlertTriangle,
+  ChevronUp,
+  ChevronDown,
+  Regex as RegexIcon,
+  Pin,
+  PinOff,
+  Copy,
+  PenLine,
+  Brain,
+  Download,
+  MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
@@ -25,6 +36,15 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { SplitPane } from '@/components/split-pane';
 import {
   supabase,
   type Deposition,
@@ -37,6 +57,18 @@ import {
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
+import {
+  queueDraftPaste,
+  seedAskQuestion,
+  depoCiteLabel,
+  formatQuoteBlock,
+} from '@/lib/depo-clipboard';
+import {
+  downloadDigestDocx,
+  downloadDigestMarkdown,
+  downloadAdmissionsCsv,
+  printDigest,
+} from '@/lib/depo-export';
 
 type VerifyStatus = 'verified' | 'unverified' | 'failed' | null | undefined;
 
@@ -153,21 +185,48 @@ function CiteButton({
   span,
   onCite,
   label,
+  onHover,
+  onPin,
+  pinned,
 }: {
   span: CiteSpan;
   onCite: (s: CiteSpan) => void;
   label?: string | null;
+  onHover?: (s: CiteSpan | null) => void;
+  onPin?: (s: CiteSpan) => void;
+  pinned?: boolean;
 }) {
   const text = label ?? formatCite(span);
   if (!text) return null;
   return (
-    <button
-      type="button"
-      onClick={() => onCite(span)}
-      className="inline-flex items-center rounded-sm border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-foreground hover:bg-primary/10 hover:border-primary/30 hover:text-primary transition-colors"
+    <span
+      className="inline-flex items-center rounded-sm border border-border bg-secondary/40 overflow-hidden divide-x divide-border/70"
+      onMouseEnter={() => onHover?.(span)}
+      onMouseLeave={() => onHover?.(null)}
     >
-      {text}
-    </button>
+      <button
+        type="button"
+        onClick={() => onCite(span)}
+        className="px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+      >
+        {text}
+      </button>
+      {onPin && (
+        <button
+          type="button"
+          onClick={() => onPin(span)}
+          title={pinned ? 'Unpin from transcript' : 'Pin to transcript'}
+          className={cn(
+            'px-1 py-0.5 transition-colors',
+            pinned
+              ? 'text-primary bg-primary/10'
+              : 'text-muted-foreground hover:text-primary',
+          )}
+        >
+          {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -270,9 +329,33 @@ function DepositionWorkspace() {
 
   // Transcript: refs + search + scroll-to-cite
   const [search, setSearch] = useState('');
+  const [useRegex, setUseRegex] = useState(false);
+  const [speakerFilter, setSpeakerFilter] = useState<'any' | 'q' | 'a' | 'obj'>('any');
+  const [matchIdx, setMatchIdx] = useState(0);
   const [mobileView, setMobileView] = useState<'transcript' | 'findings'>('transcript');
   const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  const [pinnedCites, setPinnedCites] = useState<CiteSpan[]>([]);
+  const [hoverCite, setHoverCite] = useState<CiteSpan | null>(null);
   const highlightTimer = useRef<number | null>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const keysForSpan = useCallback(
+    (span: CiteSpan): Set<string> => {
+      const out = new Set<string>();
+      if (span.page_start == null || span.line_start == null) return out;
+      const ps = span.page_start;
+      const ls = span.line_start;
+      const pe = span.page_end ?? ps;
+      const le = span.line_end ?? ls;
+      for (const l of linesQ.data ?? []) {
+        const afterStart = l.page > ps || (l.page === ps && l.line >= ls);
+        const beforeEnd = l.page < pe || (l.page === pe && l.line <= le);
+        if (afterStart && beforeEnd) out.add(`${l.page}-${l.line}`);
+      }
+      return out;
+    },
+    [linesQ.data],
+  );
 
   const scrollToCite = useCallback(
     (span: CiteSpan) => {
@@ -280,23 +363,47 @@ function DepositionWorkspace() {
       setMobileView('transcript');
       const anchor = document.getElementById(`line-${span.page_start}-${span.line_start}`);
       anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      const keys = new Set<string>();
-      const ps = span.page_start;
-      const ls = span.line_start;
-      const pe = span.page_end ?? ps;
-      const le = span.line_end ?? ls;
-      const lines = linesQ.data ?? [];
-      for (const l of lines) {
-        const afterStart = l.page > ps || (l.page === ps && l.line >= ls);
-        const beforeEnd = l.page < pe || (l.page === pe && l.line <= le);
-        if (afterStart && beforeEnd) keys.add(`${l.page}-${l.line}`);
-      }
+      const keys = keysForSpan(span);
       setHighlighted(keys);
       if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
       highlightTimer.current = window.setTimeout(() => setHighlighted(new Set()), 2500);
     },
-    [linesQ.data],
+    [keysForSpan],
   );
+
+  const togglePin = useCallback((span: CiteSpan) => {
+    setPinnedCites((prev) => {
+      const key = `${span.page_start}-${span.line_start}-${span.page_end}-${span.line_end}`;
+      const exists = prev.some(
+        (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` === key,
+      );
+      if (exists) {
+        return prev.filter(
+          (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` !== key,
+        );
+      }
+      return [...prev, span];
+    });
+  }, []);
+
+  const isPinned = useCallback(
+    (span: CiteSpan) => {
+      const key = `${span.page_start}-${span.line_start}-${span.page_end}-${span.line_end}`;
+      return pinnedCites.some(
+        (p) => `${p.page_start}-${p.line_start}-${p.page_end}-${p.line_end}` === key,
+      );
+    },
+    [pinnedCites],
+  );
+
+  // Union of pinned + hover keys drives sticky highlights on transcript.
+  const stickyKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of pinnedCites) for (const k of keysForSpan(p)) s.add(k);
+    if (hoverCite) for (const k of keysForSpan(hoverCite)) s.add(k);
+    return s;
+  }, [pinnedCites, hoverCite, keysForSpan]);
+
 
   // Group lines by page
   const linesByPage = useMemo(() => {
@@ -335,6 +442,72 @@ function DepositionWorkspace() {
   }, [segmentsQ.data, linesQ.data]);
 
   const searchLower = search.trim().toLowerCase();
+
+  // Compile regex if enabled; falls back to substring match on parse errors.
+  const searchRegex = useMemo(() => {
+    if (!useRegex || !search.trim()) return null;
+    try {
+      return new RegExp(search, 'i');
+    } catch {
+      return null;
+    }
+  }, [useRegex, search]);
+  const regexInvalid = useRegex && search.trim().length > 0 && !searchRegex;
+
+  const lineMatchesSpeaker = useCallback(
+    (kind: string | undefined) => {
+      if (speakerFilter === 'any') return true;
+      const k = (kind || '').toLowerCase();
+      if (speakerFilter === 'q') return k === 'question';
+      if (speakerFilter === 'a') return k === 'answer';
+      if (speakerFilter === 'obj') return k === 'objection';
+      return true;
+    },
+    [speakerFilter],
+  );
+
+  const lineHitsSearch = useCallback(
+    (text: string) => {
+      if (!search.trim()) return false;
+      if (searchRegex) return searchRegex.test(text);
+      return text.toLowerCase().includes(searchLower);
+    },
+    [search, searchLower, searchRegex],
+  );
+
+  // Ordered list of matching line ids (for prev/next nav).
+  const matches = useMemo(() => {
+    const out: { page: number; line: number }[] = [];
+    const hasSearch = search.trim().length > 0;
+    const hasSpeaker = speakerFilter !== 'any';
+    if (!hasSearch && !hasSpeaker) return out;
+    for (const l of linesQ.data ?? []) {
+      const seg = segmentByLineKey.get(`${l.page}-${l.line}`);
+      if (hasSpeaker && !lineMatchesSpeaker(seg?.kind)) continue;
+      if (hasSearch && !lineHitsSearch(l.text)) continue;
+      out.push({ page: l.page, line: l.line });
+    }
+    return out;
+  }, [linesQ.data, search, speakerFilter, segmentByLineKey, lineMatchesSpeaker, lineHitsSearch]);
+
+  // Clamp match index when result set changes.
+  useEffect(() => {
+    if (matchIdx >= matches.length) setMatchIdx(0);
+  }, [matches.length, matchIdx]);
+
+  const jumpToMatch = useCallback(
+    (idx: number) => {
+      if (matches.length === 0) return;
+      const clamped = ((idx % matches.length) + matches.length) % matches.length;
+      setMatchIdx(clamped);
+      const m = matches[clamped];
+      const anchor = document.getElementById(`line-${m.page}-${m.line}`);
+      anchor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    [matches],
+  );
+
+
 
   // Findings by type
   const findings = findingsQ.data ?? [];
@@ -411,6 +584,56 @@ function DepositionWorkspace() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deposition-findings', id] }),
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Update failed'),
   });
+
+  // Cross-page actions on findings
+  const witnessName = depoQ.data?.witness_name ?? null;
+  const sendToDraft = useCallback(
+    (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      const parts: string[] = [];
+      if (f.title) parts.push(`**${f.title.trim()}**`);
+      if (f.detail) parts.push(f.detail.trim());
+      if (f.quote) parts.push(formatQuoteBlock(f.quote, cite));
+      else if (cite) parts.push(`_${cite}_`);
+      queueDraftPaste({ markdown: parts.join('\n\n'), source: cite });
+      toast.success('Sent to Draft', {
+        description: 'It will appear in your document when you open Drafting.',
+        action: { label: 'Open', onClick: () => navigate({ to: '/draft' }) },
+      });
+    },
+    [witnessName, navigate],
+  );
+
+  const sendToAsk = useCallback(
+    (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      const seed = f.title
+        ? `Regarding ${witnessName || 'the witness'} on ${cite || 'the record'}: ${f.title}. What does the wider MDL record say?`
+        : `What does the wider MDL record say about ${cite || 'this testimony'}?`;
+      seedAskQuestion(seed);
+      toast.success('Seeded Ask the Record', {
+        description: 'Open Research to run it.',
+        action: { label: 'Open', onClick: () => navigate({ to: '/search' }) },
+      });
+    },
+    [witnessName, navigate],
+  );
+
+  const copyFindingCite = useCallback(
+    async (f: DepositionFinding) => {
+      const cite = f.cite || depoCiteLabel(witnessName, f);
+      if (!cite) return;
+      const payload = f.quote ? formatQuoteBlock(f.quote, cite) : cite;
+      try {
+        await navigator.clipboard.writeText(payload);
+        toast.success('Copied citation');
+      } catch {
+        toast.error('Copy failed');
+      }
+    },
+    [witnessName],
+  );
+
 
   // Ask
   const [question, setQuestion] = useState('');
@@ -510,7 +733,47 @@ function DepositionWorkspace() {
               </p>
             )}
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={!analyzed}>
+                  <Download className="mr-2 h-4 w-4" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Deposition digest
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestDocx(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <FileText className="mr-2 h-4 w-4" /> Digest .docx
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestMarkdown(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <PenLine className="mr-2 h-4 w-4" /> Digest .md
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => printDigest(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <FileText className="mr-2 h-4 w-4" /> Print / Save as PDF
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Data
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadAdmissionsCsv(depo, findings)}
+                  disabled={!analyzed || !(byType['admission']?.length)}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Admissions .csv
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="outline"
               onClick={() => void runAnalyze()}
@@ -556,16 +819,106 @@ function DepositionWorkspace() {
           {/* LEFT: transcript */}
           <div className={cn('min-w-0', mobileView !== 'transcript' && 'hidden lg:block')}>
             <Card className="p-0 overflow-hidden flex flex-col h-[calc(100vh-11rem)] sticky top-4">
-              <div className="border-b border-border bg-card px-4 py-3 shrink-0">
-                <div className="relative">
-                  <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search transcript…"
-                    className="pl-8 h-8 text-sm"
-                  />
+              <div className="border-b border-border bg-card px-4 py-3 shrink-0 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder={useRegex ? 'Regex, e.g. \\b(risk|warn\\w+)\\b' : 'Search transcript…'}
+                      className={cn(
+                        'pl-8 pr-8 h-8 text-sm font-mono',
+                        regexInvalid && 'border-destructive/60 focus-visible:ring-destructive/40',
+                      )}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          jumpToMatch(e.shiftKey ? matchIdx - 1 : matchIdx + 1);
+                        }
+                        if (e.key === 'Escape') setSearch('');
+                      }}
+                    />
+                    {search && (
+                      <button
+                        type="button"
+                        onClick={() => setSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUseRegex((v) => !v)}
+                    title={useRegex ? 'Regex on' : 'Regex off'}
+                    aria-pressed={useRegex}
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded-sm border transition-colors',
+                      useRegex
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <RegexIcon className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="inline-flex rounded-sm border border-border overflow-hidden">
+                    {(['any', 'q', 'a', 'obj'] as const).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setSpeakerFilter(v)}
+                        className={cn(
+                          'h-8 px-2 text-[11px] font-medium uppercase tracking-wider transition-colors',
+                          speakerFilter === v
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {v === 'any' ? 'All' : v === 'obj' ? 'Obj' : v.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+                {(search.trim() || speakerFilter !== 'any') && (
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground tabular-nums">
+                    <span>
+                      {regexInvalid ? (
+                        <span className="text-destructive">Invalid regex</span>
+                      ) : matches.length === 0 ? (
+                        'No matches'
+                      ) : (
+                        <>
+                          <span className="font-medium text-foreground">{matchIdx + 1}</span>
+                          {' / '}
+                          {matches.length} match{matches.length === 1 ? '' : 'es'}
+                        </>
+                      )}
+                    </span>
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => jumpToMatch(matchIdx - 1)}
+                        disabled={matches.length === 0}
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-sm border border-border text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        aria-label="Previous match"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => jumpToMatch(matchIdx + 1)}
+                        disabled={matches.length === 0}
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-sm border border-border text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        aria-label="Next match"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto">
                 {linesByPage.length === 0 ? (
@@ -584,10 +937,14 @@ function DepositionWorkspace() {
                           <div className="py-1">
                             {pageLines.map((l, idx) => {
                               const key = `${l.page}-${l.line}`;
-                              const isMatch =
-                                searchLower.length > 0 &&
-                                l.text.toLowerCase().includes(searchLower);
+                              const isMatch = lineHitsSearch(l.text);
                               const isHi = highlighted.has(key);
+                              const isSticky = stickyKeys.has(key);
+                              const currentMatch = matches[matchIdx];
+                              const isCurrent =
+                                !!currentMatch &&
+                                currentMatch.page === l.page &&
+                                currentMatch.line === l.line;
                               const seg = segmentByLineKey.get(key);
                               // Prev line across pages: prefer previous line on this page,
                               // else previous page's last line via lines array lookup
@@ -609,6 +966,8 @@ function DepositionWorkspace() {
                               const kind = (seg?.kind || '').toLowerCase();
                               const speaker = (seg?.speaker || '').trim();
                               const isBareQA = speaker === 'Q' || speaker === 'A' || speaker === '';
+                              const speakerMatches = lineMatchesSpeaker(kind);
+                              const dimmedBySpeaker = speakerFilter !== 'any' && !speakerMatches;
                               let label = '';
                               if (kind === 'question') label = 'Q';
                               else if (kind === 'answer') label = 'A';
@@ -658,8 +1017,11 @@ function DepositionWorkspace() {
                                     className={cn(
                                       'flex gap-3 pl-3 pr-4 py-[2px] transition-colors',
                                       turnAccent,
-                                      isHi && 'bg-primary/15',
-                                      !isHi && isMatch && 'bg-amber-200/40',
+                                      dimmedBySpeaker && 'opacity-40',
+                                      isSticky && 'bg-primary/10 ring-1 ring-inset ring-primary/25',
+                                      isHi && 'bg-primary/20',
+                                      isCurrent && 'bg-amber-300/50',
+                                      !isHi && !isCurrent && !isSticky && isMatch && 'bg-amber-200/40',
                                     )}
                                   >
                                     <span className="shrink-0 w-11 font-mono text-[10.5px] leading-5 text-muted-foreground/70 tabular-nums select-none">
@@ -759,6 +1121,9 @@ function DepositionWorkspace() {
                     execs={byType['exec_summary'] ?? []}
                     profiles={byType['witness_profile'] ?? []}
                     onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
                   />
                 </TabsContent>
 
@@ -770,19 +1135,43 @@ function DepositionWorkspace() {
                       reviewM.mutate({ findingId: fid, status })
                     }
                     pendingId={reviewM.isPending ? reviewM.variables?.findingId : undefined}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
                   />
                 </TabsContent>
 
                 <TabsContent value="chronology" className="mt-4">
-                  <ChronologyTab items={byType['chronology'] ?? []} onCite={scrollToCite} />
+                  <ChronologyTab
+                    items={byType['chronology'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="exhibits" className="mt-4">
-                  <ExhibitsTab items={byType['exhibit'] ?? []} onCite={scrollToCite} />
+                  <ExhibitsTab
+                    items={byType['exhibit'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="quality" className="mt-4">
-                  <QualityTab items={byType['quality_note'] ?? []} onCite={scrollToCite} />
+                  <QualityTab
+                    items={byType['quality_note'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
                 </TabsContent>
 
                 <TabsContent value="ask" className="mt-4">
@@ -794,6 +1183,9 @@ function DepositionWorkspace() {
                     onAsk={(q) => askM.mutate(q)}
                     pending={askM.isPending}
                     onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
                   />
                 </TabsContent>
               </Tabs>
@@ -807,21 +1199,76 @@ function DepositionWorkspace() {
 
 // ---------- Tab components ----------
 
+type CiteExtras = {
+  onHoverCite?: (s: CiteSpan | null) => void;
+  onPin?: (s: CiteSpan) => void;
+  isPinned?: (s: CiteSpan) => boolean;
+};
+
 function EmptyTab({ label }: { label: string }) {
   return (
     <Card className="p-6 text-center text-sm text-muted-foreground">No {label} yet.</Card>
   );
 }
 
+function FindingActionRow({
+  f,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
+}: {
+  f: DepositionFinding;
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+}) {
+  if (!onSendToDraft && !onSendToAsk && !onCopy) return null;
+  return (
+    <div className="mt-3 flex items-center gap-1 border-t border-dashed border-border/70 pt-2">
+      {onCopy && (
+        <button
+          type="button"
+          onClick={() => onCopy(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+        >
+          <Copy className="h-3 w-3" /> Copy cite
+        </button>
+      )}
+      {onSendToDraft && (
+        <button
+          type="button"
+          onClick={() => onSendToDraft(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+        >
+          <PenLine className="h-3 w-3" /> Send to Draft
+        </button>
+      )}
+      {onSendToAsk && (
+        <button
+          type="button"
+          onClick={() => onSendToAsk(f)}
+          className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+        >
+          <Brain className="h-3 w-3" /> Ask the record
+        </button>
+      )}
+    </div>
+  );
+}
+
+
 function SummaryTab({
   execs,
   profiles,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   execs: DepositionFinding[];
   profiles: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   const exec = execs[0];
   const profile = profiles[0];
   if (!exec && !profile) return <EmptyTab label="summary" />;
@@ -886,6 +1333,18 @@ function SummaryTab({
                           }}
                           onCite={onCite}
                           label={kp.cite}
+                          onHover={onHoverCite}
+                          onPin={onPin}
+                          pinned={
+                            isPinned
+                              ? isPinned({
+                                  page_start: kp.page_start ?? null,
+                                  line_start: kp.line_start ?? null,
+                                  page_end: kp.page_end ?? null,
+                                  line_end: kp.line_end ?? null,
+                                })
+                              : undefined
+                          }
                         />
                         {kp.verified && (
                           <BadgeCheck className="h-3.5 w-3.5 text-emerald-600" />
@@ -908,12 +1367,21 @@ function AdmissionsTab({
   onCite,
   onReview,
   pendingId,
+  onHoverCite,
+  onPin,
+  isPinned,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
   onReview: (findingId: string, status: 'approved' | 'rejected') => void;
   pendingId?: string;
-}) {
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="admissions" />;
   return (
     <div className="space-y-3">
@@ -974,8 +1442,21 @@ function AdmissionsTab({
               </blockquote>
             )}
             <div className="mt-3">
-              <CiteButton span={f} onCite={onCite} label={f.cite} />
+              <CiteButton
+                span={f}
+                onCite={onCite}
+                label={f.cite}
+                onHover={onHoverCite}
+                onPin={onPin}
+                pinned={isPinned ? isPinned(f) : undefined}
+              />
             </div>
+            <FindingActionRow
+              f={f}
+              onSendToDraft={onSendToDraft}
+              onSendToAsk={onSendToAsk}
+              onCopy={onCopy}
+            />
           </Card>
         );
       })}
@@ -986,10 +1467,13 @@ function AdmissionsTab({
 function ChronologyTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="chronology" />;
   return (
     <Card className="p-5">
@@ -1018,7 +1502,14 @@ function ChronologyTab({
                 <div className="mt-1.5 text-xs text-muted-foreground italic">“{f.quote}”</div>
               )}
               <div className="mt-2">
-                <CiteButton span={f} onCite={onCite} label={f.cite} />
+                <CiteButton
+                  span={f}
+                  onCite={onCite}
+                  label={f.cite}
+                  onHover={onHoverCite}
+                  onPin={onPin}
+                  pinned={isPinned ? isPinned(f) : undefined}
+                />
               </div>
             </li>
           );
@@ -1028,13 +1519,17 @@ function ChronologyTab({
   );
 }
 
+
 function ExhibitsTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="exhibits" />;
   return (
     <div className="space-y-3">
@@ -1052,7 +1547,14 @@ function ExhibitsTab({
                   <h4 className="font-serif text-[15px] font-semibold text-foreground">
                     {f.title || (num ? `Exhibit ${num}` : 'Exhibit')}
                   </h4>
-                  <CiteButton span={f} onCite={onCite} label={f.cite} />
+                  <CiteButton
+                    span={f}
+                    onCite={onCite}
+                    label={f.cite}
+                    onHover={onHoverCite}
+                    onPin={onPin}
+                    pinned={isPinned ? isPinned(f) : undefined}
+                  />
                 </div>
                 {data.description && (
                   <p className="mt-1 text-sm text-foreground/85">{data.description}</p>
@@ -1074,10 +1576,13 @@ function ExhibitsTab({
 function QualityTab({
   items,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   items: DepositionFinding[];
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   if (items.length === 0) return <EmptyTab label="quality notes" />;
   return (
     <div className="space-y-3">
@@ -1106,7 +1611,14 @@ function QualityTab({
             )}
             {(f.page_start != null || f.cite) && (
               <div className="mt-2">
-                <CiteButton span={f} onCite={onCite} label={f.cite} />
+                <CiteButton
+                  span={f}
+                  onCite={onCite}
+                  label={f.cite}
+                  onHover={onHoverCite}
+                  onPin={onPin}
+                  pinned={isPinned ? isPinned(f) : undefined}
+                />
               </div>
             )}
           </Card>
@@ -1116,6 +1628,7 @@ function QualityTab({
   );
 }
 
+
 function AskTab({
   question,
   setQuestion,
@@ -1124,6 +1637,9 @@ function AskTab({
   onAsk,
   pending,
   onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
 }: {
   question: string;
   setQuestion: (s: string) => void;
@@ -1132,7 +1648,7 @@ function AskTab({
   onAsk: (q: string) => void;
   pending: boolean;
   onCite: (s: CiteSpan) => void;
-}) {
+} & CiteExtras) {
   const submit = () => {
     const q = question.trim();
     if (!q || pending) return;
@@ -1216,7 +1732,14 @@ function AskTab({
                     </blockquote>
                   )}
                   <div className="mt-2 flex items-center gap-2">
-                    <CiteButton span={c} onCite={onCite} label={c.cite} />
+                    <CiteButton
+                      span={c}
+                      onCite={onCite}
+                      label={c.cite}
+                      onHover={onHoverCite}
+                      onPin={onPin}
+                      pinned={isPinned ? isPinned(c) : undefined}
+                    />
                     {c.verified && (
                       <span className="inline-flex items-center gap-1 text-[10.5px] text-emerald-700">
                         <BadgeCheck className="h-3 w-3" /> verified
