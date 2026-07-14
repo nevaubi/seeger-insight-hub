@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Editor } from '@tiptap/react';
 
 type Placeholder = {
@@ -34,7 +34,6 @@ function scanPlaceholders(editor: Editor | null): Placeholder[] {
 export function PlaceholderRail({ editor }: { editor: Editor | null }) {
   const [placeholders, setPlaceholders] = useState<Placeholder[]>([]);
 
-  // Recompute whenever the doc changes (debounced via microtask).
   useEffect(() => {
     if (!editor) return;
     let raf = 0;
@@ -60,19 +59,12 @@ export function PlaceholderRail({ editor }: { editor: Editor | null }) {
       const to = Math.min(p.to, size);
       editor.chain().focus().setTextSelection({ from, to }).run();
 
-      // Scroll the selection into view + flash a pulse.
       try {
         const view = editor.view;
         const domNode = view.domAtPos(from).node;
-        const el =
-          domNode instanceof HTMLElement
-            ? domNode
-            : domNode.parentElement;
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+        const el = domNode instanceof HTMLElement ? domNode : domNode.parentElement;
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        // Overlay pulse pinned to the selection rect — no DOM mutation of prose.
         const coords = view.coordsAtPos(from);
         const endCoords = view.coordsAtPos(to);
         const scroller = view.dom.closest('.legal-editor-content') as HTMLElement | null;
@@ -89,7 +81,6 @@ export function PlaceholderRail({ editor }: { editor: Editor | null }) {
           pointerEvents: 'none',
           zIndex: '4',
         } as CSSStyleDeclaration);
-        // Ensure scroller can position the flash.
         if (getComputedStyle(scroller).position === 'static') {
           scroller.style.position = 'relative';
         }
@@ -102,40 +93,23 @@ export function PlaceholderRail({ editor }: { editor: Editor | null }) {
     [editor],
   );
 
-  const count = placeholders.length;
-  const label = useMemo(
-    () => (count === 0 ? 'All placeholders filled' : `${count} placeholder${count === 1 ? '' : 's'}`),
-    [count],
-  );
-
-  if (!editor) return null;
+  if (!editor || placeholders.length === 0) return null;
 
   return (
-    <div className="placeholder-rail" aria-label="Placeholder navigator">
-      <div className="placeholder-rail-header">
-        <span className="placeholder-rail-title">Placeholders</span>
-        <span className={`placeholder-rail-count${count === 0 ? ' is-done' : ''}`}>
-          {count === 0 ? '✓' : count}
-        </span>
-      </div>
-      {count === 0 ? (
-        <div className="placeholder-rail-empty">{label}. Bracketed tokens like [party name] or {'{{date}}'} will appear here.</div>
-      ) : (
-        <div className="placeholder-rail-list">
-          {placeholders.map((p, idx) => (
-            <button
-              key={p.id}
-              type="button"
-              className="placeholder-item"
-              onClick={() => jumpTo(p)}
-              title={`Jump to ${p.label}`}
-            >
-              <span className="placeholder-item-label">{p.label}</span>
-              <span className="placeholder-item-index">{idx + 1}</span>
-            </button>
-          ))}
-        </div>
-      )}
+    <div
+      className="placeholder-rail"
+      aria-label={`${placeholders.length} unfilled placeholder${placeholders.length === 1 ? '' : 's'}`}
+    >
+      {placeholders.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          className="placeholder-dot"
+          onClick={() => jumpTo(p)}
+          title={p.label}
+          aria-label={`Jump to ${p.label}`}
+        />
+      ))}
     </div>
   );
 }
