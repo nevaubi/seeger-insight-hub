@@ -85,6 +85,7 @@ import {
   rejectChange,
   acceptAll,
   rejectAll,
+  findChangeRange,
   findMarkRange,
   listChangeIds,
   newChangeId,
@@ -152,6 +153,7 @@ function DraftPage() {
   const lastCiteKeyRef = useRef<string | null>(null);
   const cursorRef = useRef<number>(0);
   const editorRef = useRef<Editor | null>(null);
+  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
 
   // Track-changes state (always on — Accept/Reject/Retry pill for every AI edit)
   const [activeChangeId, setActiveChangeId] = useState<ChangeId | null>(null);
@@ -197,7 +199,7 @@ function DraftPage() {
 
   // Track pending suggestion count from the editor
   useEffect(() => {
-    const ed = editorRef.current;
+    const ed = editorInstance;
     if (!ed) return;
     const update = () => setPendingChangeCount(listChangeIds(ed).length);
     update();
@@ -205,7 +207,7 @@ function DraftPage() {
     return () => {
       ed.off('transaction', update);
     };
-  }, [editorRef.current]);
+  }, [editorInstance]);
 
 
   const matterScope = useMemo(
@@ -524,6 +526,7 @@ function DraftPage() {
               onChange={onContentChange}
               onReady={(ed) => {
                 editorRef.current = ed;
+                setEditorInstance((prev) => (prev === ed ? prev : ed));
               }}
               onAskClaude={({ text, kind }) => {
                 setSidecarOpen(true);
@@ -537,11 +540,11 @@ function DraftPage() {
               className="flex-1 min-h-0"
             />
             <div className="hidden lg:block shrink-0 w-5">
-              <PlaceholderRail editor={editorRef.current} />
+              <PlaceholderRail editor={editorInstance} />
             </div>
           </div>
           <ChangePill
-            editor={editorRef.current}
+            editor={editorInstance}
             changeId={activeChangeId}
             streaming={changeStreaming}
             onAccept={acceptActive}
@@ -600,7 +603,8 @@ function DraftPage() {
     editor.view.dispatch(tr);
     editor.commands.setTextSelection(to);
 
-    setActiveChangeId(cid);
+    setActiveChangeId(null);
+    requestAnimationFrame(() => setActiveChangeId(cid));
     lastTransformRef.current = { instruction, selectionText, changeId: cid };
     await streamIntoChange(cid, instruction, selectionText);
     setDirty(true);
@@ -664,6 +668,8 @@ function DraftPage() {
     flush(finalText);
     toast.dismiss(t);
     setChangeStreaming(false);
+    const stillPending = findChangeRange(editor, cid);
+    if (stillPending) setActiveChangeId(cid);
     toast.success('Suggestion ready — accept or reject');
   }
 }

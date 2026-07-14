@@ -1,28 +1,26 @@
-## Fix 1 — Accept/Reject/Retry pill not appearing after regenerate
+Plan: Drafting page polish + AI edit pill reliability
 
-**Root cause.** The pill only renders when a track-change is created, and that only happens on the "suggestions ON" path in `runInlineTransform` (src/routes/_authenticated/draft.tsx:595). When we removed the "Suggest" header button in a prior pass, we left the underlying `suggestionsOn` state — which reads from `localStorage['draft.suggestions']`. Any user (like you) whose localStorage still has `'0'` from an earlier session now silently falls into the OFF path: the edit is applied in-place, no `changeId` is created, and `ChangePill` has nothing to anchor to.
+1. Make the placeholder navigator dots slightly larger and better spaced
+- Increase dot size from 8px to about 10px.
+- Increase vertical spacing from 6px to about 9px.
+- Slightly widen the rail so hover/focus states do not feel cramped.
+- Keep the minimal dot-only design.
 
-**Fix.** Since there's no longer a UI to toggle suggestions, force the ON path always:
-- Remove the `suggestionsOn` state, its localStorage read/write, and the `if (!suggestionsOn) { …direct replace… }` branch in `runInlineTransform`.
-- Always create the deletion/insertion track-change pair and stream into it, so `ChangePill` renders with Accept / Reject / Retry every time.
+2. Fix Accept / Reject / Retry disappearing after the first successful AI edit
+- The current inline AI edit flow stores the Tiptap editor only in a ref, so React does not reliably re-render `ChangePill` when the editor becomes ready or when subsequent edits create a new change.
+- Add a small reactive `editorInstance` state alongside the existing ref and pass that state into `ChangePill` and `PlaceholderRail`.
+- When a new inline AI transform starts, force the new change id through React state before streaming begins so the pill remounts/repositions for every run.
+- After streaming finishes, verify the insertion/deletion marks still exist; if they do, keep `activeChangeId` set so the pill remains visible.
 
-No changes to `ChangePill` itself — it works, it just wasn't being given a `changeId`.
+3. Harden the pill positioning
+- Make `ChangePill` reposition on scroll/resize in addition to editor transactions.
+- If coordinates briefly fail during rapid selection/streaming updates, keep the last good position instead of immediately unmounting the pill.
 
-## Fix 2 — Slim, minimal Placeholder navigator
+Files to touch
+- `src/routes/_authenticated/draft.tsx`
+- `src/components/editor/change-pill.tsx`
+- `src/styles.css`
 
-Rework `src/components/editor/placeholder-rail.tsx` into a compact vertical rail:
-- Drop the header ("Placeholders" title + count) and the empty-state paragraph.
-- Drop the token text (`[party name]`, `{{date}}`, index number).
-- Render each placeholder as a small circular dot button (~10px), stacked vertically with tight spacing. Hover reveals the token as a tooltip (`title` attr) only.
-- Container shrinks from a card to a bare ~20px-wide column of dots; no border, no background, no header chrome.
-- When zero placeholders remain, render nothing (rail disappears).
-- Click behaviour unchanged: focus + scroll + pulse.
-
-Also narrow the reserved column in `draft.tsx` (`hidden xl:block shrink-0`) so the editor reclaims the width.
-
-## Files touched
-- `src/routes/_authenticated/draft.tsx` — remove `suggestionsOn` + OFF branch; tighten the placeholder rail slot.
-- `src/components/editor/placeholder-rail.tsx` — minimal dot-only rail.
-- `src/styles.css` — new minimal `.placeholder-rail` / `.placeholder-dot` styles (replace the card styles).
-
-No edge-function or data changes.
+Expected result
+- The dot rail is still minimal, but more legible and better spaced.
+- Every time highlighted text is refined/regenerated, the Accept / Reject / Retry pill appears near the edited text and stays visible until accepted or rejected.
