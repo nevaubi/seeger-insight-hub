@@ -1199,7 +1199,9 @@ function DepositionWorkspace() {
               </Tabs>
             )}
           </div>
-        </div>
+          }
+        />
+
       </div>
     </AppShell>
   );
