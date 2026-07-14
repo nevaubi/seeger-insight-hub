@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowLeft,
   Loader2,
@@ -15,6 +16,16 @@ import {
   Calendar,
   FileText,
   AlertTriangle,
+  ChevronUp,
+  ChevronDown,
+  Regex as RegexIcon,
+  Pin,
+  PinOff,
+  Copy,
+  PenLine,
+  Brain,
+  Download,
+  MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
@@ -25,6 +36,15 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import { SplitPane } from '@/components/split-pane';
 import {
   supabase,
   type Deposition,
@@ -37,6 +57,18 @@ import {
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
+import {
+  queueDraftPaste,
+  seedAskQuestion,
+  depoCiteLabel,
+  formatQuoteBlock,
+} from '@/lib/depo-clipboard';
+import {
+  downloadDigestDocx,
+  downloadDigestMarkdown,
+  downloadAdmissionsCsv,
+  printDigest,
+} from '@/lib/depo-export';
 
 type VerifyStatus = 'verified' | 'unverified' | 'failed' | null | undefined;
 
