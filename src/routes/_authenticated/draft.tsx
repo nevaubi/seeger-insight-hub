@@ -84,6 +84,9 @@ import {
 } from '@/components/editor/track-changes';
 import { ChangePill } from '@/components/editor/change-pill';
 import { drainDraftQueue } from '@/lib/depo-clipboard';
+import { CounterdraftDialog, type CounterdraftDraft } from '@/components/editor/counterdraft-dialog';
+import { CounterdraftPanel, type SuggestArgs } from '@/components/editor/counterdraft-panel';
+import { isCounterdraft, saveCounterdraft } from '@/lib/counterdraft';
 
 const docsQuery = (caseId: string) =>
   queryOptions({
@@ -297,6 +300,23 @@ function DraftPage() {
 
   const newDocument = () => createDoc.mutate({ title: 'Untitled document', content: '' });
 
+  // -------- Counter-draft ingestion --------
+  const [counterOpen, setCounterOpen] = useState(false);
+  const isCounterActive = !!activeId && isCounterdraft(activeId);
+  const [counterPanelOpen, setCounterPanelOpen] = useState(true);
+  useEffect(() => {
+    if (isCounterActive) setCounterPanelOpen(true);
+  }, [isCounterActive, activeId]);
+
+  const createCounterdraft = useCallback(
+    async ({ title: t, markdown, state }: CounterdraftDraft) => {
+      const created = await createDoc.mutateAsync({ title: t, content: markdown });
+      saveCounterdraft(created.id, state);
+      toast.success(`Counter-draft ready — ${state.sections.length} sections`);
+    },
+    [createDoc],
+  );
+
   const onContentChange = useCallback((v: string) => {
     setContent(v);
     setDirty(true);
@@ -471,6 +491,7 @@ function DraftPage() {
         onToggleFocus={() => setFocusMode((v) => !v)}
         wordCount={stats.words}
         readMin={stats.readMin}
+        onNewCounterdraft={() => setCounterOpen(true)}
       />
 
       <div className="lg:h-[calc(100vh-54px)] lg:flex lg:overflow-hidden">
@@ -523,17 +544,40 @@ function DraftPage() {
           />
         </div>
 
-        {sidecarOpen && (
-          <ClaudeSidecar
-            caseId={caseId}
-            matter={matterScope}
-            documentText={content}
-            onAppend={appendToDoc}
-            onInsertCite={insertCitation}
-            onClose={() => setSidecarOpen(false)}
+        {isCounterActive && counterPanelOpen && activeId ? (
+          <CounterdraftPanel
+            docId={activeId}
+            editor={editorRef.current}
+            onClose={() => setCounterPanelOpen(false)}
+            onDismantle={() => setCounterPanelOpen(false)}
+            onSuggest={async (args: SuggestArgs) => {
+              await runInlineTransform({
+                instruction: args.instruction,
+                selectionText: args.selectionText,
+                from: args.from,
+                to: args.to,
+              });
+            }}
           />
+        ) : (
+          sidecarOpen && (
+            <ClaudeSidecar
+              caseId={caseId}
+              matter={matterScope}
+              documentText={content}
+              onAppend={appendToDoc}
+              onInsertCite={insertCitation}
+              onClose={() => setSidecarOpen(false)}
+            />
+          )
         )}
       </div>
+
+      <CounterdraftDialog
+        open={counterOpen}
+        onOpenChange={setCounterOpen}
+        onCreate={createCounterdraft}
+      />
     </AppShell>
   );
 
@@ -738,6 +782,7 @@ function DocumentBar({
   onToggleFocus,
   wordCount,
   readMin,
+  onNewCounterdraft,
 }: {
   title: string;
   onTitleChange: (v: string) => void;
@@ -771,6 +816,7 @@ function DocumentBar({
   onToggleFocus: () => void;
   wordCount: number;
   readMin: number;
+  onNewCounterdraft: () => void;
 }) {
   return (
     <div className="h-[54px] border-b border-border bg-card/70 backdrop-blur-sm px-4 flex items-center gap-2 shrink-0">
@@ -790,8 +836,19 @@ function DocumentBar({
           isLoading={isLoading}
           onPick={onPickDoc}
           onNew={onNewDoc}
+          onNewCounterdraft={onNewCounterdraft}
         />
       </div>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onNewCounterdraft}
+        className="h-8 gap-1.5 hidden lg:inline-flex text-[11.5px]"
+        title="Upload an opposing draft to counter section-by-section"
+      >
+        <GitPullRequestArrow className="h-3.5 w-3.5" /> Counter draft
+      </Button>
 
       <div className="hidden md:flex items-center gap-1.5 text-[10.5px] font-sans uppercase tracking-[0.14em] text-muted-foreground px-1.5">
         <span className="text-accent/80">{matterShort}</span>
@@ -953,12 +1010,14 @@ function DocumentMenu({
   isLoading,
   onPick,
   onNew,
+  onNewCounterdraft,
 }: {
   docs: WorkspaceDocument[];
   activeId: string | null;
   isLoading: boolean;
   onPick: (d: WorkspaceDocument) => void;
   onNew: () => void;
+  onNewCounterdraft?: () => void;
 }) {
   const active = docs.find((d) => d.id === activeId);
   return (
@@ -974,6 +1033,11 @@ function DocumentMenu({
         <DropdownMenuItem onClick={onNew} className="gap-2 cursor-pointer font-medium">
           <Plus className="h-4 w-4" /> New document
         </DropdownMenuItem>
+        {onNewCounterdraft && (
+          <DropdownMenuItem onClick={onNewCounterdraft} className="gap-2 cursor-pointer">
+            <GitPullRequestArrow className="h-4 w-4" /> Counter opposing draft…
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.12em] text-muted-foreground font-sans">
           {isLoading ? 'Loading…' : `${docs.length} document${docs.length === 1 ? '' : 's'}`}
