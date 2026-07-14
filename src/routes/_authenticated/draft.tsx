@@ -746,6 +746,7 @@ function DocumentBar({
   onExportDocx,
   onExportPdf,
   onExportMd,
+  onPolish,
   canExport,
   onDelete,
   matterShort,
