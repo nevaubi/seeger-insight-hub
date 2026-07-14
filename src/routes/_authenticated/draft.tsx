@@ -11,14 +11,7 @@ import {
   CornerDownLeft,
   BookOpen,
   ArrowDownToLine,
-  Mail,
-  ListChecks,
-  CalendarClock,
-  Gavel,
   Search,
-  FileSignature,
-  FileSearch,
-  ClipboardList,
   Sparkles,
   MoreHorizontal,
   Layers,
@@ -26,9 +19,12 @@ import {
   ChevronsRight,
   X,
   Check,
+  Star,
   GitPullRequestArrow,
   Focus,
   Hash,
+  Type as TypeIcon,
+  ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
