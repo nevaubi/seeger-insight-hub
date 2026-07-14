@@ -66,6 +66,7 @@ import {
   downloadBlob,
   exportFilename,
 } from '@/lib/file-export';
+import { normalizeBluebook } from '@/lib/bluebook';
 import { cn } from '@/lib/utils';
 import { LegalEditor } from '@/components/editor/legal-editor';
 import type { Editor } from '@tiptap/react';
@@ -341,6 +342,32 @@ function DraftPage() {
     toast.success('Exported Markdown (.md)');
   };
 
+  const polishBluebook = useCallback(() => {
+    if (!content.trim()) {
+      toast.error('Nothing to polish yet');
+      return;
+    }
+    const { markdown, report } = normalizeBluebook(content);
+    if (markdown === content) {
+      toast.success('Citations already Bluebook-clean');
+      return;
+    }
+    setContent(markdown);
+    setDirty(true);
+    const total = Object.values(report.totals).reduce((a, b) => a + b, 0);
+    const bits: string[] = [];
+    if (report.totals.reporter) bits.push(`${report.totals.reporter} reporter${report.totals.reporter === 1 ? '' : 's'}`);
+    if (report.totals.signal) bits.push(`${report.totals.signal} signal${report.totals.signal === 1 ? '' : 's'}`);
+    if (report.totals.id) bits.push(`${report.totals.id} Id.`);
+    if (report.totals.short) bits.push(`${report.totals.short} short-form`);
+    if (report.totals.pincite) bits.push(`${report.totals.pincite} pincite${report.totals.pincite === 1 ? '' : 's'}`);
+    if (report.totals.italic) bits.push(`${report.totals.italic} italics`);
+    if (report.totals.smart) bits.push(`${report.totals.smart} smart quote${report.totals.smart === 1 ? '' : 's'}`);
+    toast.success(`Bluebook polish · ${total} fix${total === 1 ? '' : 'es'}`, {
+      description: bits.join(' · ') || undefined,
+    });
+  }, [content]);
+
   const appendToDoc = (text: string) => {
     const next = content ? `${content}\n\n${text}` : text;
     setContent(next);
@@ -450,6 +477,7 @@ function DraftPage() {
         onExportDocx={exportDocx}
         onExportPdf={exportPdf}
         onExportMd={exportMarkdown}
+        onPolish={polishBluebook}
         canExport={!!content.trim()}
         onDelete={activeId ? () => deleteDoc.mutate(activeId) : undefined}
         matterShort={currentMatter.short_name}
@@ -718,6 +746,7 @@ function DocumentBar({
   onExportDocx,
   onExportPdf,
   onExportMd,
+  onPolish,
   canExport,
   onDelete,
   matterShort,
@@ -751,6 +780,7 @@ function DocumentBar({
   onExportDocx: () => void;
   onExportPdf: () => void;
   onExportMd: () => void;
+  onPolish: () => void;
   canExport: boolean;
   onDelete?: () => void;
   matterShort: string;
@@ -882,6 +912,17 @@ function DocumentBar({
           hasActive={hasActive}
           onSave={onSave}
         />
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onPolish}
+          disabled={!canExport}
+          className="h-8 gap-1.5 text-muted-foreground hover:text-foreground"
+          title="Normalize reporters, signals, Id., pincites, and smart quotes"
+        >
+          <BookOpen className="h-3.5 w-3.5" /> Bluebook polish
+        </Button>
 
 
         <DropdownMenu>

@@ -165,13 +165,14 @@ export function downloadXlsx(base: string, sheets: Sheet[]): void {
 
 // ---------- document model (shared by DOCX + print) ----------
 
-export type Run = { text: string; bold?: boolean; italic?: boolean };
+export type Run = { text: string; bold?: boolean; italic?: boolean; smallCaps?: boolean };
 export type TableAlign = 'left' | 'center' | 'right' | null;
 export type DocBlock =
   | { type: 'heading'; level: 1 | 2 | 3; runs: Run[] }
   | { type: 'paragraph'; runs: Run[] }
   | { type: 'bullet'; runs: Run[] }
   | { type: 'ordered'; index: number; runs: Run[] }
+  | { type: 'blockquote'; runs: Run[] }
   | { type: 'rule' }
   | { type: 'spacer' }
   | { type: 'table'; header: Run[][]; rows: Run[][][]; align: TableAlign[] };
@@ -301,6 +302,12 @@ export function markdownToBlocks(md: string): DocBlock[] {
       out.push({ type: 'bullet', runs: parseInline(ul[1]) });
       continue;
     }
+    const bq = /^\s*>\s?(.*)$/.exec(line);
+    if (bq) {
+      orderedIdx = 0;
+      out.push({ type: 'blockquote', runs: parseInline(bq[1]) });
+      continue;
+    }
     orderedIdx = 0;
     out.push({ type: 'paragraph', runs: parseInline(line) });
   }
@@ -317,7 +324,8 @@ export function markdownToBlocks(md: string): DocBlock[] {
 // ---------- DOCX ----------
 
 function runXml(r: Run): string {
-  const props = `${r.bold ? '<w:b/>' : ''}${r.italic ? '<w:i/>' : ''}`;
+  const props =
+    `${r.bold ? '<w:b/>' : ''}${r.italic ? '<w:i/>' : ''}${r.smallCaps ? '<w:smallCaps/>' : ''}`;
   const rPr = props ? `<w:rPr>${props}</w:rPr>` : '';
   return `<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(r.text)}</w:t></w:r>`;
 }
@@ -341,6 +349,8 @@ function blockToDocxXml(b: DocBlock): string {
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: '• ' })}${b.runs.map(runXml).join('')}</w:p>`;
     case 'ordered':
       return `<w:p><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="240"/></w:pPr>${runXml({ text: `${b.index}. ` })}${b.runs.map(runXml).join('')}</w:p>`;
+    case 'blockquote':
+      return `<w:p><w:pPr><w:spacing w:before="80" w:after="120" w:line="240" w:lineRule="auto"/><w:ind w:left="720" w:right="720"/></w:pPr>${b.runs.map((r) => runXml({ ...r, italic: true })).join('')}</w:p>`;
     case 'paragraph':
       return `<w:p><w:pPr><w:spacing w:after="160"/><w:jc w:val="both"/></w:pPr>${b.runs.map(runXml).join('')}</w:p>`;
     case 'table':
@@ -487,6 +497,8 @@ export function blocksToHtml(blocks: DocBlock[]): string {
         )
         .join('')}</tbody>`;
       out.push(`<table class="doc-table">${thead}${tbody}</table>`);
+    } else if (b.type === 'blockquote') {
+      out.push(`<blockquote>${b.runs.map(runHtml).join('')}</blockquote>`);
     } else out.push(`<p>${b.runs.map(runHtml).join('')}</p>`);
   }
   flush();
@@ -506,6 +518,7 @@ const PRINT_CSS = `
   ul, ol { margin: 0 0 10px; padding-left: 22px; }
   li { margin: 0 0 4px; }
   hr { border: none; border-top: 1px solid #c9c2b4; margin: 16px 0; }
+  blockquote { margin: 12px 0 12px 0.5in; padding: 0 0.4in; font-style: italic; color: #2a2a2a; border-left: 2px solid #c9c2b4; }
   table.doc-table { width: 100%; border-collapse: collapse; margin: 4px 0 14px; font-size: 10.5pt; page-break-inside: auto; }
   .doc-table th, .doc-table td { border: 1px solid #c9c2b4; padding: 6px 9px; vertical-align: top; text-align: left; }
   .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2a44; }
