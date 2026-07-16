@@ -1069,18 +1069,7 @@ function DepositionWorkspace() {
               </div>
             )}
             {isAnalyzing ? (
-              <Card className="p-8 text-center">
-                <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
-                <div className="mt-3 font-serif text-base font-semibold">
-                  Analyzing testimony…
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Findings will appear here as soon as the analysis completes.
-                </p>
-                <div className="mt-3 flex justify-center">
-                  <ClaudeBadge />
-                </div>
-              </Card>
+              <FindingsSkeleton />
             ) : hasError ? (
               <Card className="p-8 text-center border-destructive/40">
                 <AlertTriangle className="mx-auto h-5 w-5 text-destructive" />
@@ -1107,6 +1096,7 @@ function DepositionWorkspace() {
                   <Sparkles className="mr-2 h-4 w-4" /> Run analysis
                 </Button>
               </Card>
+
             ) : (
               <Tabs defaultValue="summary" className="w-full">
                 <div className="flex items-center justify-between gap-3 border-b border-border -mx-4 px-4 pb-1">
