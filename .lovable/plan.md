@@ -1,42 +1,91 @@
-## Goal
-Make the Depositions page an upload-first launcher. Remove the "Recent depositions" list entirely, kick off analysis automatically after upload without a button press, and use clean skeleton placeholders while things load.
+## 1. Clearer labels for the transcript search bar
+File: `src/routes/_authenticated/depositions.$id.tsx` (search toolbar ~ lines 831–893).
 
-## 1. `src/routes/_authenticated/depositions.index.tsx` — strip to a launcher
+- Add a small caption row above the controls: `"Search transcript"` on the left, and on the right a subtle "Filter" label preceding the speaker pill group.
+- Replace the cryptic speaker pill labels (`All / Q / A / Obj`) with full words:
+  - `Any speaker` · `Question` · `Answer` · `Objection`
+  - Keep the compact pill styling; widen slightly to fit. On very narrow widths, show the current short letters and add a `title=` tooltip with the full name.
+- Regex toggle: replace the icon-only button with an icon + short label pill (`.*` icon + "Regex") plus `aria-label="Toggle regular expression search"` and a `title` tooltip: "Regex on — match with a regular expression" / "Regex off — plain text search".
+- Placeholder in the input becomes: `"Search words or phrases…"` (plain) / `"Regex, e.g. \b(risk|warn\w+)\b"` (regex on) — already present, keep.
+- Match counter line: prefix with `Matches:` for clarity (e.g. `Matches: 3 / 27`).
 
-Remove from the page:
-- The `Recent depositions` section header, filter bar, sort dropdown, and the divided list of previously uploaded transcripts.
-- The metrics summary strip (transcripts / pp / analyzed / helpful-harmful / exhibits) — it depends on the roster.
-- The `depositions` and `deposition_findings` queries plus all filter/sort state (`query`, `align`, `status`, `roleFilter`, `sort`, `findingsByDepo`, `metrics`, `filteredSorted`, `roleOptions`, related helpers, `AlignmentBadge`, `StatusBadge`).
-- The Upload sheet's `autoAnalyze` Switch — analysis always runs.
+No other logic changes — same state, same handlers.
 
-Keep and promote:
-- The upload flow (drag-drop card, witness name, witness role, submit). Render it directly on the page as the primary hero card, not behind a Sheet — no "Upload transcript" button needed to open a modal. (The `Sheet` component and `uploadOpen` state can be removed.)
-- Header stays (matter name + page title), but drop the `Plus` button since upload is inline.
-- Empty-state copy (`No depositions yet`) is deleted; the upload card replaces it.
+## 2. Redesigned DOCX / PDF digest with tables + chronology timeline
+File: `src/lib/depo-export.ts` (rewrite `buildDigestMarkdown` sections).
 
-Submission behavior:
-- On successful `ingestDeposition`, always navigate to `/depositions/$id` with `search: { analyze: true }` (drop the toggle). No toast about "analyzing in the background" — the destination page will show live progress.
-- Show skeleton state on the upload card while `busy` (file row shimmering, progress caption "Preparing transcript…").
+Leverage the existing GFM pipe-table support in `file-export.ts` (`markdownToBlocks` + `tableXml`) so both DOCX and print/PDF output pick up the tables and timeline styling automatically.
 
-## 2. `src/routes/_authenticated/depositions.$id.tsx` — auto-analyze on arrival
+- **Admissions** → a compact table:
 
-Current behavior already auto-starts analysis when `?analyze=true` is present (lines 562-572). Confirm it fires even before the deposition row has any pages loaded and:
-- Set an initial UI state that assumes analysis is starting when `searchParams.analyze` is true, so users never see the "Not analyzed yet / Analyze now" empty card (line 1099) between navigation and the mutation firing.
-- Replace the spinner-only pending block (~line 1073) and the transcript-loading blocks with the new `<DepoSkeleton />` component (below) so both the findings column and transcript column show aligned skeleton rows instead of a lone spinner.
+  ```
+  | # | Topic | Stance | Admission | Cite |
+  |---|-------|--------|-----------|------|
+  | 1 | Warning label | Adverse | "…" — plain quote | 42:7–43:12 |
+  ```
 
-## 3. Skeleton components
+  - Detail + quote combined into one wrapped cell; quote wrapped in curly quotes.
+  - Stance rendered as short label (Adverse / Neutral / Helpful) instead of italics.
+  - Empty section is skipped.
 
-Add a small local `DepoSkeleton` (in `depositions.$id.tsx`, or a new `src/components/depo-skeletons.tsx` if cleaner) using the existing `Skeleton` shadcn primitive:
-- `TranscriptSkeleton`: 12 rows of `page:line` gutter + text bar, matching the virtualized line layout.
-- `FindingsSkeleton`: 4 stacked cards (title bar, 2 lines of text, small tag row).
-- `HeaderSkeleton`: witness name + metadata line for the top of the workspace while `depoQ.isLoading`.
+- **Chronology** → vertical timeline rendered as a two-column table with left "date rail" and right "event":
 
-On the launcher page, add an inline `UploadingSkeleton` block that appears under the upload card once `busy` is true, mirroring the shape of the destination workspace so the transition feels continuous.
+  ```
+  |     |     |
+  |-----|-----|
+  | **2018-04** | **FDA correspondence** — witness confirmed receipt.  _(112:3)_ |
+  | **2019-08** | **Warning revision** — declined to update label.  _(145:9)_ |
+  ```
 
-## 4. Cleanup
+  - Header row is empty so it reads as a rail visually; the left column uses bold dates for a timeline feel.
+  - Also add a small CSS tweak in `blocksToHtml` styles for `.doc-table td:first-child { white-space: nowrap; color: hsl of oxblood-ish accent; border-right: 2px solid; }` to give the timeline its rail. (Edit inside `file-export.ts` `blocksToHtml` `<style>` block — scoped, tiny, safe.)
 
-- Remove now-unused imports in `depositions.index.tsx` (`useQueryClient`, `Sheet*`, `Select*`, `Switch`, `Badge`, `SearchIcon`, `X`, `CheckCircle2`, `Sparkles`, `Plus`, `Loader2` where unused, `fmtDate`, `Deposition`, `DepositionFinding` types, `cn` if unused).
-- No changes to `depo-api.ts`, edge functions, or DB.
+- **Exhibits** → table:
+
+  ```
+  | Ex. | Title | Description | Cite |
+  |-----|-------|-------------|------|
+  | 12  | Warning label draft | Marked and identified by witness. | 89:2–90:14 |
+  ```
+
+- **Quality notes** → table:
+
+  ```
+  | # | Note | Cite |
+  |---|------|------|
+  | 1 | Coaching objection sustained | 55:11 |
+  ```
+
+- **Executive Summary** / **Witness Profile** stay as prose paragraphs at the top (unchanged).
+- Keep markdown pipe-safe escaping helper (`|` → `\|`, newlines → spaces).
+
+The PDF path uses `printDigest → blocksToHtml`, so the same tables render there — no separate PDF code path.
+
+## 3. Full multi-sheet Excel export
+File: `src/lib/depo-export.ts` — replace `downloadAdmissionsCsv` with `downloadDigestXlsx(depo, findings)` (keep the CSV helper as a thin wrapper if desired, or remove).
+
+Use `downloadXlsx(base, sheets)` from `@/lib/file-export`. Workbook contains:
+
+1. **Summary** — key/value: witness, role, alignment, date, MDL, case no, page count, analyzed_at, counts per finding type.
+2. **Admissions** — Witness, Topic, Stance, Detail, Quote, Cite (P:L), Page Start, Line Start, Page End, Line End, Tags, Confidence, Verify, Review.
+3. **Chronology** — Date, Event Title, Detail, Cite, Page Start, Line Start, Tags.
+4. **Exhibits** — Ex. Number, Title, Description, Cite, Page Start, Line Start, Tags.
+5. **Quality Notes** — Note, Detail, Cite, Page Start, Line Start.
+6. **All Findings** — union sheet: Type, Title, Detail, Quote, Cite, Stance, Tags, Confidence, Verify, Review, Page Start, Line Start, Page End, Line End.
+
+Each sheet uses `columns: [{header, width}]` sized by content max (mirroring `review-export.ts` pattern). Empty sheets are still created with just the header row so the workbook shape is predictable.
+
+File name: `<witness-last>-deposition-workbook.xlsx`.
+
+## 4. Wire the new export into the menu
+File: `src/routes/_authenticated/depositions.$id.tsx` (~ lines 785–794).
+
+- Rename the "Data" section to `Spreadsheet`.
+- Replace the single `Admissions .csv` item with:
+  - `Full workbook (.xlsx)` → `downloadDigestXlsx(depo, findings)` (disabled only if `!analyzed`).
+  - Keep `Admissions .csv` as a secondary quick option.
+- Update the `Deposition digest` section labels to `.docx / .md / Print (PDF)` — copy only.
 
 ## Out of scope
-Any change to the transcript viewer internals, findings analytics, ask-the-witness pane, or export menus — only loading states and route wiring are touched there.
+- No changes to analysis, findings schema, edge functions, or transcript viewer internals.
+- No new dependencies (uses existing `file-export.ts` pipeline).

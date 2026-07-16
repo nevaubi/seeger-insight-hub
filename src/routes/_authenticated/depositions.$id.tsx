@@ -69,6 +69,7 @@ import {
   downloadDigestDocx,
   downloadDigestMarkdown,
   downloadAdmissionsCsv,
+  downloadDigestXlsx,
   printDigest,
 } from '@/lib/depo-export';
 
@@ -767,13 +768,13 @@ function DepositionWorkspace() {
                   onSelect={() => downloadDigestDocx(depo, findings)}
                   disabled={!analyzed}
                 >
-                  <FileText className="mr-2 h-4 w-4" /> Digest .docx
+                  <FileText className="mr-2 h-4 w-4" /> Digest (.docx)
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => downloadDigestMarkdown(depo, findings)}
                   disabled={!analyzed}
                 >
-                  <PenLine className="mr-2 h-4 w-4" /> Digest .md
+                  <PenLine className="mr-2 h-4 w-4" /> Digest (.md)
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => printDigest(depo, findings)}
@@ -783,13 +784,19 @@ function DepositionWorkspace() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                  Data
+                  Spreadsheet
                 </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestXlsx(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Full workbook (.xlsx)
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => downloadAdmissionsCsv(depo, findings)}
                   disabled={!analyzed || !(byType['admission']?.length)}
                 >
-                  <Download className="mr-2 h-4 w-4" /> Admissions .csv
+                  <Download className="mr-2 h-4 w-4" /> Admissions (.csv)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -829,13 +836,18 @@ function DepositionWorkspace() {
             <div className={cn('min-w-0 h-full flex flex-col', mobileView !== 'transcript' && 'hidden lg:flex')}>
             <div className="flex-1 min-h-0 flex flex-col border-r border-border lg:border-r-0">
               <div className="border-b border-border bg-card px-4 py-2 shrink-0 space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  <span>Search transcript</span>
+                  <span>Filter by speaker</span>
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
                     <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                     <Input
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder={useRegex ? 'Regex, e.g. \\b(risk|warn\\w+)\\b' : 'Search transcript…'}
+                      placeholder={useRegex ? 'Regex, e.g. \\b(risk|warn\\w+)\\b' : 'Search words or phrases…'}
+                      aria-label="Search transcript text"
                       className={cn(
                         'pl-8 pr-8 h-8 text-sm font-mono',
                         regexInvalid && 'border-destructive/60 focus-visible:ring-destructive/40',
@@ -862,31 +874,44 @@ function DepositionWorkspace() {
                   <button
                     type="button"
                     onClick={() => setUseRegex((v) => !v)}
-                    title={useRegex ? 'Regex on' : 'Regex off'}
+                    title={useRegex ? 'Regex on — match with a regular expression' : 'Regex off — plain text search'}
+                    aria-label="Toggle regular expression search"
                     aria-pressed={useRegex}
                     className={cn(
-                      'h-8 w-8 inline-flex items-center justify-center rounded-sm border transition-colors',
+                      'h-8 inline-flex items-center gap-1.5 px-2 rounded-sm border text-[11px] font-medium transition-colors',
                       useRegex
                         ? 'bg-primary/10 border-primary/40 text-primary'
                         : 'border-border text-muted-foreground hover:text-foreground',
                     )}
                   >
                     <RegexIcon className="h-3.5 w-3.5" />
+                    <span>Regex</span>
                   </button>
                   <div className="inline-flex rounded-sm border border-border overflow-hidden">
-                    {(['any', 'q', 'a', 'obj'] as const).map((v) => (
+                    {(
+                      [
+                        { v: 'any', label: 'Any speaker', short: 'Any' },
+                        { v: 'q', label: 'Question', short: 'Q' },
+                        { v: 'a', label: 'Answer', short: 'A' },
+                        { v: 'obj', label: 'Objection', short: 'Obj' },
+                      ] as const
+                    ).map((opt) => (
                       <button
-                        key={v}
+                        key={opt.v}
                         type="button"
-                        onClick={() => setSpeakerFilter(v)}
+                        onClick={() => setSpeakerFilter(opt.v)}
+                        title={opt.label}
+                        aria-label={`Filter by ${opt.label.toLowerCase()}`}
+                        aria-pressed={speakerFilter === opt.v}
                         className={cn(
-                          'h-8 px-2 text-[11px] font-medium uppercase tracking-wider transition-colors',
-                          speakerFilter === v
+                          'h-8 px-2.5 text-[11px] font-medium tracking-tight transition-colors whitespace-nowrap',
+                          speakerFilter === opt.v
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-card text-muted-foreground hover:text-foreground',
                         )}
                       >
-                        {v === 'any' ? 'All' : v === 'obj' ? 'Obj' : v.toUpperCase()}
+                        <span className="hidden xl:inline">{opt.label}</span>
+                        <span className="xl:hidden">{opt.short}</span>
                       </button>
                     ))}
                   </div>
@@ -897,12 +922,13 @@ function DepositionWorkspace() {
                       {regexInvalid ? (
                         <span className="text-destructive">Invalid regex</span>
                       ) : matches.length === 0 ? (
-                        'No matches'
+                        'Matches: 0'
                       ) : (
                         <>
+                          <span className="font-medium text-foreground">Matches:</span>{' '}
                           <span className="font-medium text-foreground">{matchIdx + 1}</span>
                           {' / '}
-                          {matches.length} match{matches.length === 1 ? '' : 'es'}
+                          {matches.length}
                         </>
                       )}
                     </span>

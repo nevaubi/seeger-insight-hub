@@ -1,4 +1,4 @@
-// Deposition digest exports (Markdown → DOCX/PDF/CSV).
+// Deposition digest exports (Markdown → DOCX/PDF, plus multi-sheet XLSX).
 // Reuses the in-house file-export pipeline; produces one polished digest per
 // deposition, with toggleable sections.
 
@@ -11,10 +11,13 @@ import {
   buildDocx,
   downloadBlob,
   downloadCsv,
+  downloadXlsx,
   exportFilename,
   markdownToBlocks,
   printDocument,
   blocksToHtml,
+  type Sheet,
+  type Cell,
 } from '@/lib/file-export';
 import { fmtDate } from '@/components/case-ui';
 
@@ -31,7 +34,7 @@ const DEFAULTS: DigestOptions = {
   admissions: true,
   chronology: true,
   exhibits: true,
-  quality: false,
+  quality: true,
 };
 
 function witnessLast(name: string | null | undefined): string {
@@ -39,7 +42,9 @@ function witnessLast(name: string | null | undefined): string {
   return name.split(/\s+/).slice(-1)[0] || name;
 }
 
-function shortCite(f: Pick<DepositionFinding, 'page_start' | 'line_start' | 'page_end' | 'line_end' | 'cite'>): string {
+function shortCite(
+  f: Pick<DepositionFinding, 'page_start' | 'line_start' | 'page_end' | 'line_end' | 'cite'>,
+): string {
   if (f.cite) return f.cite;
   const p1 = f.page_start, l1 = f.line_start;
   if (p1 == null || l1 == null) return '';
@@ -52,7 +57,24 @@ function shortCite(f: Pick<DepositionFinding, 'page_start' | 'line_start' | 'pag
 
 function stanceLabel(s: FindingStance | null): string {
   if (!s) return '';
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  if (s === 'harmful') return 'Adverse';
+  if (s === 'helpful') return 'Helpful';
+  return 'Neutral';
+}
+
+/** Escape a value for a markdown pipe-table cell. */
+function tc(v: string | number | null | undefined): string {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  return s
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\s{2,}/g, ' ');
+}
+
+function curlyQuote(q: string): string {
+  const t = q.trim().replace(/^["\u201C]+|["\u201D]+$/g, '');
+  return `\u201C${t}\u201D`;
 }
 
 /** Group findings by finding_type for convenience. */
@@ -71,7 +93,6 @@ export function buildDigestMarkdown(
   const o = { ...DEFAULTS, ...opts };
   const g = groupFindings(findings);
   const witness = depo.witness_name || depo.filename || 'Witness';
-  const last = witnessLast(depo.witness_name);
   const lines: string[] = [];
 
   lines.push(`# ${witness} — Deposition Digest`);
@@ -96,55 +117,66 @@ export function buildDigestMarkdown(
     }
   }
 
+  // ---- Admissions: table ----
   if (o.admissions && (g['admission']?.length ?? 0) > 0) {
     lines.push('## Admissions');
-    for (const f of g['admission']) {
-      const s = shortCite(f);
-      const title = f.title?.trim() || 'Admission';
+    lines.push('| # | Topic | Stance | Admission | Cite |');
+    lines.push('|---|---|---|---|---|');
+    g['admission'].forEach((f, i) => {
+      const topic = f.title?.trim() || 'Admission';
       const stance = stanceLabel(f.stance);
-      lines.push(`### ${title}${stance ? ` — _${stance}_` : ''}`);
-      if (f.detail) { lines.push(f.detail.trim()); }
-      if (f.quote) {
-        const bq = f.quote.trim().split('\n').map((l) => `> ${l}`).join('\n');
-        lines.push('');
-        lines.push(bq);
-        if (s) lines.push(`>\n> — ${last} Dep. ${s}`);
-      } else if (s) {
-        lines.push('');
-        lines.push(`_${last} Dep. ${s}_`);
-      }
-      lines.push('');
-    }
+      const parts: string[] = [];
+      if (f.detail) parts.push(f.detail.trim());
+      if (f.quote) parts.push(curlyQuote(f.quote));
+      const body = parts.join(' — ');
+      lines.push(`| ${i + 1} | ${tc(topic)} | ${tc(stance)} | ${tc(body)} | ${tc(shortCite(f))} |`);
+    });
+    lines.push('');
   }
 
+  // ---- Chronology: two-column timeline ----
   if (o.chronology && (g['chronology']?.length ?? 0) > 0) {
     lines.push('## Chronology');
+    lines.push('| When | Event |');
+    lines.push('|---|---|');
     for (const f of g['chronology']) {
-      const s = shortCite(f);
-      const when = (f.data?.date as string | undefined) || (f.data?.when as string | undefined) || '';
-      const head = [when || null, f.title].filter(Boolean).join(' — ') || 'Event';
-      lines.push(`- **${head}**${f.detail ? ` — ${f.detail.trim()}` : ''}${s ? `  _(${s})_` : ''}`);
+      const when = String(
+        (f.data?.date as string | undefined) ||
+          (f.data?.when as string | undefined) ||
+          '',
+      );
+      const title = f.title?.trim() || 'Event';
+      const detail = f.detail ? ` — ${f.detail.trim()}` : '';
+      const cite = shortCite(f);
+      const right = `**${title}**${detail}${cite ? `  _(${cite})_` : ''}`;
+      lines.push(`| ${tc(when ? `**${when}**` : '·')} | ${tc(right)} |`);
     }
     lines.push('');
   }
 
+  // ---- Exhibits: table ----
   if (o.exhibits && (g['exhibit']?.length ?? 0) > 0) {
     lines.push('## Exhibits');
+    lines.push('| Ex. | Title | Description | Cite |');
+    lines.push('|---|---|---|---|');
     for (const f of g['exhibit']) {
-      const s = shortCite(f);
       const num = (f.data?.exhibit_number as number | string | undefined) ?? '';
-      const head = num ? `Ex. ${num}` : (f.title || 'Exhibit');
-      lines.push(`- **${head}**${f.title && num ? ` — ${f.title}` : ''}${f.detail ? ` — ${f.detail.trim()}` : ''}${s ? `  _(${s})_` : ''}`);
+      const title = f.title?.trim() || (num ? `Ex. ${num}` : 'Exhibit');
+      const desc = f.detail?.trim() || '';
+      lines.push(`| ${tc(num)} | ${tc(title)} | ${tc(desc)} | ${tc(shortCite(f))} |`);
     }
     lines.push('');
   }
 
+  // ---- Quality notes: table ----
   if (o.quality && (g['quality_note']?.length ?? 0) > 0) {
     lines.push('## Quality Notes');
-    for (const f of g['quality_note']) {
-      const s = shortCite(f);
-      lines.push(`- ${f.detail?.trim() || f.title || 'Note'}${s ? `  _(${s})_` : ''}`);
-    }
+    lines.push('| # | Note | Cite |');
+    lines.push('|---|---|---|');
+    g['quality_note'].forEach((f, i) => {
+      const note = f.detail?.trim() || f.title?.trim() || 'Note';
+      lines.push(`| ${i + 1} | ${tc(note)} | ${tc(shortCite(f))} |`);
+    });
     lines.push('');
   }
 
@@ -198,7 +230,177 @@ export function printDigest(
   });
 }
 
-/** CSV of admissions with witness, cite, stance, tags. */
+// ============================================================
+// XLSX workbook — one sheet per section + a union sheet.
+// ============================================================
+
+function sizeColumns(headers: string[], rows: Cell[][]): { header: string; width: number }[] {
+  return headers.map((h, i) => {
+    const max = Math.max(h.length, ...rows.map((r) => String(r[i] ?? '').length));
+    return { header: h, width: Math.min(60, Math.max(12, max + 2)) };
+  });
+}
+
+function findingTypeLabel(t: DepositionFinding['finding_type']): string {
+  switch (t) {
+    case 'admission': return 'Admission';
+    case 'chronology': return 'Chronology';
+    case 'exhibit': return 'Exhibit';
+    case 'quality_note': return 'Quality note';
+    case 'exec_summary': return 'Executive summary';
+    case 'witness_profile': return 'Witness profile';
+    default: return t;
+  }
+}
+
+function summarySheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const counts: Record<string, number> = {};
+  for (const f of findings) counts[f.finding_type] = (counts[f.finding_type] ?? 0) + 1;
+  const rows: Cell[][] = [
+    ['Witness', depo.witness_name ?? ''],
+    ['Role', depo.witness_role ?? ''],
+    ['Party alignment', depo.party_alignment ?? ''],
+    ['Deposed', depo.deposition_date ? fmtDate(depo.deposition_date) : ''],
+    ['MDL number', depo.mdl_number ?? ''],
+    ['MDL case no.', depo.mdl_case_no ?? ''],
+    ['Individual case no.', depo.individual_case_no ?? ''],
+    ['Court', depo.court ?? ''],
+    ['Judge', depo.judge ?? ''],
+    ['Reporter', depo.reporter ?? ''],
+    ['Pages', depo.page_count ?? ''],
+    ['Source file', depo.filename ?? ''],
+    ['Status', depo.status ?? ''],
+    ['Updated', depo.updated_at ? fmtDate(depo.updated_at) : ''],
+    ['', ''],
+    ['Finding counts', ''],
+    ['  Admissions', counts['admission'] ?? 0],
+    ['  Chronology', counts['chronology'] ?? 0],
+    ['  Exhibits', counts['exhibit'] ?? 0],
+    ['  Quality notes', counts['quality_note'] ?? 0],
+    ['  Executive summary', counts['exec_summary'] ?? 0],
+    ['  Witness profile', counts['witness_profile'] ?? 0],
+    ['  Total', findings.length],
+  ];
+  return { name: 'Summary', columns: [{ header: 'Field', width: 24 }, { header: 'Value', width: 60 }], rows };
+}
+
+function admissionsSheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = [
+    'Witness', 'Topic', 'Stance', 'Detail', 'Quote', 'Cite',
+    'Page start', 'Line start', 'Page end', 'Line end',
+    'Tags', 'Confidence', 'Verify', 'Review',
+  ];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === 'admission')
+    .map((f) => [
+      depo.witness_name ?? '',
+      f.title ?? '',
+      stanceLabel(f.stance),
+      f.detail ?? '',
+      f.quote ?? '',
+      shortCite(f),
+      f.page_start ?? '',
+      f.line_start ?? '',
+      f.page_end ?? '',
+      f.line_end ?? '',
+      (f.issue_tags || []).join('; '),
+      f.confidence ?? '',
+      f.verify_status ?? '',
+      f.review_status ?? '',
+    ]);
+  return { name: 'Admissions', columns: sizeColumns(headers, rows), rows };
+}
+
+function chronologySheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = ['Witness', 'Date', 'Event', 'Detail', 'Cite', 'Page start', 'Line start', 'Tags'];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === 'chronology')
+    .map((f) => [
+      depo.witness_name ?? '',
+      String(f.data?.date ?? f.data?.when ?? ''),
+      f.title ?? '',
+      f.detail ?? '',
+      shortCite(f),
+      f.page_start ?? '',
+      f.line_start ?? '',
+      (f.issue_tags || []).join('; '),
+    ]);
+  return { name: 'Chronology', columns: sizeColumns(headers, rows), rows };
+}
+
+function exhibitsSheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = ['Witness', 'Ex. #', 'Title', 'Description', 'Cite', 'Page start', 'Line start', 'Tags'];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === 'exhibit')
+    .map((f) => [
+      depo.witness_name ?? '',
+      String(f.data?.exhibit_number ?? ''),
+      f.title ?? '',
+      f.detail ?? '',
+      shortCite(f),
+      f.page_start ?? '',
+      f.line_start ?? '',
+      (f.issue_tags || []).join('; '),
+    ]);
+  return { name: 'Exhibits', columns: sizeColumns(headers, rows), rows };
+}
+
+function qualitySheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = ['Witness', 'Note', 'Detail', 'Cite', 'Page start', 'Line start'];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === 'quality_note')
+    .map((f) => [
+      depo.witness_name ?? '',
+      f.title ?? '',
+      f.detail ?? '',
+      shortCite(f),
+      f.page_start ?? '',
+      f.line_start ?? '',
+    ]);
+  return { name: 'Quality Notes', columns: sizeColumns(headers, rows), rows };
+}
+
+function allFindingsSheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = [
+    'Witness', 'Type', 'Title', 'Detail', 'Quote', 'Cite', 'Stance',
+    'Tags', 'Confidence', 'Verify', 'Review',
+    'Page start', 'Line start', 'Page end', 'Line end',
+  ];
+  const rows: Cell[][] = findings.map((f) => [
+    depo.witness_name ?? '',
+    findingTypeLabel(f.finding_type),
+    f.title ?? '',
+    f.detail ?? '',
+    f.quote ?? '',
+    shortCite(f),
+    stanceLabel(f.stance),
+    (f.issue_tags || []).join('; '),
+    f.confidence ?? '',
+    f.verify_status ?? '',
+    f.review_status ?? '',
+    f.page_start ?? '',
+    f.line_start ?? '',
+    f.page_end ?? '',
+    f.line_end ?? '',
+  ]);
+  return { name: 'All Findings', columns: sizeColumns(headers, rows), rows };
+}
+
+/** Full multi-sheet Excel workbook covering every finding type. */
+export function downloadDigestXlsx(depo: Deposition, findings: DepositionFinding[]): void {
+  const sheets: Sheet[] = [
+    summarySheet(depo, findings),
+    admissionsSheet(depo, findings),
+    chronologySheet(depo, findings),
+    exhibitsSheet(depo, findings),
+    qualitySheet(depo, findings),
+    allFindingsSheet(depo, findings),
+  ];
+  const base = `${witnessLast(depo.witness_name).toLowerCase()}-deposition-workbook`;
+  downloadXlsx(base, sheets);
+}
+
+/** CSV of admissions with witness, cite, stance, tags. Kept for quick exports. */
 export function downloadAdmissionsCsv(
   depo: Deposition,
   findings: DepositionFinding[],
@@ -210,7 +412,7 @@ export function downloadAdmissionsCsv(
     f.detail || '',
     f.quote || '',
     shortCite(f),
-    f.stance || '',
+    stanceLabel(f.stance),
     (f.issue_tags || []).join('; '),
     f.confidence != null ? f.confidence : '',
     f.verify_status || '',
