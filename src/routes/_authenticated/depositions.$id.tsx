@@ -45,6 +45,8 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { SplitPane } from '@/components/split-pane';
+import { FindingsSkeleton } from '@/components/depo-skeletons';
+
 import {
   supabase,
   type Deposition,
