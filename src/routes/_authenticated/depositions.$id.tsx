@@ -69,6 +69,7 @@ import {
   downloadDigestDocx,
   downloadDigestMarkdown,
   downloadAdmissionsCsv,
+  downloadDigestXlsx,
   printDigest,
 } from '@/lib/depo-export';
 
