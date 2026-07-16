@@ -768,13 +768,13 @@ function DepositionWorkspace() {
                   onSelect={() => downloadDigestDocx(depo, findings)}
                   disabled={!analyzed}
                 >
-                  <FileText className="mr-2 h-4 w-4" /> Digest .docx
+                  <FileText className="mr-2 h-4 w-4" /> Digest (.docx)
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => downloadDigestMarkdown(depo, findings)}
                   disabled={!analyzed}
                 >
-                  <PenLine className="mr-2 h-4 w-4" /> Digest .md
+                  <PenLine className="mr-2 h-4 w-4" /> Digest (.md)
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => printDigest(depo, findings)}
@@ -784,13 +784,19 @@ function DepositionWorkspace() {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                  Data
+                  Spreadsheet
                 </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadDigestXlsx(depo, findings)}
+                  disabled={!analyzed}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Full workbook (.xlsx)
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => downloadAdmissionsCsv(depo, findings)}
                   disabled={!analyzed || !(byType['admission']?.length)}
                 >
-                  <Download className="mr-2 h-4 w-4" /> Admissions .csv
+                  <Download className="mr-2 h-4 w-4" /> Admissions (.csv)
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
