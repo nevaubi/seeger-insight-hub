@@ -577,6 +577,7 @@ const PRINT_CSS = `
   .doc-table thead th { background: #f4efe3; font-family: Inter, sans-serif; font-size: 9.5pt; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2a44; }
   .doc-table tr { page-break-inside: avoid; }
   .doc-table thead { display: table-header-group; }
+  .doc-table td:first-child { white-space: nowrap; font-family: Inter, sans-serif; color: #6b1f2a; font-size: 9.5pt; }
   .sources { margin-top: 28px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10.5pt; }
   .sources h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: 0.08em; font-family: Inter, sans-serif; }
   .cite { font-family: Inter, sans-serif; font-size: 8pt; vertical-align: super; color: #1f2a44; font-weight: 600; }
