@@ -398,7 +398,12 @@ export type DepositionFindingType =
   | 'chronology'
   | 'admission'
   | 'quality_note'
-  | 'exhibit';
+  | 'exhibit'
+  | 'impeachment'
+  | 'objection'
+  | 'case_theme'
+  | 'topic';
+
 export type FindingStance = 'helpful' | 'harmful' | 'neutral';
 export type FindingVerify = 'verified' | 'unverified' | 'failed';
 export type FindingReview = 'unreviewed' | 'approved' | 'edited' | 'rejected';
