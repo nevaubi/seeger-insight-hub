@@ -1,91 +1,67 @@
-## 1. Clearer labels for the transcript search bar
-File: `src/routes/_authenticated/depositions.$id.tsx` (search toolbar ~ lines 831–893).
+# Depositions: audit and upgrade plan
 
-- Add a small caption row above the controls: `"Search transcript"` on the left, and on the right a subtle "Filter" label preceding the speaker pill group.
-- Replace the cryptic speaker pill labels (`All / Q / A / Obj`) with full words:
-  - `Any speaker` · `Question` · `Answer` · `Objection`
-  - Keep the compact pill styling; widen slightly to fit. On very narrow widths, show the current short letters and add a `title=` tooltip with the full name.
-- Regex toggle: replace the icon-only button with an icon + short label pill (`.*` icon + "Regex") plus `aria-label="Toggle regular expression search"` and a `title` tooltip: "Regex on — match with a regular expression" / "Regex off — plain text search".
-- Placeholder in the input becomes: `"Search words or phrases…"` (plain) / `"Regex, e.g. \b(risk|warn\w+)\b"` (regex on) — already present, keep.
-- Match counter line: prefix with `Matches:` for clarity (e.g. `Matches: 3 / 27`).
+## Where we are today
 
-No other logic changes — same state, same handlers.
+The workspace (`/depositions/$id`) already does the hard part well:
 
-## 2. Redesigned DOCX / PDF digest with tables + chronology timeline
-File: `src/lib/depo-export.ts` (rewrite `buildDigestMarkdown` sections).
+- PDF ingest with page:line fidelity, speaker/examination segmentation, exhibit metadata.
+- Auto-analysis on upload producing six finding types (witness profile, exec summary, chronology, admissions, exhibit hits, quality notes), each with a page:line cite, stance, confidence, verify status and review status.
+- Split-pane transcript + findings, transcript search with regex and speaker filters, jump-to-cite.
+- Ask-the-transcript Q&A with quoted citations.
+- Digest export to DOCX / Markdown / print-PDF and a six-sheet XLSX workbook.
 
-Leverage the existing GFM pipe-table support in `file-export.ts` (`markdownToBlocks` + `tableXml`) so both DOCX and print/PDF output pick up the tables and timeline styling automatically.
+That puts us at parity with the "AI transcript summary" layer of Steno Transcript Genius, Nextpoint and Everlaw's deposition analyzer. What those platforms have that we do not is the **work-product layer around** the summary: designations, cross-transcript comparison, human annotations, and a prep deliverable.
 
-- **Admissions** → a compact table:
+## Gaps vs. leading tools
 
-  ```
-  | # | Topic | Stance | Admission | Cite |
-  |---|-------|--------|-----------|------|
-  | 1 | Warning label | Adverse | "…" — plain quote | 42:7–43:12 |
-  ```
+1. **No transcript library.** One deposition at a time; `/depositions` is upload-only. Nothing lists prior transcripts for the matter, so nothing can be compared.
+2. **No designations workflow.** Everlaw Storybuilder, Epiq Narrate and Nextpoint all treat affirmative/counter designations plus objections as the core trial deliverable. We cannot mark a page:line range for trial at all.
+3. **No user annotations.** Every mark in our app is AI-generated. There is no highlight, no note, no manual issue-code on a passage.
+4. **No cross-examination outline.** The digest is a report, not a prep document. Litigators want a Q-and-cite outline they can carry to the next depo.
+5. **No contradiction detection.** No comparison of a witness against their own earlier testimony, against another witness, or against a document.
+6. **No word index / concordance.** Standard in transcript tools: every significant term with its page:line hits.
+7. **Ask is one-shot.** No saved threads, no promoting an answer into findings or the outline.
 
-  - Detail + quote combined into one wrapped cell; quote wrapped in curly quotes.
-  - Stance rendered as short label (Adverse / Neutral / Helpful) instead of italics.
-  - Empty section is skipped.
+## Proposed build order
 
-- **Chronology** → vertical timeline rendered as a two-column table with left "date rail" and right "event":
+### Phase 1 — Transcript library and manual work product
 
-  ```
-  |     |     |
-  |-----|-----|
-  | **2018-04** | **FDA correspondence** — witness confirmed receipt.  _(112:3)_ |
-  | **2019-08** | **Warning revision** — declined to update label.  _(145:9)_ |
-  ```
+- **Library view** at `/depositions`: keep upload as the hero, add a table below of the matter's transcripts (witness, alignment, date, pages, status, findings count, last analyzed) with search, alignment filter and row-click into the workspace.
+- **Highlights and notes**: select any transcript range in the left pane to create a highlight with a colour-coded issue tag and an optional note. Renders as a margin rail in the transcript and as a "My notes" tab beside the AI findings; included in exports.
+- **Promote to finding**: turn a highlight into an admission-style entry so hand-found testimony sits alongside AI output with the same cite/review chrome.
 
-  - Header row is empty so it reads as a rail visually; the left column uses bold dates for a timeline feel.
-  - Also add a small CSS tweak in `blocksToHtml` styles for `.doc-table td:first-child { white-space: nowrap; color: hsl of oxblood-ish accent; border-right: 2px solid; }` to give the timeline its rail. (Edit inside `file-export.ts` `blocksToHtml` `<style>` block — scoped, tiny, safe.)
+### Phase 2 — Designations
 
-- **Exhibits** → table:
+- Mark a page:line span as **affirmative** or **counter**, with party, objection code (hearsay, 403, foundation, ...) and a free-text basis.
+- Designation tab listing all spans, sortable by page, with overlap detection and running "minutes of testimony" estimate.
+- Exports: designation chart XLSX (Party / Begin / End / Testimony / Objection / Ruling), a DOCX exchange version, and CSV import so opposing counsel's chart can be loaded and counter-designated.
 
-  ```
-  | Ex. | Title | Description | Cite |
-  |-----|-------|-------------|------|
-  | 12  | Warning label draft | Marked and identified by witness. | 89:2–90:14 |
-  ```
+### Phase 3 — Cross-examination prep kit
 
-- **Quality notes** → table:
+- Generate a structured outline from selected findings: topic clusters, the locking question, the supporting quote and cite, and anticipated dodges.
+- Editable before export; ships as DOCX with the court-ready formatting presets already in `format-presets.ts`, or pushes into the Drafting workspace.
 
-  ```
-  | # | Note | Cite |
-  |---|------|------|
-  | 1 | Coaching objection sustained | 55:11 |
-  ```
+### Phase 4 — Contradiction and cross-transcript intelligence
 
-- **Executive Summary** / **Witness Profile** stay as prose paragraphs at the top (unchanged).
-- Keep markdown pipe-safe escaping helper (`|` → `\|`, newlines → spaces).
+- **Self-contradiction pass**: within one transcript, flag answers that conflict with earlier answers, with both cites side by side.
+- **Cross-witness compare**: pick two transcripts in the matter and get an agreement/conflict grid by topic.
+- **Testimony vs. record**: check admissions against the existing corpus search so a witness statement can be contradicted with an order or produced document.
 
-The PDF path uses `printDigest → blocksToHtml`, so the same tables render there — no separate PDF code path.
+### Phase 5 — Retrieval and navigation polish
 
-## 3. Full multi-sheet Excel export
-File: `src/lib/depo-export.ts` — replace `downloadAdmissionsCsv` with `downloadDigestXlsx(depo, findings)` (keep the CSV helper as a thin wrapper if desired, or remove).
+- Word index tab: significant terms with hit counts and clickable page:line lists.
+- Persistent Ask threads per deposition, with "add answer to outline" and "save as finding".
+- Keyboard command bar inside the workspace (jump to page:line, next finding, next highlight).
 
-Use `downloadXlsx(base, sheets)` from `@/lib/file-export`. Workbook contains:
+## Technical notes
 
-1. **Summary** — key/value: witness, role, alignment, date, MDL, case no, page count, analyzed_at, counts per finding type.
-2. **Admissions** — Witness, Topic, Stance, Detail, Quote, Cite (P:L), Page Start, Line Start, Page End, Line End, Tags, Confidence, Verify, Review.
-3. **Chronology** — Date, Event Title, Detail, Cite, Page Start, Line Start, Tags.
-4. **Exhibits** — Ex. Number, Title, Description, Cite, Page Start, Line Start, Tags.
-5. **Quality Notes** — Note, Detail, Cite, Page Start, Line Start.
-6. **All Findings** — union sheet: Type, Title, Detail, Quote, Cite, Stance, Tags, Confidence, Verify, Review, Page Start, Line Start, Page End, Line End.
-
-Each sheet uses `columns: [{header, width}]` sized by content max (mirroring `review-export.ts` pattern). Empty sheets are still created with just the header row so the workbook shape is predictable.
-
-File name: `<witness-last>-deposition-workbook.xlsx`.
-
-## 4. Wire the new export into the menu
-File: `src/routes/_authenticated/depositions.$id.tsx` (~ lines 785–794).
-
-- Rename the "Data" section to `Spreadsheet`.
-- Replace the single `Admissions .csv` item with:
-  - `Full workbook (.xlsx)` → `downloadDigestXlsx(depo, findings)` (disabled only if `!analyzed`).
-  - Keep `Admissions .csv` as a secondary quick option.
-- Update the `Deposition digest` section labels to `.docx / .md / Print (PDF)` — copy only.
+- Library, highlights, designations and outlines each need new tables in the external Supabase project plus a read path; the app is read-only today, so this is the first place we write. Confirm whether writes are acceptable there or whether they should live in a separate app-owned store.
+- Contradiction passes and outline generation extend the existing `depo-analyze` edge function rather than adding new client logic.
+- Exports reuse `file-export.ts` (DOCX/XLSX/print) and `depo-export.ts` patterns; no new dependencies.
+- Highlights need a stable anchor: store `page_start/line_start/page_end/line_end` plus the matched text, not DOM offsets.
 
 ## Out of scope
-- No changes to analysis, findings schema, edge functions, or transcript viewer internals.
-- No new dependencies (uses existing `file-export.ts` pipeline).
+
+- Video-synced transcripts and clip export (no video source in the pipeline).
+- Realtime multi-user collaboration and permissions.
+- Court reporter integrations / live feeds.
