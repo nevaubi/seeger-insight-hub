@@ -68,12 +68,22 @@ export interface AnalyzeResult {
   ok: boolean;
   counts?: Record<string, number>;
   dropped?: number;
+  /** depo-analyze v2: per-pass state ('running' | 'done' | 'error'). */
+  progress?: Record<string, string>;
+  elapsed_ms?: number;
   error?: string;
 }
 
-export async function analyzeDeposition(depositionId: string): Promise<AnalyzeResult> {
-  return postJson<AnalyzeResult>(DEPO_ANALYZE_ENDPOINT, { deposition_id: depositionId });
+export async function analyzeDeposition(
+  depositionId: string,
+  facets?: string[],
+): Promise<AnalyzeResult> {
+  return postJson<AnalyzeResult>(DEPO_ANALYZE_ENDPOINT, {
+    deposition_id: depositionId,
+    ...(facets?.length ? { facets } : {}),
+  });
 }
+
 
 export async function askDeposition(
   depositionId: string,

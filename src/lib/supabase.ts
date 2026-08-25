@@ -324,12 +324,22 @@ export interface DepositionExhibit {
   marked_line: number | null;
 }
 
+export type AnalysisPassState = 'running' | 'done' | 'error';
+
+/** Per-pass progress written by depo-analyze v2 while the fan-out runs. */
+export interface AnalysisProgress {
+  [pass: string]: AnalysisPassState | string | undefined;
+  updated_at?: string;
+}
+
 export interface DepositionMetadata {
   parties?: { alignment: string; firm: string | null; counsel: string[] }[];
   exhibits?: DepositionExhibit[];
   start_time?: string | null;
   deposition_date_long?: string | null;
+  analysis?: AnalysisProgress;
 }
+
 
 export interface Deposition {
   id: string;
@@ -388,7 +398,12 @@ export type DepositionFindingType =
   | 'chronology'
   | 'admission'
   | 'quality_note'
-  | 'exhibit';
+  | 'exhibit'
+  | 'impeachment'
+  | 'objection'
+  | 'case_theme'
+  | 'topic';
+
 export type FindingStance = 'helpful' | 'harmful' | 'neutral';
 export type FindingVerify = 'verified' | 'unverified' | 'failed';
 export type FindingReview = 'unreviewed' | 'approved' | 'edited' | 'rejected';

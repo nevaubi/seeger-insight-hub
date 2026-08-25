@@ -75,8 +75,10 @@ import {
   type DepositionFinding,
   type FindingStance,
   type DepoAskResponse,
+  type AnalysisProgress,
 } from '@/lib/supabase';
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
+
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 import {
@@ -796,6 +798,11 @@ function DepositionWorkspace() {
     return typeof n === 'number' && n > 0 ? n : 0;
   })();
 
+  // depo-analyze v2 writes per-pass progress onto the deposition while the fan-out runs.
+  const analysisProgress = (depo.metadata?.analysis ?? null) as AnalysisProgress | null;
+
+
+
   return (
     <AppShell>
       <div className="border-b border-border bg-card px-6 py-3">
@@ -1209,8 +1216,10 @@ function DepositionWorkspace() {
                 </span>
               </div>
             )}
-            {isAnalyzing ? (
+            {isAnalyzing && <AnalysisProgressStrip progress={analysisProgress} />}
+            {isAnalyzing && noFindings ? (
               <FindingsSkeleton />
+
             ) : hasError ? (
               <Card className="p-8 text-center border-destructive/40">
                 <AlertTriangle className="mx-auto h-5 w-5 text-destructive" />
@@ -1245,13 +1254,17 @@ function DepositionWorkspace() {
                     {(
                       [
                         { v: 'summary', label: 'Summary', count: 0 },
-                        { v: 'admissions', label: 'Admissions', count: 0 },
-                        { v: 'chronology', label: 'Chronology', count: 0 },
-                        { v: 'exhibits', label: 'Exhibits', count: 0 },
-                        { v: 'quality', label: 'Quality', count: 0 },
+                        { v: 'admissions', label: 'Admissions', count: byType['admission']?.length ?? 0 },
+                        { v: 'impeachment', label: 'Impeachment', count: byType['impeachment']?.length ?? 0 },
+                        { v: 'themes', label: 'Case themes', count: byType['case_theme']?.length ?? 0 },
+                        { v: 'objections', label: 'Objections', count: byType['objection']?.length ?? 0 },
+                        { v: 'chronology', label: 'Chronology', count: byType['chronology']?.length ?? 0 },
+                        { v: 'exhibits', label: 'Exhibits', count: byType['exhibit']?.length ?? 0 },
+                        { v: 'quality', label: 'Quality', count: byType['quality_note']?.length ?? 0 },
                         { v: 'notes', label: 'Notes', count: ann.highlights.length },
                         { v: 'designations', label: 'Designations', count: ann.designations.length },
                         { v: 'ask', label: 'Ask', count: 0 },
+
                       ] as const
                     ).map((t) => (
                       <TabsTrigger
@@ -1282,7 +1295,45 @@ function DepositionWorkspace() {
                     onPin={togglePin}
                     isPinned={isPinned}
                   />
+                  <TopicMap items={byType['topic'] ?? []} onCite={scrollToCite} />
                 </TabsContent>
+
+                <TabsContent value="impeachment" className="mt-4">
+                  <ImpeachmentTab
+                    items={byType['impeachment'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
+                  />
+                </TabsContent>
+
+                <TabsContent value="themes" className="mt-4">
+                  <ThemesTab
+                    items={byType['case_theme'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
+                  />
+                </TabsContent>
+
+                <TabsContent value="objections" className="mt-4">
+                  <ObjectionsTab
+                    items={byType['objection'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
+                </TabsContent>
+
 
                 <TabsContent value="admissions" className="mt-4">
                   <AdmissionsTab
@@ -1979,5 +2030,381 @@ function AskTab({
         </Card>
       )}
     </div>
+  );
+}
+
+// ============================================================
+// depo-analyze v2 — parallel pass progress + new facet views
+// ============================================================
+
+const PASS_LABELS: Record<string, string> = {
+  overview: 'Overview',
+  admission: 'Admissions',
+  impeachment: 'Impeachment',
+  case_theme: 'Case themes',
+  objection: 'Objections',
+  chronology: 'Chronology',
+  exhibit: 'Exhibits',
+  quality_note: 'Quality',
+  topic: 'Topics',
+};
+
+const PASS_ORDER = [
+  'overview',
+  'admission',
+  'impeachment',
+  'case_theme',
+  'objection',
+  'chronology',
+  'exhibit',
+  'quality_note',
+];
+
+/** Compact strip showing which analysis passes are running / done / failed. */
+function AnalysisProgressStrip({ progress }: { progress: AnalysisProgress | null }) {
+  const entries = PASS_ORDER.filter((k) => progress?.[k]).map((k) => ({
+    key: k,
+    state: String(progress?.[k]),
+  }));
+
+  return (
+    <div className="mb-3 rounded-sm border border-border bg-secondary/30 px-3 py-2">
+      <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Analyzing in parallel
+      </div>
+      {entries.length === 0 ? (
+        <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+          Starting the specialist passes…
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {entries.map((e) => (
+            <span
+              key={e.key}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10.5px] transition-colors',
+                e.state === 'done'
+                  ? 'border-emerald-600/30 bg-emerald-600/5 text-emerald-700'
+                  : e.state === 'error'
+                    ? 'border-destructive/30 bg-destructive/5 text-destructive'
+                    : 'border-border bg-background text-muted-foreground',
+              )}
+            >
+              {e.state === 'done' ? (
+                <CheckCircle2 className="h-3 w-3" />
+              ) : e.state === 'error' ? (
+                <AlertTriangle className="h-3 w-3" />
+              ) : (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              )}
+              {PASS_LABELS[e.key] ?? e.key}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Topic coverage map produced by the overview pass. */
+function TopicMap({
+  items,
+  onCite,
+}: {
+  items: DepositionFinding[];
+  onCite: (s: CiteSpan) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <Card className="mt-3 p-4">
+      <div className="text-[10.5px] uppercase tracking-[0.14em] font-medium text-muted-foreground">
+        Topics covered
+      </div>
+      <ul className="mt-2.5 space-y-2">
+        {items.map((f) => {
+          const coverage = String((f.data as { coverage?: string })?.coverage ?? '');
+          return (
+            <li key={f.id} className="flex items-start gap-2.5">
+              <span
+                className={cn(
+                  'mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full',
+                  coverage === 'thorough'
+                    ? 'bg-emerald-600'
+                    : coverage === 'thin'
+                      ? 'bg-amber-500'
+                      : 'bg-muted-foreground/60',
+                )}
+              />
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="font-serif text-[13.5px] font-semibold text-foreground">
+                    {f.title}
+                  </span>
+                  {coverage && (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {coverage}
+                    </span>
+                  )}
+                  {f.page_start ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCite({
+                          page_start: f.page_start,
+                          line_start: f.line_start,
+                          page_end: f.page_end,
+                          line_end: f.line_end,
+                        })
+                      }
+                      className="font-mono text-[10.5px] text-primary hover:underline"
+                    >
+                      {f.cite || `${f.page_start}:${f.line_start}`}
+                    </button>
+                  ) : null}
+                </div>
+                {f.detail && (
+                  <p className="text-[12.5px] text-muted-foreground leading-relaxed">{f.detail}</p>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+const IMPEACHMENT_KIND_LABELS: Record<string, string> = {
+  contradiction: 'Contradiction',
+  prior_statement: 'Prior statement',
+  evasive: 'Evasive',
+  memory_failure: 'Memory failure',
+};
+
+function ImpeachmentTab({
+  items,
+  onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
+}: {
+  items: DepositionFinding[];
+  onCite: (s: CiteSpan) => void;
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+} & CiteExtras) {
+  if (items.length === 0) return <EmptyTab label="impeachment material" />;
+  return (
+    <div className="space-y-3">
+      {items.map((f) => {
+        const kind = String((f.data as { kind?: string })?.kind ?? '');
+        return (
+          <Card key={f.id} className="p-4 border-l-2 border-l-rose-600/50">
+            <div className="flex items-center gap-2 flex-wrap">
+              {kind && (
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                  {IMPEACHMENT_KIND_LABELS[kind] ?? kind}
+                </Badge>
+              )}
+              <h4 className="font-serif text-[15px] font-semibold leading-snug text-foreground">
+                {f.title || 'Impeachment'}
+              </h4>
+              <VerifyMark status={f.verify_status} />
+            </div>
+            {f.detail && (
+              <p className="mt-2 text-sm text-foreground/90 leading-relaxed">{f.detail}</p>
+            )}
+            {f.quote && (
+              <blockquote className="mt-2.5 border-l-2 border-rose-600/40 bg-secondary/40 px-3 py-2 text-[13px] italic text-foreground/85 leading-relaxed">
+                “{f.quote}”
+              </blockquote>
+            )}
+            <div className="mt-3">
+              <CiteButton
+                span={f}
+                onCite={onCite}
+                label={f.cite}
+                onHover={onHoverCite}
+                onPin={onPin}
+                pinned={isPinned ? isPinned(f) : undefined}
+              />
+            </div>
+            <FindingActionRow
+              f={f}
+              onSendToDraft={onSendToDraft}
+              onSendToAsk={onSendToAsk}
+              onCopy={onCopy}
+            />
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+const THEME_LABELS: Record<string, string> = {
+  warnings_labeling: 'Warnings & labeling',
+  corporate_knowledge: 'Corporate knowledge',
+  safer_alternative: 'Safer alternative',
+  causation: 'Causation',
+  regulatory: 'Regulatory',
+  other: 'Other',
+};
+
+function ThemesTab({
+  items,
+  onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
+  onSendToDraft,
+  onSendToAsk,
+  onCopy,
+}: {
+  items: DepositionFinding[];
+  onCite: (s: CiteSpan) => void;
+  onSendToDraft?: (f: DepositionFinding) => void;
+  onSendToAsk?: (f: DepositionFinding) => void;
+  onCopy?: (f: DepositionFinding) => void;
+} & CiteExtras) {
+  if (items.length === 0) return <EmptyTab label="case-theme evidence" />;
+
+  const groups = new Map<string, DepositionFinding[]>();
+  for (const f of items) {
+    const theme = String((f.data as { theme?: string })?.theme ?? 'other');
+    const list = groups.get(theme) ?? [];
+    list.push(f);
+    groups.set(theme, list);
+  }
+
+  return (
+    <div className="space-y-5">
+      {[...groups.entries()].map(([theme, list]) => (
+        <div key={theme}>
+          <div className="flex items-baseline gap-2 border-b border-border pb-1">
+            <h3 className="font-serif text-[13.5px] font-semibold text-foreground">
+              {THEME_LABELS[theme] ?? theme}
+            </h3>
+            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground">
+              {list.length}
+            </span>
+          </div>
+          <div className="mt-3 space-y-3">
+            {list.map((f) => (
+              <Card key={f.id} className="p-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <StanceBadge stance={f.stance} />
+                  <h4 className="font-serif text-[14.5px] font-semibold text-foreground">
+                    {f.title || 'Theme evidence'}
+                  </h4>
+                  <VerifyMark status={f.verify_status} />
+                </div>
+                {f.detail && (
+                  <p className="mt-2 text-sm text-foreground/90 leading-relaxed">{f.detail}</p>
+                )}
+                {f.quote && (
+                  <blockquote className="mt-2.5 border-l-2 border-primary/40 bg-secondary/40 px-3 py-2 text-[13px] italic text-foreground/85 leading-relaxed">
+                    “{f.quote}”
+                  </blockquote>
+                )}
+                <div className="mt-3">
+                  <CiteButton
+                    span={f}
+                    onCite={onCite}
+                    label={f.cite}
+                    onHover={onHoverCite}
+                    onPin={onPin}
+                    pinned={isPinned ? isPinned(f) : undefined}
+                  />
+                </div>
+                <FindingActionRow
+                  f={f}
+                  onSendToDraft={onSendToDraft}
+                  onSendToAsk={onSendToAsk}
+                  onCopy={onCopy}
+                />
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ObjectionsTab({
+  items,
+  onCite,
+  onHoverCite,
+  onPin,
+  isPinned,
+}: {
+  items: DepositionFinding[];
+  onCite: (s: CiteSpan) => void;
+} & CiteExtras) {
+  if (items.length === 0) return <EmptyTab label="objections" />;
+  return (
+    <Card className="overflow-hidden">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="border-b border-border bg-secondary/40">
+            <th className="px-3 py-2 text-[10px] uppercase tracking-[0.12em] font-medium text-muted-foreground">
+              Ground
+            </th>
+            <th className="px-3 py-2 text-[10px] uppercase tracking-[0.12em] font-medium text-muted-foreground">
+              Objection
+            </th>
+            <th className="px-3 py-2 text-[10px] uppercase tracking-[0.12em] font-medium text-muted-foreground">
+              Cite
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((f) => {
+            const data = (f.data ?? {}) as { ground?: string; instructed_not_to_answer?: boolean };
+            return (
+              <tr key={f.id} className="border-b border-border/60 last:border-0 align-top">
+                <td className="px-3 py-2.5 w-[130px]">
+                  <span className="text-[11.5px] text-foreground/90">{data.ground || '—'}</span>
+                  {data.instructed_not_to_answer && (
+                    <span className="mt-1 block text-[10px] uppercase tracking-wider text-destructive">
+                      Instructed not to answer
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5">
+                  <div className="text-[13px] font-medium text-foreground">
+                    {f.title || 'Objection'}
+                  </div>
+                  {f.detail && (
+                    <p className="mt-0.5 text-[12px] text-muted-foreground leading-relaxed">
+                      {f.detail}
+                    </p>
+                  )}
+                  {f.quote && (
+                    <div className="mt-1 text-[12px] italic text-foreground/70">“{f.quote}”</div>
+                  )}
+                </td>
+                <td className="px-3 py-2.5 w-[110px]">
+                  <CiteButton
+                    span={f}
+                    onCite={onCite}
+                    label={f.cite}
+                    onHover={onHoverCite}
+                    onPin={onPin}
+                    pinned={isPinned ? isPinned(f) : undefined}
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
   );
 }

@@ -24,6 +24,9 @@ import { fmtDate } from '@/components/case-ui';
 export interface DigestOptions {
   summary: boolean;
   admissions: boolean;
+  impeachment: boolean;
+  themes: boolean;
+  objections: boolean;
   chronology: boolean;
   exhibits: boolean;
   quality: boolean;
@@ -32,10 +35,34 @@ export interface DigestOptions {
 const DEFAULTS: DigestOptions = {
   summary: true,
   admissions: true,
+  impeachment: true,
+  themes: true,
+  objections: true,
   chronology: true,
   exhibits: true,
   quality: true,
 };
+
+const THEME_LABELS: Record<string, string> = {
+  warnings_labeling: 'Warnings & labeling',
+  corporate_knowledge: 'Corporate knowledge',
+  safer_alternative: 'Safer alternative',
+  causation: 'Causation',
+  regulatory: 'Regulatory',
+  other: 'Other',
+};
+
+const IMPEACHMENT_LABELS: Record<string, string> = {
+  contradiction: 'Contradiction',
+  prior_statement: 'Prior statement',
+  evasive: 'Evasive',
+  memory_failure: 'Memory failure',
+};
+
+function dataStr(f: DepositionFinding, key: string): string {
+  const v = (f.data ?? {})[key];
+  return v == null ? '' : String(v);
+}
 
 function witnessLast(name: string | null | undefined): string {
   if (!name) return 'Witness';
@@ -115,6 +142,15 @@ export function buildDigestMarkdown(
       if (exec?.detail) { lines.push(exec.detail.trim()); lines.push(''); }
       if (profile?.detail) { lines.push(profile.detail.trim()); lines.push(''); }
     }
+    if ((g['topic']?.length ?? 0) > 0) {
+      lines.push('### Topics Covered');
+      lines.push('| Topic | Coverage | Notes |');
+      lines.push('|---|---|---|');
+      for (const f of g['topic']) {
+        lines.push(`| ${tc(f.title ?? '')} | ${tc(dataStr(f, 'coverage'))} | ${tc(f.detail ?? '')} |`);
+      }
+      lines.push('');
+    }
   }
 
   // ---- Admissions: table ----
@@ -130,6 +166,64 @@ export function buildDigestMarkdown(
       if (f.quote) parts.push(curlyQuote(f.quote));
       const body = parts.join(' — ');
       lines.push(`| ${i + 1} | ${tc(topic)} | ${tc(stance)} | ${tc(body)} | ${tc(shortCite(f))} |`);
+    });
+    lines.push('');
+  }
+
+  // ---- Impeachment: table ----
+  if (o.impeachment && (g['impeachment']?.length ?? 0) > 0) {
+    lines.push('## Impeachment');
+    lines.push('| # | Type | Issue | Testimony | Cite |');
+    lines.push('|---|---|---|---|---|');
+    g['impeachment'].forEach((f, i) => {
+      const kind = dataStr(f, 'kind');
+      const parts: string[] = [];
+      if (f.detail) parts.push(f.detail.trim());
+      if (f.quote) parts.push(curlyQuote(f.quote));
+      lines.push(
+        `| ${i + 1} | ${tc(IMPEACHMENT_LABELS[kind] ?? kind)} | ${tc(f.title ?? '')} | ${tc(parts.join(' \u2014 '))} | ${tc(shortCite(f))} |`,
+      );
+    });
+    lines.push('');
+  }
+
+  // ---- Case themes: grouped tables ----
+  if (o.themes && (g['case_theme']?.length ?? 0) > 0) {
+    lines.push('## Case Themes');
+    const groups = new Map<string, DepositionFinding[]>();
+    for (const f of g['case_theme']) {
+      const t = dataStr(f, 'theme') || 'other';
+      const list = groups.get(t) ?? [];
+      list.push(f);
+      groups.set(t, list);
+    }
+    for (const [theme, list] of groups) {
+      lines.push(`### ${THEME_LABELS[theme] ?? theme}`);
+      lines.push('| # | Point | Stance | Testimony | Cite |');
+      lines.push('|---|---|---|---|---|');
+      list.forEach((f, i) => {
+        const parts: string[] = [];
+        if (f.detail) parts.push(f.detail.trim());
+        if (f.quote) parts.push(curlyQuote(f.quote));
+        lines.push(
+          `| ${i + 1} | ${tc(f.title ?? '')} | ${tc(stanceLabel(f.stance))} | ${tc(parts.join(' \u2014 '))} | ${tc(shortCite(f))} |`,
+        );
+      });
+      lines.push('');
+    }
+  }
+
+  // ---- Objection log: table ----
+  if (o.objections && (g['objection']?.length ?? 0) > 0) {
+    lines.push('## Objection Log');
+    lines.push('| # | Ground | Objection | Instructed not to answer | Cite |');
+    lines.push('|---|---|---|---|---|');
+    g['objection'].forEach((f, i) => {
+      const inst = dataStr(f, 'instructed_not_to_answer') === 'true' ? 'Yes' : '';
+      const body = [f.title?.trim(), f.detail?.trim()].filter(Boolean).join(' \u2014 ');
+      lines.push(
+        `| ${i + 1} | ${tc(dataStr(f, 'ground'))} | ${tc(body)} | ${tc(inst)} | ${tc(shortCite(f))} |`,
+      );
     });
     lines.push('');
   }
@@ -249,6 +343,10 @@ function findingTypeLabel(t: DepositionFinding['finding_type']): string {
     case 'quality_note': return 'Quality note';
     case 'exec_summary': return 'Executive summary';
     case 'witness_profile': return 'Witness profile';
+    case 'impeachment': return 'Impeachment';
+    case 'objection': return 'Objection';
+    case 'case_theme': return 'Case theme';
+    case 'topic': return 'Topic';
     default: return t;
   }
 }
@@ -274,6 +372,10 @@ function summarySheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
     ['', ''],
     ['Finding counts', ''],
     ['  Admissions', counts['admission'] ?? 0],
+    ['  Impeachment', counts['impeachment'] ?? 0],
+    ['  Case themes', counts['case_theme'] ?? 0],
+    ['  Objections', counts['objection'] ?? 0],
+    ['  Topics', counts['topic'] ?? 0],
     ['  Chronology', counts['chronology'] ?? 0],
     ['  Exhibits', counts['exhibit'] ?? 0],
     ['  Quality notes', counts['quality_note'] ?? 0],
@@ -387,10 +489,71 @@ function allFindingsSheet(depo: Deposition, findings: DepositionFinding[]): Shee
 }
 
 /** Full multi-sheet Excel workbook covering every finding type. */
+function facetSheet(
+  name: string,
+  type: DepositionFinding['finding_type'],
+  extraHeaders: string[],
+  extra: (f: DepositionFinding) => Cell[],
+  depo: Deposition,
+  findings: DepositionFinding[],
+): Sheet {
+  const headers = [
+    'Witness', ...extraHeaders, 'Title', 'Detail', 'Quote', 'Stance', 'Cite',
+    'Page start', 'Line start', 'Page end', 'Line end', 'Tags', 'Confidence', 'Verify',
+  ];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === type)
+    .map((f) => [
+      depo.witness_name ?? '',
+      ...extra(f),
+      f.title ?? '',
+      f.detail ?? '',
+      f.quote ?? '',
+      stanceLabel(f.stance),
+      shortCite(f),
+      f.page_start ?? '',
+      f.line_start ?? '',
+      f.page_end ?? '',
+      f.line_end ?? '',
+      (f.issue_tags || []).join('; '),
+      f.confidence ?? '',
+      f.verify_status ?? '',
+    ]);
+  return { name, columns: sizeColumns(headers, rows), rows };
+}
+
+function topicsSheet(depo: Deposition, findings: DepositionFinding[]): Sheet {
+  const headers = ['Witness', 'Topic', 'Coverage', 'Notes', 'Cite'];
+  const rows: Cell[][] = findings
+    .filter((f) => f.finding_type === 'topic')
+    .map((f) => [
+      depo.witness_name ?? '',
+      f.title ?? '',
+      String(f.data?.coverage ?? ''),
+      f.detail ?? '',
+      shortCite(f),
+    ]);
+  return { name: 'Topics', columns: sizeColumns(headers, rows), rows };
+}
+
 export function downloadDigestXlsx(depo: Deposition, findings: DepositionFinding[]): void {
   const sheets: Sheet[] = [
     summarySheet(depo, findings),
     admissionsSheet(depo, findings),
+    facetSheet(
+      'Impeachment', 'impeachment', ['Type'],
+      (f) => [String(f.data?.kind ?? '')], depo, findings,
+    ),
+    facetSheet(
+      'Case themes', 'case_theme', ['Theme'],
+      (f) => [String(f.data?.theme ?? '')], depo, findings,
+    ),
+    facetSheet(
+      'Objections', 'objection', ['Ground', 'Instructed not to answer'],
+      (f) => [String(f.data?.ground ?? ''), f.data?.instructed_not_to_answer ? 'Yes' : ''],
+      depo, findings,
+    ),
+    topicsSheet(depo, findings),
     chronologySheet(depo, findings),
     exhibitsSheet(depo, findings),
     qualitySheet(depo, findings),
