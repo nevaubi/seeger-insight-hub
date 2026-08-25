@@ -250,6 +250,8 @@ function ReviewPage() {
 
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [queueState, setQueueState] = useState<{ done: number; total: number } | null>(null);
+  const [failedUploads, setFailedUploads] = useState<{ file: File; error: string }[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const ingest = async (file: Pick<ReviewFile, 'id' | 'storage_path' | 'mime_type' | 'filename'>) => {
@@ -268,41 +270,98 @@ function ReviewPage() {
     }
   };
 
-  const handleFiles = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    const incoming = Array.from(fileList);
+  // Upload + transcribe a single file. Throws so the queue can record the failure.
+  const uploadOne = useCallback(async (sid: string, file: File) => {
+    if (file.size > MAX_BYTES) throw new Error('Exceeds the 25MB limit');
+    const safe = file.name.replace(/[^\w.\-]+/g, '_');
+    const path = `${sid}/${crypto.randomUUID()}-${safe}`;
+    const { error: upErr } = await supabase.storage
+      .from(REVIEW_FILES_BUCKET)
+      .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (upErr) throw new Error(upErr.message);
+    const { data: row, error: insErr } = await supabase
+      .from('review_files')
+      .insert({ review_set_id: sid, filename: file.name, storage_path: path, mime_type: file.type || null, byte_size: file.size, status: 'uploaded' })
+      .select('*').single();
+    if (insErr || !row) throw new Error(insErr?.message ?? 'Could not register the file');
+    qc.invalidateQueries({ queryKey: ['review-files', sid] });
+
+    // Transcription with one automatic retry on transient failure.
+    const call = async () => {
+      const res = await fetch(TABULAR_INGEST_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ review_file_id: row.id, storage_path: path, mime_type: file.type || null, filename: file.name }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) throw new Error(body?.error || `Transcription failed (${res.status})`);
+    };
+    try {
+      await call();
+    } catch {
+      await new Promise((r) => setTimeout(r, 1200));
+      await call();
+    }
+  }, [qc]);
+
+  // Bulk intake: bounded worker pool, per-file progress, failures collected for retry.
+  const enqueue = useCallback(async (incoming: File[]) => {
+    if (!incoming.length) return;
     const remaining = MAX_REVIEW_FILES - files.length;
-    if (remaining <= 0) { toast.error(`A review holds up to ${MAX_REVIEW_FILES} files`); return; }
-    const accepted = incoming.slice(0, remaining);
-    if (incoming.length > remaining) toast.warning(`Only ${remaining} more allowed — added the first ${remaining}`);
+    if (remaining <= 0) { toast.error(`A review holds up to ${MAX_REVIEW_FILES} documents`); return; }
+
+    // Skip files already in the set (same name and size).
+    const seen = new Set(files.map((f) => `${f.filename}:${f.byte_size ?? 0}`));
+    const deduped = incoming.filter((f) => !seen.has(`${f.name}:${f.size}`));
+    const skipped = incoming.length - deduped.length;
+    if (skipped) toast.info(`Skipped ${skipped} duplicate${skipped === 1 ? '' : 's'}`);
+
+    const accepted = deduped.slice(0, remaining);
+    if (deduped.length > remaining) toast.warning(`Only ${remaining} more fit — queued the first ${remaining}`);
+    if (!accepted.length) return;
 
     setUploading(true);
+    setFailedUploads([]);
+    setQueueState({ done: 0, total: accepted.length });
+    const fails: { file: File; error: string }[] = [];
     try {
       const sid = await ensureSet();
-      for (const file of accepted) {
-        if (file.size > MAX_BYTES) { toast.error(`${file.name} exceeds 25MB`); continue; }
-        const safe = file.name.replace(/[^\w.\-]+/g, '_');
-        const path = `${sid}/${crypto.randomUUID()}-${safe}`;
-        const { error: upErr } = await supabase.storage
-          .from(REVIEW_FILES_BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
-        if (upErr) { toast.error(`Upload failed for ${file.name}: ${upErr.message}`); continue; }
-        const { data: row, error: insErr } = await supabase
-          .from('review_files')
-          .insert({ review_set_id: sid, filename: file.name, storage_path: path, mime_type: file.type || null, byte_size: file.size, status: 'uploaded' })
-          .select('*').single();
-        if (insErr || !row) { toast.error(`Could not register ${file.name}`); continue; }
-        qc.invalidateQueries({ queryKey: ['review-files', sid] });
-        void ingest(row as ReviewFile);
-      }
+      const queue = [...accepted];
+      const worker = async () => {
+        while (queue.length) {
+          const f = queue.shift();
+          if (!f) break;
+          try {
+            await uploadOne(sid, f);
+          } catch (e) {
+            fails.push({ file: f, error: (e as Error).message });
+          } finally {
+            setQueueState((p) => (p ? { ...p, done: p.done + 1 } : p));
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, accepted.length) }, worker));
+      qc.invalidateQueries({ queryKey: ['review-files', sid] });
+      setFailedUploads(fails);
+      if (fails.length) toast.warning(`${accepted.length - fails.length} of ${accepted.length} ingested`, { description: fails[0].error });
+      else toast.success(`${accepted.length} document${accepted.length === 1 ? '' : 's'} ready`);
     } finally {
       setUploading(false);
+      setQueueState(null);
       if (inputRef.current) inputRef.current.value = '';
     }
+  }, [files, ensureSet, uploadOne, qc]);
+
+  const handleFiles = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+    void enqueue(Array.from(fileList));
   };
 
   const removeFile = useMutation({
     mutationFn: async (f: ReviewFile) => {
-      await supabase.storage.from(REVIEW_FILES_BUCKET).remove([f.storage_path]);
+      if (!isImportedPath(f.storage_path)) {
+        await supabase.storage.from(REVIEW_FILES_BUCKET).remove([f.storage_path]);
+      }
       const { error } = await supabase.from('review_files').delete().eq('id', f.id);
       if (error) throw error;
     },
