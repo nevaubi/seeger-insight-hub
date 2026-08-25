@@ -246,7 +246,7 @@ export interface ReviewCellCitation {
   verified: boolean;
 }
 
-export const MAX_REVIEW_FILES = 25;
+export const MAX_REVIEW_FILES = 250;
 
 export interface WorkspaceDocument {
   id: string;
