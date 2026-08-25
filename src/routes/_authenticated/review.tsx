@@ -245,6 +245,40 @@ function ReviewPage() {
     onError: (e: any) => toast.error(`Could not create review: ${e.message}`),
   });
 
+  // Create a named review, optionally seeded with a template's column pack.
+  const createNamedSet = useMutation({
+    mutationFn: async ({ name, template }: { name: string; template: ReviewTemplate | null }) => {
+      const { data, error } = await supabase
+        .from('review_sets')
+        .insert({ case_id: caseId, name: name.trim() || `Review ${new Date().toLocaleDateString()}` })
+        .select('*').single();
+      if (error) throw error;
+      const s = data as ReviewSet;
+      if (template?.columns.length) {
+        const rows = template.columns.map((c, i) => ({
+          review_set_id: s.id,
+          name: c.name,
+          data_type: c.data_type,
+          prompt: c.prompt || null,
+          enum_options: c.enum_options ?? null,
+          ordinal: i,
+        }));
+        const { error: colErr } = await supabase.from('review_columns').insert(rows);
+        if (colErr) throw colErr;
+      }
+      return s;
+    },
+    onSuccess: (s, vars) => {
+      setActiveSetId(s.id);
+      qc.invalidateQueries({ queryKey: ['review-sets', caseId] });
+      qc.invalidateQueries({ queryKey: ['review-columns', s.id] });
+      toast.success(`Created "${s.name}"`, {
+        description: vars.template ? `${vars.template.columns.length} columns from ${vars.template.name}` : undefined,
+      });
+    },
+    onError: (e: any) => toast.error(`Could not create review: ${e.message}`),
+  });
+
   const ensureSet = useCallback(async (): Promise<string> => {
     if (setId) return setId;
     const s = await createSet.mutateAsync();
@@ -252,6 +286,7 @@ function ReviewPage() {
   }, [setId, createSet]);
 
   const [uploading, setUploading] = useState(false);
+  const [newReviewOpen, setNewReviewOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [queueState, setQueueState] = useState<{ done: number; total: number } | null>(null);
   const [failedUploads, setFailedUploads] = useState<{ file: File; error: string }[]>([]);
@@ -597,13 +632,23 @@ function ReviewPage() {
                 </DropdownMenuItem>
               ))}
               {sets.length > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuItem onClick={() => createSet.mutate()} className="gap-2 cursor-pointer font-medium">
+              <DropdownMenuItem
+                onSelect={(e) => { e.preventDefault(); setNewReviewOpen(true); }}
+                className="gap-2 cursor-pointer font-medium"
+              >
                 <Plus className="h-3.5 w-3.5" /> New review
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </PageHeader>
+
+      <NewReviewDialog
+        open={newReviewOpen}
+        onOpenChange={setNewReviewOpen}
+        pending={createNamedSet.isPending}
+        onCreate={async (name, template) => { await createNamedSet.mutateAsync({ name, template }); setNewReviewOpen(false); }}
+      />
 
       <div className="px-6 lg:px-8 py-6">
         {/* Upload zone */}
@@ -899,6 +944,75 @@ function CellView({ cell, running }: { cell?: CellWithCites; running: boolean })
 }
 
 
+
+function NewReviewDialog({
+  open, onOpenChange, onCreate, pending,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreate: (name: string, template: ReviewTemplate | null) => Promise<void>;
+  pending: boolean;
+}) {
+  const [name, setName] = useState('');
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) { setName(''); setTemplateId(null); }
+  }, [open]);
+  const template = REVIEW_TEMPLATES.find((t) => t.id === templateId) ?? null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New review</DialogTitle>
+          <DialogDescription>
+            Name the review and pick the kind of documents it holds. The column pack is added up front — you can edit it later.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Name</Label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Rule 702 briefing — defense exhibits"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !pending) void onCreate(name, template); }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Starting columns</Label>
+            <div className="max-h-56 overflow-y-auto rounded-md border border-border divide-y divide-border/60">
+              <button
+                type="button"
+                onClick={() => setTemplateId(null)}
+                className={cn('w-full text-left px-3 py-2 text-[12px] transition-colors', templateId === null ? 'bg-primary/10 text-foreground' : 'hover:bg-secondary/40 text-muted-foreground')}
+              >
+                Start empty
+              </button>
+              {REVIEW_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTemplateId(t.id)}
+                  className={cn('w-full text-left px-3 py-2 transition-colors', templateId === t.id ? 'bg-primary/10' : 'hover:bg-secondary/40')}
+                >
+                  <div className="text-[12px] text-foreground">{t.name}</div>
+                  <div className="text-[11px] text-muted-foreground line-clamp-1">{t.columns.length} columns · {t.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" className="gap-1.5" disabled={pending} onClick={() => void onCreate(name, template)}>
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Create review
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function TemplatesDialog({ onApply }: { onApply: (cols: TemplateColumn[]) => void }) {
   const [open, setOpen] = useState(false);
