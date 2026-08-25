@@ -1216,8 +1216,10 @@ function DepositionWorkspace() {
                 </span>
               </div>
             )}
-            {isAnalyzing ? (
+            {isAnalyzing && <AnalysisProgressStrip progress={analysisProgress} />}
+            {isAnalyzing && noFindings ? (
               <FindingsSkeleton />
+
             ) : hasError ? (
               <Card className="p-8 text-center border-destructive/40">
                 <AlertTriangle className="mx-auto h-5 w-5 text-destructive" />
