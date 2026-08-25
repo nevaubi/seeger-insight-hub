@@ -1295,7 +1295,45 @@ function DepositionWorkspace() {
                     onPin={togglePin}
                     isPinned={isPinned}
                   />
+                  <TopicMap items={byType['topic'] ?? []} onCite={scrollToCite} />
                 </TabsContent>
+
+                <TabsContent value="impeachment" className="mt-4">
+                  <ImpeachmentTab
+                    items={byType['impeachment'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
+                  />
+                </TabsContent>
+
+                <TabsContent value="themes" className="mt-4">
+                  <ThemesTab
+                    items={byType['case_theme'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                    onSendToDraft={sendToDraft}
+                    onSendToAsk={sendToAsk}
+                    onCopy={copyFindingCite}
+                  />
+                </TabsContent>
+
+                <TabsContent value="objections" className="mt-4">
+                  <ObjectionsTab
+                    items={byType['objection'] ?? []}
+                    onCite={scrollToCite}
+                    onHoverCite={setHoverCite}
+                    onPin={togglePin}
+                    isPinned={isPinned}
+                  />
+                </TabsContent>
+
 
                 <TabsContent value="admissions" className="mt-4">
                   <AdmissionsTab
