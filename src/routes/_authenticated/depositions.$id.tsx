@@ -75,8 +75,10 @@ import {
   type DepositionFinding,
   type FindingStance,
   type DepoAskResponse,
+  type AnalysisProgress,
 } from '@/lib/supabase';
 import { analyzeDeposition, askDeposition } from '@/lib/depo-api';
+
 import { fmtDate } from '@/components/case-ui';
 import { cn } from '@/lib/utils';
 import {
