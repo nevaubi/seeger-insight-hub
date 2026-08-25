@@ -617,20 +617,68 @@ function ReviewPage() {
             atLimit && 'opacity-60',
           )}
         >
-          <input ref={inputRef} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => handleFiles(e.target.files)} />
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+            // @ts-expect-error non-standard folder-picker attributes
+            webkitdirectory=""
+            directory=""
+          />
           <Upload className="h-6 w-6 text-muted-foreground shrink-0" strokeWidth={1.5} />
           <div className="min-w-0 flex-1">
             <p className="font-sans text-sm text-foreground">
-              {atLimit ? `Maximum ${MAX_REVIEW_FILES} files reached` : 'Drag documents here, or choose files'}
+              {atLimit ? `Maximum ${MAX_REVIEW_FILES} documents reached` : 'Drag a folder or documents here, pull filings from the docket, or choose files'}
             </p>
-            <p className="text-[11px] text-muted-foreground">PDF, images, or text · up to {MAX_REVIEW_FILES} · 25MB each · {files.length}/{MAX_REVIEW_FILES} used</p>
+            <p className="text-[11px] text-muted-foreground">
+              PDF, images, or text · up to {MAX_REVIEW_FILES} documents · 25MB each · {files.length}/{MAX_REVIEW_FILES} used
+            </p>
+            {queueState && (
+              <div className="mt-2 flex items-center gap-2">
+                <Progress value={(queueState.done / Math.max(queueState.total, 1)) * 100} className="h-1.5 max-w-xs" />
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {queueState.done}/{queueState.total} ingested
+                </span>
+              </div>
+            )}
           </div>
           {!atLimit && (
-            <Button variant="secondary" size="sm" className="gap-2 shrink-0" disabled={uploading} onClick={() => inputRef.current?.click()}>
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Choose files
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <ImportFromMatterDialog
+                caseId={caseId}
+                ensureSet={ensureSet}
+                remaining={MAX_REVIEW_FILES - files.length}
+                onImported={() => qc.invalidateQueries({ queryKey: ['review-files', setId] })}
+              />
+              <Button variant="secondary" size="sm" className="gap-2" disabled={uploading} onClick={() => inputRef.current?.click()}>
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Choose files
+              </Button>
+            </div>
           )}
         </div>
+
+        {failedUploads.length > 0 && (
+          <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 flex items-center gap-3">
+            <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+            <div className="min-w-0 flex-1 text-[12px]">
+              <span className="text-foreground">{failedUploads.length} file{failedUploads.length === 1 ? '' : 's'} failed to ingest</span>
+              <span className="text-muted-foreground"> — {failedUploads[0].error}</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 shrink-0"
+              disabled={uploading}
+              onClick={() => void enqueue(failedUploads.map((f) => f.file))}
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Retry all
+            </Button>
+          </div>
+        )}
+
 
         {/* Ask across documents */}
         {setId && readyFiles.length > 0 && (
