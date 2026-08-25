@@ -77,6 +77,9 @@ import {
   type ReviewCell,
   type ReviewCellCitation,
 } from '@/lib/supabase';
+import { ImportFromMatterDialog } from '@/components/review/import-dialog';
+import { isImportedPath } from '@/lib/review-import';
+import { Progress } from '@/components/ui/progress';
 import { useMatter } from '@/lib/matter-context';
 import { cn } from '@/lib/utils';
 
