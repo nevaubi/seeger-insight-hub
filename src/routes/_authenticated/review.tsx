@@ -531,7 +531,7 @@ function ReviewPage() {
     <AppShell>
       <PageHeader
         title="Tabular Review"
-        description="Upload up to 25 documents, define the fields you want, and extract a cited table — every value is pulled from the source text and verified against it."
+        description="Pull filings from the docket, import transcripts, or upload documents in bulk — then define the fields you want and extract a cited table, every value verified against the source text."
       >
         <div className="flex items-center gap-2">
           {files.length > 0 && (
@@ -624,14 +624,11 @@ function ReviewPage() {
             accept={ACCEPT}
             className="hidden"
             onChange={(e) => handleFiles(e.target.files)}
-            // @ts-expect-error non-standard folder-picker attributes
-            webkitdirectory=""
-            directory=""
           />
           <Upload className="h-6 w-6 text-muted-foreground shrink-0" strokeWidth={1.5} />
           <div className="min-w-0 flex-1">
             <p className="font-sans text-sm text-foreground">
-              {atLimit ? `Maximum ${MAX_REVIEW_FILES} documents reached` : 'Drag a folder or documents here, pull filings from the docket, or choose files'}
+              {atLimit ? `Maximum ${MAX_REVIEW_FILES} documents reached` : 'Drag documents here, pull filings from the docket, or choose files'}
             </p>
             <p className="text-[11px] text-muted-foreground">
               PDF, images, or text · up to {MAX_REVIEW_FILES} documents · 25MB each · {files.length}/{MAX_REVIEW_FILES} used
