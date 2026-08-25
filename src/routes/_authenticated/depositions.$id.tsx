@@ -46,6 +46,26 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SplitPane } from '@/components/split-pane';
 import { FindingsSkeleton } from '@/components/depo-skeletons';
+import {
+  useTranscriptSelection,
+  SelectionToolbar,
+  NotesTab,
+  DesignationsTab,
+} from '@/components/depo-annotate';
+import {
+  useDepoAnnotations,
+  TAG_COLORS,
+  type IssueTag,
+  type DesignationKind,
+} from '@/lib/depo-annotations';
+import {
+  downloadDesignationsXlsx,
+  downloadDesignationsCsv,
+  downloadDesignationsDocx,
+  downloadNotesDocx,
+  parseDesignationCsv,
+} from '@/lib/depo-workproduct-export';
+
 
 import {
   supabase,
@@ -373,6 +393,69 @@ function DepositionWorkspace() {
     },
     [keysForSpan],
   );
+
+  // ---- Attorney work product: highlights + designations ----
+  const ann = useDepoAnnotations(id);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const { selection, clear: clearSelection } = useTranscriptSelection(transcriptRef);
+  const importRef = useRef<HTMLInputElement>(null);
+
+  const onHighlight = useCallback(
+    (tag: IssueTag) => {
+      if (!selection) return;
+      ann.addHighlight({
+        page_start: selection.page_start,
+        line_start: selection.line_start,
+        page_end: selection.page_end,
+        line_end: selection.line_end,
+        text: selection.text,
+        note: '',
+        tag,
+      });
+      clearSelection();
+      toast.success('Highlight saved');
+    },
+    [ann, selection, clearSelection],
+  );
+
+  const onDesignate = useCallback(
+    (kind: DesignationKind) => {
+      if (!selection) return;
+      ann.addDesignation({
+        page_start: selection.page_start,
+        line_start: selection.line_start,
+        page_end: selection.page_end,
+        line_end: selection.line_end,
+        text: selection.text,
+        kind,
+        party: '',
+        objection: '',
+        basis: '',
+      });
+      clearSelection();
+      toast.success(kind === 'counter' ? 'Counter-designation added' : 'Designation added');
+    },
+    [ann, selection, clearSelection],
+  );
+
+  const onImportDesignations = useCallback(
+    async (f: File | null) => {
+      if (!f) return;
+      try {
+        const rows = parseDesignationCsv(await f.text());
+        if (rows.length === 0) {
+          toast.error('No designation rows found in that file');
+          return;
+        }
+        rows.forEach((r) => ann.addDesignation(r));
+        toast.success(`Imported ${rows.length} designations`);
+      } catch {
+        toast.error('Could not read that CSV');
+      }
+    },
+    [ann],
+  );
+
 
   const togglePin = useCallback((span: CiteSpan) => {
     setPinnedCites((prev) => {
@@ -798,6 +881,29 @@ function DepositionWorkspace() {
                 >
                   <Download className="mr-2 h-4 w-4" /> Admissions (.csv)
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Work product
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => downloadDesignationsXlsx(depo, ann.designations)}
+                  disabled={ann.designations.length === 0}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Designation chart (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => downloadDesignationsCsv(depo, ann.designations)}
+                  disabled={ann.designations.length === 0}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Designation chart (.csv)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => downloadNotesDocx(depo, ann.highlights)}
+                  disabled={ann.highlights.length === 0}
+                >
+                  <PenLine className="mr-2 h-4 w-4" /> Notes &amp; highlights (.docx)
+                </DropdownMenuItem>
+
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -955,7 +1061,7 @@ function DepositionWorkspace() {
                   </div>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div ref={transcriptRef} className="flex-1 overflow-y-auto">
                 {linesByPage.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">
                     No transcript lines found.
@@ -974,6 +1080,9 @@ function DepositionWorkspace() {
                               const key = `${l.page}-${l.line}`;
                               const isMatch = lineHitsSearch(l.text);
                               const isHi = highlighted.has(key);
+                              const annTag = ann.highlightedLineKeys.get(key);
+                              const annDesig = ann.designatedLineKeys.get(key);
+
                               const isSticky = stickyKeys.has(key);
                               const currentMatch = matches[matchIdx];
                               const isCurrent =
@@ -1050,15 +1159,19 @@ function DepositionWorkspace() {
                                   <div
                                     id={`line-${l.page}-${l.line}`}
                                     className={cn(
-                                      'flex gap-3 pl-3 pr-4 py-[2px] transition-colors',
+                                      'relative flex gap-3 pl-3 pr-4 py-[2px] transition-colors',
                                       turnAccent,
                                       dimmedBySpeaker && 'opacity-40',
+                                      annTag && TAG_COLORS[annTag],
                                       isSticky && 'bg-primary/10 ring-1 ring-inset ring-primary/25',
                                       isHi && 'bg-primary/20',
                                       isCurrent && 'bg-amber-300/50',
-                                      !isHi && !isCurrent && !isSticky && isMatch && 'bg-amber-200/40',
+                                      !isHi && !isCurrent && !isSticky && !annTag && isMatch && 'bg-amber-200/40',
+                                      annDesig === 'affirmative' && 'shadow-[inset_3px_0_0_0_hsl(var(--primary))]',
+                                      annDesig === 'counter' && 'shadow-[inset_3px_0_0_0_hsl(var(--destructive))]',
                                     )}
                                   >
+
                                     <span className="shrink-0 w-11 font-mono text-[10.5px] leading-5 text-muted-foreground/70 tabular-nums select-none">
                                       {l.page}:{String(l.line).padStart(2, '0')}
                                     </span>
@@ -1128,17 +1241,34 @@ function DepositionWorkspace() {
             ) : (
               <Tabs defaultValue="summary" className="w-full">
                 <div className="flex items-center justify-between gap-3 border-b border-border -mx-4 px-4 pb-1">
-                  <TabsList className="flex justify-start gap-0 bg-transparent p-0 h-auto">
-                    {(['summary','admissions','chronology','exhibits','quality','ask'] as const).map((v) => (
+                  <TabsList className="flex flex-wrap justify-start gap-0 bg-transparent p-0 h-auto">
+                    {(
+                      [
+                        { v: 'summary', label: 'Summary', count: 0 },
+                        { v: 'admissions', label: 'Admissions', count: 0 },
+                        { v: 'chronology', label: 'Chronology', count: 0 },
+                        { v: 'exhibits', label: 'Exhibits', count: 0 },
+                        { v: 'quality', label: 'Quality', count: 0 },
+                        { v: 'notes', label: 'Notes', count: ann.highlights.length },
+                        { v: 'designations', label: 'Designations', count: ann.designations.length },
+                        { v: 'ask', label: 'Ask', count: 0 },
+                      ] as const
+                    ).map((t) => (
                       <TabsTrigger
-                        key={v}
-                        value={v}
-                        className="shrink-0 px-2.5 py-1 h-7 text-[11.5px] rounded-none border-b-2 border-transparent bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground capitalize"
+                        key={t.v}
+                        value={t.v}
+                        className="shrink-0 px-2.5 py-1 h-7 text-[11.5px] rounded-none border-b-2 border-transparent bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:text-foreground text-muted-foreground"
                       >
-                        {v}
+                        {t.label}
+                        {t.count > 0 && (
+                          <span className="ml-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+                            {t.count}
+                          </span>
+                        )}
                       </TabsTrigger>
                     ))}
                   </TabsList>
+
                   <ClaudeBadge variant="chip" label="Claude Legal" />
                 </div>
 
@@ -1201,6 +1331,63 @@ function DepositionWorkspace() {
                   />
                 </TabsContent>
 
+                <TabsContent value="notes" className="mt-4">
+                  <NotesTab
+                    highlights={ann.highlights}
+                    onJump={scrollToCite}
+                    onUpdate={ann.updateHighlight}
+                    onRemove={ann.removeHighlight}
+                  />
+                </TabsContent>
+
+                <TabsContent value="designations" className="mt-4">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={ann.designations.length === 0}
+                      onClick={() => downloadDesignationsXlsx(depo, ann.designations)}
+                    >
+                      <Download className="mr-1.5 h-3.5 w-3.5" /> Chart (.xlsx)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      disabled={ann.designations.length === 0}
+                      onClick={() => downloadDesignationsDocx(depo, ann.designations)}
+                    >
+                      <FileText className="mr-1.5 h-3.5 w-3.5" /> Exchange (.docx)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px]"
+                      onClick={() => importRef.current?.click()}
+                    >
+                      Import chart (.csv)
+                    </Button>
+                    <input
+                      ref={importRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => {
+                        void onImportDesignations(e.target.files?.[0] ?? null);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+                  <DesignationsTab
+                    designations={ann.designations}
+                    onJump={scrollToCite}
+                    onUpdate={ann.updateDesignation}
+                    onRemove={ann.removeDesignation}
+                  />
+                </TabsContent>
+
+
                 <TabsContent value="ask" className="mt-4">
                   <AskTab
                     question={question}
@@ -1222,7 +1409,17 @@ function DepositionWorkspace() {
         />
 
       </div>
+
+      {selection && (
+        <SelectionToolbar
+          selection={selection}
+          onHighlight={onHighlight}
+          onDesignate={onDesignate}
+          onDismiss={clearSelection}
+        />
+      )}
     </AppShell>
+
   );
 }
 
