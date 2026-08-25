@@ -1254,13 +1254,17 @@ function DepositionWorkspace() {
                     {(
                       [
                         { v: 'summary', label: 'Summary', count: 0 },
-                        { v: 'admissions', label: 'Admissions', count: 0 },
-                        { v: 'chronology', label: 'Chronology', count: 0 },
-                        { v: 'exhibits', label: 'Exhibits', count: 0 },
-                        { v: 'quality', label: 'Quality', count: 0 },
+                        { v: 'admissions', label: 'Admissions', count: byType['admission']?.length ?? 0 },
+                        { v: 'impeachment', label: 'Impeachment', count: byType['impeachment']?.length ?? 0 },
+                        { v: 'themes', label: 'Case themes', count: byType['case_theme']?.length ?? 0 },
+                        { v: 'objections', label: 'Objections', count: byType['objection']?.length ?? 0 },
+                        { v: 'chronology', label: 'Chronology', count: byType['chronology']?.length ?? 0 },
+                        { v: 'exhibits', label: 'Exhibits', count: byType['exhibit']?.length ?? 0 },
+                        { v: 'quality', label: 'Quality', count: byType['quality_note']?.length ?? 0 },
                         { v: 'notes', label: 'Notes', count: ann.highlights.length },
                         { v: 'designations', label: 'Designations', count: ann.designations.length },
                         { v: 'ask', label: 'Ask', count: 0 },
+
                       ] as const
                     ).map((t) => (
                       <TabsTrigger
