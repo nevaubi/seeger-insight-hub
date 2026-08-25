@@ -839,7 +839,7 @@ function DepositionWorkspace() {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" disabled={!analyzed} className="h-8 gap-1.5 text-xs">
+                <Button size="sm" variant="outline" disabled={!analyzed && ann.designations.length === 0 && ann.highlights.length === 0} className="h-8 gap-1.5 text-xs">
                   <Download className="h-3.5 w-3.5" /> Export
                 </Button>
               </DropdownMenuTrigger>
