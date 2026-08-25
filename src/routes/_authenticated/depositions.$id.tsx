@@ -798,6 +798,11 @@ function DepositionWorkspace() {
     return typeof n === 'number' && n > 0 ? n : 0;
   })();
 
+  // depo-analyze v2 writes per-pass progress onto the deposition while the fan-out runs.
+  const analysisProgress = (depo.metadata?.analysis ?? null) as AnalysisProgress | null;
+
+
+
   return (
     <AppShell>
       <div className="border-b border-border bg-card px-6 py-3">
